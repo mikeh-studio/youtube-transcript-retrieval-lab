@@ -8,26 +8,30 @@ hybrid, and deterministic agentic search before the answer layer. It preserves
 the raw timestamped transcript as evidence, derives E5 + FAISS and Japanese
 BM25 search views, and uses retrieved evidence for citation-backed Q&A.
 
-**Benchmark snapshot:** optimized hybrid improved nDCG@10 from 0.845 to 1.000
-(+18.3%) versus baseline RRF on the checked-in eight-query Japanese regression
-fixture; baseline RRF remains the application default. See the
-[benchmark details](evals/README.md#fixture-result).
+Compare retrieval runs with Precision@K, Recall@K, MRR, and nDCG@K, then inspect
+the timestamped evidence behind each result. The included eight-query benchmark
+is a deterministic regression fixture with hand-authored dense scores; it does
+not establish real-world retrieval quality. Baseline RRF remains the default
+hybrid profile. See the [benchmark details](evals/README.md#fixture-result).
 
 ![Evaluation Metrics](docs/media/02-evaluation-metrics.png)
 
-Evaluation rigor: retrieval runs are scored with P@K, Recall@K, MRR, and nDCG@K, with browser-local labels and run comparison snapshots.
-
 ## Quick Start
 
-From the repository root:
+Python 3.11 is used in CI. From the repository root, create an isolated environment
+(macOS/Linux commands):
 
 ```bash
-pip install -r requirements.txt
-cp .env.example .env.local
-python local_preview/local_api.py
+python3.11 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+# Preserve any existing machine-specific configuration.
+[ -f .env.local ] || cp .env.example .env.local
 ```
 
-Add provider keys to `.env.local` if you want citation-backed Q&A:
+Transcript search and the offline benchmark do not require an answer-provider
+key. For citation-backed Q&A, add the key for your selected provider to
+`.env.local` before starting the server:
 
 ```env
 OPENAI_API_KEY=your_openai_api_key_here
@@ -44,13 +48,23 @@ SAKANA_BASE_URL=https://api.sakana.ai/v1
 
 If `OPENAI_MODEL` is not set, ChatGPT calls default to `gpt-5.4-mini`.
 
-Open the real local app:
+Start the API and UI together:
 
-- `http://127.0.0.1:8000/index.html` - Main console
-- `http://127.0.0.1:8000/reviews.html` - Reviewed chunks
-- `http://127.0.0.1:8000/evidence.html` - Evidence curation
-- `http://127.0.0.1:8000/evaluation.html` - Evaluation workspace
-- `http://127.0.0.1:8000/chunking.html` - Chunking Lab
+```bash
+python local_preview/local_api.py
+```
+
+Open the [main console](http://127.0.0.1:8000/index.html), ingest a video with an
+available transcript, then search its evidence. Use the real API server for
+these workflows; a static file server cannot ingest or search videos.
+
+| Workspace | Use it to |
+| --- | --- |
+| [Main console](http://127.0.0.1:8000/index.html) | Ingest, search, ask questions, and use Study Studio |
+| [Reviewed chunks](http://127.0.0.1:8000/reviews.html) | Inspect search-result feedback |
+| [Evidence curation](http://127.0.0.1:8000/evidence.html) | Inspect generated curation artifacts |
+| [Evaluation](http://127.0.0.1:8000/evaluation.html) | Label results, compare runs, and draft evaluation datasets |
+| [Chunking Lab](http://127.0.0.1:8000/chunking.html) | Compare chunking strategies on stored transcripts |
 
 Notes:
 
@@ -65,12 +79,18 @@ Notes:
 - If model download is unavailable, local preview can fall back to local hashing
   embeddings. A saved model-built index is preserved on disk (dense search is
   disabled, lexical search keeps working) until the model is available again.
-- For fully offline startup, run `YT_RAG_FORCE_HASH_EMBEDDINGS=1 python local_preview/local_api.py`.
+- To skip the embedding-model download, run
+  `YT_RAG_FORCE_HASH_EMBEDDINGS=1 python local_preview/local_api.py`. Hashing is a
+  fallback for local operation, not equivalent to E5 semantic retrieval. New
+  YouTube ingestion and provider-backed answers still require network access.
 - Japanese lexical (BM25) search tokenizes with fugashi morphological analysis,
   falling back to character bigrams if fugashi is unavailable.
-- Agentic search is deterministic and provider-free: it chooses semantic or
-  keyword search, switches tools when evidence is weak, and reads nearby raw
-  transcript segments around the strongest timestamp anchors.
+- Optional `YOUTUBE_API_KEY` enables YouTube Data API metadata lookup; without
+  it, ingestion uses best-effort oEmbed metadata. It is not an answer-provider key.
+- Local-video OCR additionally requires `ffmpeg` and `ffprobe` on `PATH`.
+- The built frontend is checked in; running it through the Python API does not
+  require Node.js. See [Development and Tests](#development-and-tests) for frontend
+  builds and browser checks.
 
 ### Seed an Evaluation Dataset with Codex
 
@@ -123,6 +143,8 @@ The local workflow lets you:
 - Opt-in deterministic agentic search across semantic, Japanese keyword, and
   raw timestamp-context tools, with an auditable decision trace.
 - Citation-backed Q&A with fallback states and selectable OpenAI, Claude, or Sakana AI providers.
+- Video-first Ask routing that shortlists relevant videos before retrieving
+  transcript chunks when Q&A Studio searches all videos.
 - Study Studio for transcript-grounded flashcards, topic maps, per-topic explanations, run history, and study-quality checks.
 - Search-result review and assisted labeling helpers.
 - Codex CLI-assisted retrieval dataset drafts with required human review and JSONL export.
@@ -172,9 +194,14 @@ local files
 
 ## Local Video OCR Boundary
 
-Public YouTube videos remain transcript-first. The YouTube flow uses transcripts, metadata, and timestamp links.
+The YouTube flow retrieves transcripts and metadata and links evidence to video
+timestamps. Playlist ingestion currently fetches the YouTube playlist page and
+parses video IDs from its HTML; that step can fail if the page structure or
+access behavior changes.
 
-Full frame extraction and OCR are only for local video files that you own or have permission to process. This repo does not add public YouTube video downloading, page scraping, or blocking-bypass logic.
+Frame extraction and OCR accept local video files that you own or have permission
+to process. This workflow does not download public YouTube video files or bypass
+access restrictions.
 
 For implementation details, see [`docs/multimodal_ocr_design.md`](docs/multimodal_ocr_design.md).
 
@@ -221,6 +248,10 @@ The auditable tool trace is returned in `retrieval_details.agentic_retrieval`.
 If no path reaches sufficient evidence, the strongest attempted result set is
 returned and the normal insufficient-evidence answer behavior still applies.
 
+For Q&A across a library, video-first routing and agentic chunk retrieval can
+be combined. See the [video-first Ask request example](local_preview/README.md#video-first-ask-routing)
+for `video_routing`, `video_top_k`, and the returned routing details.
+
 ## Offline Retrieval Benchmark
 
 Run the checked-in benchmark without network access or provider keys.
@@ -234,7 +265,10 @@ python -m evals.runner \
 
 The runner compares dense, lexical, baseline hybrid, optimized hybrid, and
 agentic retrieval, then writes a compact leaderboard plus machine-readable
-metrics.
+metrics. The documented fixture scores are nDCG@10 **0.8452** for baseline RRF
+and **1.0000** for optimized hybrid across eight queries. These test-harness
+results use hand-authored dense scores, not a live embedding-index evaluation.
+
 The local app keeps baseline RRF as the default hybrid profile unless
 `retrieval_profile` or `YT_RAG_HYBRID_PROFILE` explicitly opts into another
 profile.
@@ -244,23 +278,46 @@ and sample-set limitations.
 ## Known Limitations
 
 - Evaluation is single-reviewer.
-- Evaluation labels are browser-local by default.
+- Evaluation workspace query sets, labels, and run snapshots are browser-local;
+  clearing browser storage removes them. Search-review feedback is stored
+  separately under `data/runtime/`.
 - Inter-rater agreement and adjudication UI are not implemented.
 - Retrieval quality depends on transcript availability from YouTube.
 - Chunking Lab requires videos with stored `full_transcript`; re-ingest older videos if preview/search comparison reports missing transcript data.
 - The checked-in retrieval benchmark is a small deterministic fixture, not a statistically stable corpus.
 
-## Tests
+## Development and Tests
+
+Install the test runner in the active Python environment and run both suites:
 
 ```bash
-pytest tests/
-pytest multilingual/tests/
-pytest tests/ multilingual/tests/ -q
+python -m pip install pytest
+python -m pytest tests/ multilingual/tests/ -q
 ```
 
 For chunking-specific checks:
 
 ```bash
-HF_HUB_OFFLINE=1 pytest multilingual/tests/test_chunking_strategies.py -q
-pytest tests/test_chunking_api.py -q
+HF_HUB_OFFLINE=1 python -m pytest multilingual/tests/test_chunking_strategies.py -q
+python -m pytest tests/test_chunking_api.py -q
 ```
+
+To rebuild the React shell, use Node.js 20 (the version used in CI):
+
+```bash
+npm ci
+npm run build:web
+```
+
+The build writes the bundle served by the Python API to `local_preview/web/`.
+CI checks that the committed bundle matches the source and runs the answer-mode
+browser regression. Run that same browser check locally with:
+
+```bash
+npx playwright install chromium
+npx playwright test e2e/qa-answer-mode.spec.ts
+```
+
+Unit tests and browser fixtures do not establish live YouTube ingestion or
+answer quality. See [Ingestion Verification](local_preview/README.md#ingestion-verification)
+for the real-backend checks.
