@@ -58,6 +58,8 @@ if load_dotenv is not None:
     load_dotenv(ROOT_DIR / ".env")
     load_dotenv(ROOT_DIR / ".env.local", override=True)
 
+from browser_boundary import BrowserBoundary
+
 from multilingual.rag_engine import RAGEngine  # noqa: E402
 from multilingual.reranker import (  # noqa: E402
     CrossEncoderReranker,
@@ -7884,13 +7886,13 @@ SERVICE = (
 WEB_DIR = Path(__file__).resolve().parent / "web"
 
 
-class Handler(BaseHTTPRequestHandler):
+class Handler(BrowserBoundary, BaseHTTPRequestHandler):
     server_version = "YouTubeRAGLocal/0.1"
 
     def _set_headers(self, status=200, content_type="application/json; charset=utf-8"):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
-        origin = _allowed_local_origin(self.headers.get("Origin"))
+        origin = None
         if origin:
             self.send_header("Access-Control-Allow-Origin", origin)
             self.send_header("Vary", "Origin")
