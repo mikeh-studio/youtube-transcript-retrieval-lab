@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 async function prepareQAStudio(page, options = {}) {
   const {
@@ -336,7 +336,7 @@ test("visualizes agentic attempts and reranked results", async ({ page }) => {
   await page.getByLabel("Reranker").selectOption("cross_encoder");
   await page.getByRole("button", { name: "Generate Answer" }).click();
 
-  expect(requestBody).toMatchObject({
+  await expect.poll(() => requestBody).toMatchObject({
     agentic: true,
     video_id: "vid1",
     reranker: "cross_encoder",
@@ -431,7 +431,7 @@ test("enables agentic tool search from the Search tab", async ({ page }) => {
   await expect(page.getByText("Semantic · BM25 · Context")).toBeVisible();
   await page.getByRole("button", { name: "Run Search" }).click();
 
-  expect(requestBody).toMatchObject({
+  await expect.poll(() => requestBody).toMatchObject({
     query: "エージェント検索",
     agentic: true,
     retrieval_mode: "hybrid",
@@ -537,7 +537,7 @@ test("keeps OCR ingestion and multimodal Ask in the Local Video tool", async ({ 
   await searchPanel.getByLabel("Search query").fill("scoreboard");
   await searchPanel.getByRole("button", { name: "Search Local Video" }).click();
 
-  expect(searchRequestBody).toMatchObject({
+  await expect.poll(() => searchRequestBody).toMatchObject({
     query: "scoreboard",
     video_id: "demo_001",
     source_mode: "ocr",
@@ -550,7 +550,7 @@ test("keeps OCR ingestion and multimodal Ask in the Local Video tool", async ({ 
   await askPanel.getByLabel("Question").fill("What score is visible?");
   await askPanel.getByRole("button", { name: "Ask Local Video" }).click();
 
-  expect(requestBody).toMatchObject({
+  await expect.poll(() => requestBody).toMatchObject({
     question: "What score is visible?",
     video_id: "demo_001",
     source_mode: "ocr",

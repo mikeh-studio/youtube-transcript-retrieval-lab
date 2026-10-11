@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 test("plays cinematic intro only once per browser session", async ({ page }) => {
   await page.goto("/index.html#/ingest");
