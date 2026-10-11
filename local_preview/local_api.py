@@ -7892,12 +7892,6 @@ class Handler(BrowserBoundary, BaseHTTPRequestHandler):
     def _set_headers(self, status=200, content_type="application/json; charset=utf-8"):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
-        origin = None
-        if origin:
-            self.send_header("Access-Control-Allow-Origin", origin)
-            self.send_header("Vary", "Origin")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.send_header(
             "Cache-Control", "no-store, no-cache, must-revalidate, max-age=0"
         )
