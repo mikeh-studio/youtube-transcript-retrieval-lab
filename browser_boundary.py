@@ -15,6 +15,9 @@ _COOKIE = "local_browser_session"
 class BrowserBoundary:
     """Same-origin session boundary; forwarded authority is never trusted."""
 
+    def _cookie_name(self):
+        return f"{_COOKIE}_{self.server.server_address[1]}"
+
     def trusted_remote_origins(self):
         return set()
 
@@ -29,7 +32,7 @@ class BrowserBoundary:
             secure = "; Secure" if self._browser_origin.startswith("https:") else ""
             self.send_header(
                 "Set-Cookie",
-                f"{_COOKIE}={cookie}; Path=/; HttpOnly; SameSite=Strict{secure}",
+                f"{self._cookie_name()}={cookie}; Path=/; HttpOnly; SameSite=Strict{secure}",
             )
         self.end_headers()
         self.wfile.write(body)
@@ -38,7 +41,7 @@ class BrowserBoundary:
     def _session(self):
         try:
             jar = SimpleCookie(self.headers.get("Cookie", ""))
-            token = jar[_COOKIE].value
+            token = jar[self._cookie_name()].value
             nonce, expires, signature = token.split(".")
             expected = hmac.new(
                 _KEY, f"{nonce}.{expires}".encode(), hashlib.sha256
