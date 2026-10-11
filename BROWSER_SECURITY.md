@@ -14,12 +14,9 @@ mutation format; multipart and WebSocket upgrades are rejected. No forwarded hea
 are trusted. CORS does not grant other local ports access. Serve built or legacy UI
 through the backend, rather than accessing the API from a separate development origin.
 
-Retrieval remains loopback-only. Flashcards can explicitly allow HTTPS authorities via
-comma-separated `APP_TRUSTED_ORIGINS=https://your-host.example` only with `APP_PASSCODE`
-set; the existing passcode authentication still gates protected routes. A TLS proxy
-must preserve the configured Host and strip Forwarded/X-Forwarded-* headers. Set
-`APP_COOKIE_SECURE=1`. Neither a remote bind nor trusted-origin configuration alone
-grants authenticated access. Do not expose a plain HTTP remote service.
+Retrieval remains loopback-only. Binding to a remote address or adding a proxy does
+not enable remote access. A future shared deployment needs explicit authentication
+and trusted-authority configuration before this boundary can support it.
 
 Validation: `python -m unittest discover -s tests -p test_browser_boundary.py` runs real
 HTTP requests against the actual route handler, stubbing only provider/disk mutations.

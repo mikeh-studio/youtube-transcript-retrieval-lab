@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -40,9 +40,22 @@ class BrowserBoundaryTests(unittest.TestCase):
                 BaseHTTPRequestHandler=BaseHTTPRequestHandler,
                 json=json,
                 urlparse=urlparse,
+                parse_qs=parse_qs,
+                RETRIEVAL_MODES={"hybrid", "dense", "lexical"},
+                AGENTIC_RETRIEVAL_ENV="unused",
+                _env_flag=lambda _: False,
+                _coerce_request_flag=lambda value, default: bool(value or default),
                 Path=Path,
                 SERVICE=SimpleNamespace(
-                    ingest=lambda **kwargs: cls.effects.append(kwargs) or {}
+                    ingest=lambda **kwargs: cls.effects.append(kwargs) or {},
+                    delete_search_feedback=lambda **kwargs: (
+                        cls.effects.append(kwargs) or 1
+                    ),
+                    save_search_feedback=lambda body: cls.effects.append(body) or body,
+                    retrieve=lambda query, **kwargs: (
+                        cls.effects.append(query)
+                        or {"retrieval_mode": "hybrid", "details": {}, "results": []}
+                    ),
                 ),
             )
             exec(
@@ -155,6 +168,48 @@ class BrowserBoundaryTests(unittest.TestCase):
         second = self.session_headers()
         first["X-CSRF-Token"] = second["X-CSRF-Token"]
         self.assertEqual(self.request(headers=first)[0], 403)
+
+    def test_bodyless_review_delete_with_session_dispatches_once(self):
+        count = len(self.effects)
+        status, _, body = self.request(
+            "DELETE",
+            "/v1/feedback/search-review?label=relevant",
+            self.session_headers(),
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["deleted_count"], 1)
+        self.assertEqual(len(self.effects), count + 1)
+
+    def test_review_cli_search_and_feedback_bootstrap_real_sessions(self):
+        sys.path.insert(0, str(ROOT / "local_preview"))
+        from review_agent_workflow import make_search_runner, make_feedback_submitter
+
+        count = len(self.effects)
+        search = make_search_runner(self.origin)({"query": "test query"})
+        self.assertTrue(search["ok"])
+        feedback = make_feedback_submitter(self.origin)(
+            {"query": "test query", "label": "relevant"}
+        )
+        self.assertTrue(feedback["ok"])
+        self.assertEqual(len(self.effects), count + 2)
+
+    def test_unrelated_malformed_cookies_do_not_poison_session(self):
+        for foreign in ("other=hello world", 'other="unterminated', "other=bad\\value"):
+            for before in (True, False):
+                headers = self.session_headers()
+                own = headers["Cookie"]
+                headers["Cookie"] = (
+                    f"{foreign}; {own}" if before else f"{own}; {foreign}"
+                )
+                with self.subTest(foreign=foreign, before=before):
+                    self.assertEqual(self.request(headers=headers)[0], 200)
+
+    def test_duplicate_own_cookie_is_rejected(self):
+        headers = self.session_headers()
+        headers["Cookie"] += "; " + headers["Cookie"]
+        count = len(self.effects)
+        self.assertEqual(self.request(headers=headers)[0], 403)
+        self.assertEqual(len(self.effects), count)
 
     def test_duplicate_security_headers(self):
         for name in ("Host", "Origin", "Content-Type", "X-CSRF-Token"):

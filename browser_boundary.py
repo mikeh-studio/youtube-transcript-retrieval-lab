@@ -6,7 +6,6 @@ import ipaddress
 import json
 import secrets
 import time
-from http.cookies import CookieError, SimpleCookie
 
 _KEY = secrets.token_bytes(32)
 _COOKIE = "local_browser_session"
@@ -40,8 +39,16 @@ class BrowserBoundary:
 
     def _session(self):
         try:
-            jar = SimpleCookie(self.headers.get("Cookie", ""))
-            token = jar[self._cookie_name()].value
+            # Unrelated applications share loopback cookies. Parse only our exact
+            # pair so malformed foreign cookies cannot poison this session.
+            values = []
+            for pair in self.headers.get("Cookie", "").split(";"):
+                name, separator, value = pair.strip().partition("=")
+                if separator and name == self._cookie_name():
+                    values.append(value)
+            if len(values) != 1:
+                return None
+            token = values[0]
             nonce, expires, signature = token.split(".")
             expected = hmac.new(
                 _KEY, f"{nonce}.{expires}".encode(), hashlib.sha256
@@ -50,7 +57,7 @@ class BrowserBoundary:
                 signature.encode(), expected.encode()
             ):
                 return token
-        except (KeyError, ValueError, CookieError):
+        except (KeyError, ValueError):
             pass
         return None
 
