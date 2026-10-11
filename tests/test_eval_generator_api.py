@@ -8,6 +8,7 @@ import os
 import socket
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 LOCAL_PREVIEW_DIR = ROOT_DIR / "local_preview"
@@ -65,7 +66,11 @@ class FakeGenerator:
         }
 
     def save_review(self, draft_id, decisions):
-        return {"draft_id": draft_id, "status": "pending_review", "decisions": decisions}
+        return {
+            "draft_id": draft_id,
+            "status": "pending_review",
+            "decisions": decisions,
+        }
 
     def finalize(self, draft_id):
         return {
@@ -88,7 +93,18 @@ class FakeService:
 
 def _request(method, path, body=None):
     encoded = json.dumps(body).encode("utf-8") if body is not None else None
-    request_lines = [f"{method} {path} HTTP/1.1", "Host: 127.0.0.1"]
+    request_lines = [f"{method} {path} HTTP/1.1", "Host: 127.0.0.1:8000"]
+    if method not in {"GET", "HEAD", "OPTIONS"}:
+        status, headers, payload = _request("GET", "/browser-session")
+        assert status == 200
+        token = json.loads(payload)["csrf_token"]
+        request_lines.extend(
+            [
+                "Origin: http://127.0.0.1:8000",
+                "Cookie: " + headers["Set-Cookie"].split(";", 1)[0],
+                "X-CSRF-Token: " + token,
+            ]
+        )
     if encoded is not None:
         request_lines.extend(
             ["Content-Type: application/json", f"Content-Length: {len(encoded)}"]
@@ -100,7 +116,11 @@ def _request(method, path, body=None):
     try:
         client.sendall(raw_request)
         client.shutdown(socket.SHUT_WR)
-        local_api.Handler(handler_socket, ("127.0.0.1", 50000), object())
+        local_api.Handler(
+            handler_socket,
+            ("127.0.0.1", 50000),
+            SimpleNamespace(server_address=("127.0.0.1", 8000)),
+        )
         handler_socket.close()
         chunks = []
         while True:
@@ -156,9 +176,7 @@ def test_generator_http_lifecycle_routes(monkeypatch):
     assert status == 200
     assert json.loads(payload)["datasets"][0]["query_set"]["id"] == "qs_test"
 
-    status, _, payload = _request(
-        "GET", "/v1/eval-generator/datasets/dataset_test"
-    )
+    status, _, payload = _request("GET", "/v1/eval-generator/datasets/dataset_test")
     assert status == 200
     assert json.loads(payload)["dataset"]["row_count"] == 1
 

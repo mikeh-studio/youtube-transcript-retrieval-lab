@@ -172,7 +172,7 @@ async function apiRequest(path, { method = "GET", body } = {}) {
   const response = await fetch(path, {
     method,
     cache: "no-store",
-    headers: body ? { "content-type": "application/json" } : undefined,
+    headers: { "content-type": "application/json" },
     body: body ? JSON.stringify(body) : undefined,
   });
   const raw = await response.text();

@@ -302,7 +302,7 @@ HF_HUB_OFFLINE=1 python -m pytest multilingual/tests/test_chunking_strategies.py
 python -m pytest tests/test_chunking_api.py -q
 ```
 
-To rebuild the React shell, use Node.js 20 (the version used in CI):
+To rebuild the React shell, use Node.js 20.19+ or 22.12+ (required by Vite 7):
 
 ```bash
 npm ci

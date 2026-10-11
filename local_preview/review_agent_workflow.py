@@ -12,7 +12,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from http.cookiejar import CookieJar
+from urllib.parse import urlsplit
+from urllib.request import HTTPCookieProcessor, Request, build_opener
 
 from feedback_keys import (
     feedback_chunk_key,
@@ -681,9 +683,23 @@ def _request_json(
     if body is not None:
         data = json.dumps(body).encode("utf-8")
         headers["Content-Type"] = "application/json"
-    request = Request(url, data=data, method=method.upper(), headers=headers)
+    opener = build_opener(HTTPCookieProcessor(CookieJar()))
     try:
-        with urlopen(request) as response:
+        if method.upper() not in {"GET", "HEAD", "OPTIONS"}:
+            parsed = urlsplit(server_url)
+            origin = f"{parsed.scheme}://{parsed.netloc}"
+            with opener.open(f"{origin}/browser-session") as response:
+                session = json.loads(response.read().decode("utf-8"))
+            headers.update(
+                {
+                    "Origin": origin,
+                    "X-CSRF-Token": session["csrf_token"],
+                    "Content-Type": "application/json",
+                }
+            )
+        # Bootstrap first, then issue the mutation exactly once; never retry writes.
+        request = Request(url, data=data, method=method.upper(), headers=headers)
+        with opener.open(request) as response:
             payload = json.loads(response.read().decode("utf-8"))
     except HTTPError as exc:
         message = exc.read().decode("utf-8", errors="replace")

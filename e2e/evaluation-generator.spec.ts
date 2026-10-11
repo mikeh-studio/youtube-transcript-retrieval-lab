@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 test("generates, reviews, and finalizes a Codex retrieval dataset", async ({ page }) => {
   await page.addInitScript(() => {

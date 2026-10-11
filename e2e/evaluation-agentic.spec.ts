@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 
 test("runs an Evaluation query set with the agentic tool strategy", async ({ page }) => {

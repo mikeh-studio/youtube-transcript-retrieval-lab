@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './fixtures';
 
 test('renders ingested video thumbnails and review links', async ({ page }) => {
   const mockVideos = [
