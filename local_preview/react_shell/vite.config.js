@@ -7,6 +7,8 @@ export default defineConfig({
   root: path.resolve(__dirname),
   base: "/",
   build: {
+    // Preserve the Vite 5 browser floor when upgrading the toolchain.
+    target: ["es2020", "edge88", "firefox78", "chrome87", "safari14"],
     outDir: path.resolve(__dirname, "../web"),
     emptyOutDir: false,
     sourcemap: false,
