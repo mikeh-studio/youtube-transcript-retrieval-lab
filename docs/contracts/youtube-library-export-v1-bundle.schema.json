@@ -1,0 +1,71 @@
+{
+  "$defs": {
+    "ExportedVideo": {
+      "additionalProperties": false,
+      "properties": {
+        "record_json": {
+          "minLength": 1,
+          "title": "Record Json",
+          "type": "string"
+        },
+        "record_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Record Sha256",
+          "type": "string"
+        },
+        "video_id": {
+          "pattern": "^[A-Za-z0-9_-]{11}$",
+          "title": "Video Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "video_id",
+        "record_sha256",
+        "record_json"
+      ],
+      "title": "ExportedVideo",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "manifest_json": {
+      "minLength": 1,
+      "title": "Manifest Json",
+      "type": "string"
+    },
+    "manifest_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Manifest Sha256",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "youtube-library-export/v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "snapshot_id": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Snapshot Id",
+      "type": "string"
+    },
+    "videos": {
+      "items": {
+        "$ref": "#/$defs/ExportedVideo"
+      },
+      "minItems": 1,
+      "title": "Videos",
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "snapshot_id",
+    "manifest_sha256",
+    "manifest_json",
+    "videos"
+  ],
+  "title": "LibraryExport",
+  "type": "object"
+}

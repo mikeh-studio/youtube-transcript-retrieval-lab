@@ -1,0 +1,216 @@
+{
+  "$defs": {
+    "JsonValue": {},
+    "LegacyChunk": {
+      "additionalProperties": false,
+      "properties": {
+        "embed_text": {
+          "minLength": 1,
+          "title": "Embed Text",
+          "type": "string"
+        },
+        "end": {
+          "minimum": 0,
+          "title": "End",
+          "type": "number"
+        },
+        "raw_text": {
+          "minLength": 1,
+          "title": "Raw Text",
+          "type": "string"
+        },
+        "start": {
+          "minimum": 0,
+          "title": "Start",
+          "type": "number"
+        }
+      },
+      "required": [
+        "start",
+        "end",
+        "raw_text",
+        "embed_text"
+      ],
+      "title": "LegacyChunk",
+      "type": "object"
+    },
+    "LegacyChunking": {
+      "additionalProperties": false,
+      "properties": {
+        "overlap_seconds": {
+          "minimum": 0,
+          "title": "Overlap Seconds",
+          "type": "number"
+        },
+        "strategy": {
+          "const": "time_window_overlap",
+          "title": "Strategy",
+          "type": "string"
+        },
+        "version": {
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        },
+        "window_seconds": {
+          "exclusiveMinimum": 0,
+          "title": "Window Seconds",
+          "type": "number"
+        }
+      },
+      "required": [
+        "version",
+        "strategy",
+        "window_seconds",
+        "overlap_seconds"
+      ],
+      "title": "LegacyChunking",
+      "type": "object"
+    },
+    "LegacySegment": {
+      "additionalProperties": false,
+      "properties": {
+        "end": {
+          "minimum": 0,
+          "title": "End",
+          "type": "number"
+        },
+        "start": {
+          "minimum": 0,
+          "title": "Start",
+          "type": "number"
+        },
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "start",
+        "end",
+        "text"
+      ],
+      "title": "LegacySegment",
+      "type": "object"
+    },
+    "LegacyTranscript": {
+      "additionalProperties": false,
+      "properties": {
+        "char_count": {
+          "minimum": 1,
+          "title": "Char Count",
+          "type": "integer"
+        },
+        "segment_count": {
+          "minimum": 1,
+          "title": "Segment Count",
+          "type": "integer"
+        },
+        "segments": {
+          "items": {
+            "$ref": "#/$defs/LegacySegment"
+          },
+          "minItems": 1,
+          "title": "Segments",
+          "type": "array"
+        },
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "version": {
+          "maximum": 1,
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "version",
+        "text",
+        "segments",
+        "segment_count",
+        "char_count"
+      ],
+      "title": "LegacyTranscript",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "chunking": {
+      "$ref": "#/$defs/LegacyChunking"
+    },
+    "chunks": {
+      "items": {
+        "$ref": "#/$defs/LegacyChunk"
+      },
+      "minItems": 1,
+      "title": "Chunks",
+      "type": "array"
+    },
+    "full_transcript": {
+      "$ref": "#/$defs/LegacyTranscript"
+    },
+    "language": {
+      "enum": [
+        "ja",
+        "en"
+      ],
+      "title": "Language",
+      "type": "string"
+    },
+    "source": {
+      "anyOf": [
+        {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Source"
+    },
+    "summary_cache": {
+      "anyOf": [
+        {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Summary Cache"
+    },
+    "title": {
+      "minLength": 1,
+      "title": "Title",
+      "type": "string"
+    },
+    "url": {
+      "minLength": 1,
+      "title": "Url",
+      "type": "string"
+    }
+  },
+  "required": [
+    "url",
+    "title",
+    "language",
+    "chunks",
+    "full_transcript",
+    "chunking"
+  ],
+  "title": "LegacyRecord",
+  "type": "object"
+}

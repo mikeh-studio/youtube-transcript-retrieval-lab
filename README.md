@@ -106,6 +106,20 @@ all cited chunk references against the selected videos, and does not forward
 provider API-key environment variables. `YT_RAG_CODEX_BIN` can select a specific
 CLI executable, and `YT_RAG_CODEX_MODEL` can optionally override its model.
 
+## Stored library export
+
+Export existing timestamped evidence without fetching videos or loading models:
+
+```bash
+python pipelines/export_library.py --data-dir data --output /private/tmp/library-export.json
+```
+
+The export uses a versioned contract shared with the separate content-library
+service. It preserves original records, hashes, segment mappings, and embedding
+inputs. Keep real exports outside Git. See
+[the export contract](docs/contracts/youtube-library-export-v1.md) for validation and
+import boundaries. The local app continues to use its existing storage and search.
+
 ## What It Solves
 
 Most RAG demos stop after retrieving chunks. This project focuses on whether retrieval is actually good.
