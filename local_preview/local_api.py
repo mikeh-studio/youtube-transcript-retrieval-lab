@@ -7966,6 +7966,14 @@ class Handler(BrowserBoundary, BaseHTTPRequestHandler):
         path = parsed.path
 
         try:
+            if path.startswith("/v1/catalog/"):
+                from local_preview.catalog_client import CatalogClientError, fetch_catalog
+                try:
+                    self._json(fetch_catalog(path, parsed.query, self.client_address[0]))
+                except CatalogClientError as error:
+                    self._json({"error": str(error)}, error.status)
+                return
+
             if path == "/v1/eval-generator/capabilities":
                 capabilities = SERVICE._eval_generator_service().capabilities()
                 self._json({"ok": True, "capabilities": capabilities})

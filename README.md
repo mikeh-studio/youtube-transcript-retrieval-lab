@@ -16,6 +16,8 @@ hybrid profile. See the [benchmark details](evals/README.md#fixture-result).
 
 ![Evaluation Metrics](docs/media/02-evaluation-metrics.png)
 
+Catalog browsing is available through the optional [local catalog browser](docs/catalog-browser.md).
+
 ## Quick Start
 
 Python 3.11 is used in CI. From the repository root, create an isolated environment
