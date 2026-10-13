@@ -7968,6 +7968,7 @@ class Handler(BrowserBoundary, BaseHTTPRequestHandler):
         try:
             if path.startswith("/v1/catalog/"):
                 from local_preview.catalog_client import CatalogClientError, fetch_catalog
+
                 try:
                     self._json(fetch_catalog(path, parsed.query, self.client_address[0]))
                 except CatalogClientError as error:

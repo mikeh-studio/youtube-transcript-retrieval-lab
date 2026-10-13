@@ -10,17 +10,24 @@
   const duration = ms => ms === null ? "Duration unknown" : `${Math.floor(ms / 60000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, "0")}`;
   const fmt = s => s ? new Date(s).toLocaleString() : "Unknown";
   function clearDisplay() { list.replaceChildren(); $("detail-content").replaceChildren(); if (dialog.open) dialog.close(); $("total").textContent = "—"; $("freshness").textContent = ""; }
-  function armExpiry(items) {
-    const deadlines = items.flatMap(i => [...Object.values(i.metadata).map(f => f.expires_at), i.readiness.expires_at].filter(Boolean).map(Date.parse));
-    if (!deadlines.length) return;
+  function expiryDeadline(data) {
+    const items = data.items || [data.item];
+    const dates = items.flatMap(i => [...Object.values(i.metadata).map(f => f.expires_at), i.readiness.expires_at].filter(Boolean).map(Date.parse));
+    return dates.length ? data.requestStarted + Math.min(...dates) - Date.parse(data.generated_at) : Infinity;
+  }
+  function armExpiry(deadline) {
     clearTimeout(timer);
-    const delay = Math.max(0, Math.min(...deadlines) - Date.now());
-    timer = setTimeout(() => { clearDisplay(); load(); }, Math.min(delay, 2147483647));
+    if (!Number.isFinite(deadline)) return;
+    timer = setTimeout(() => { clearDisplay(); load(); }, Math.min(Math.max(0, deadline - performance.now()), 2147483647));
   }
   async function get(path, signal) {
+    const requestStarted = performance.now();
     const response = await fetch(path, {cache: "no-store", signal});
     if (!response.ok) throw new Error(response.status === 422 ? "These filters are not available. Check that library/v1 has been imported." : "Catalog unavailable. Check the private service connection, then try again.");
-    return response.json();
+    const data = await response.json();
+    data.requestStarted = requestStarted;
+    if (expiryDeadline(data) <= performance.now()) throw new Error("Catalog snapshot expired in transit. Try again.");
+    return data;
   }
   function showDetail(item) {
     const content = $("detail-content"); content.replaceChildren(node("p", "VIDEO DETAILS", "eyebrow"), node("h2", value(item, "title") || "Title unknown"));
@@ -45,10 +52,10 @@
   }
   async function details(id, epoch) {
     const detailEpoch = ++detailGeneration;
-    try { const result = await get(`/v1/catalog/items/${id}`, controller.signal); if (generation !== epoch || detailEpoch !== detailGeneration) return; showDetail(result.item); armExpiry([...currentItems, result.item]); }
+    try { const result = await get(`/v1/catalog/items/${id}`, controller.signal); if (generation !== epoch || detailEpoch !== detailGeneration) return; showDetail(result.item); armExpiry(Math.min(listDeadline, expiryDeadline(result))); }
     catch (error) { if (error.name !== "AbortError" && generation === epoch) $("status").textContent = error.message; }
   }
-  let currentItems = [];
+  let listDeadline = Infinity;
   async function load() {
     const epoch = ++generation; controller?.abort(); controller = new AbortController(); clearTimeout(timer); clearDisplay();
     $("status").textContent = "Loading catalog…"; $("previous").disabled = true; $("next").disabled = true; $("page").textContent = "";
@@ -57,7 +64,7 @@
     if (params.has("term")) { params.set("vocabulary", "library"); params.set("version", "v1"); params.set("descendants", "true"); }
     try {
       const data = await get(`/v1/catalog/items?${params}`, controller.signal); if (epoch !== generation) return;
-      currentItems = data.items; $("total").textContent = data.total; $("freshness").textContent = `Snapshot ${fmt(data.generated_at)}`;
+      listDeadline = expiryDeadline(data); $("total").textContent = data.total; $("freshness").textContent = `Snapshot ${fmt(data.generated_at)}`;
       $("status").textContent = data.items.length ? "Metadata may be incomplete. Open a video to inspect its sources and review blockers." : "No videos match these filters.";
       for (const item of data.items) {
         const card = node("article", undefined, "card"); card.append(node("h3", value(item, "title") || `Title unknown · ${item.external_id}`));
@@ -68,7 +75,7 @@
       }
       $("page").textContent = data.items.length ? `${offset + 1}–${offset + data.items.length} of ${data.total}` : "0 videos";
       $("previous").disabled = offset === 0; $("next").disabled = offset + limit >= data.total || offset + limit > 10000;
-      armExpiry(data.items);
+      armExpiry(listDeadline);
     } catch (error) { if (error.name !== "AbortError" && epoch === generation) $("status").textContent = error.message; }
   }
   form.addEventListener("submit", event => {event.preventDefault(); offset = 0; load();});

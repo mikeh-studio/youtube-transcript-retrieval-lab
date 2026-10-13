@@ -22,12 +22,17 @@ transcript text are rejected. The upstream must be an explicit numeric loopback 
 with a port; redirects and environment HTTP proxies are disabled. The client has a
 5-second caller deadline, 3-second socket timeout, 2 MB response cap and four worker
 slots. Responses are no-store. A slow worker retains its bounded slot until it ends.
-This is an operator-local interface without multiuser authentication; do not expose
+BrowserBoundary already rejects untrusted Host/port, Origin and forwarded headers
+before route dispatch. The ingestion-unlock navigation flag is onboarding based on
+localStorage and existing indexed videos, not authentication; Catalog intentionally
+remains available before any ingestion. This is an operator-local interface without multiuser authentication; do not expose
 it through a tunnel or network listener.
 
 Ontology filters use explicit `library/v1` reviewed terms. They do not change live
 semantic ranking. Unknown and expired metadata remain explicit. At the earliest
-metadata or permit expiry, displayed data is cleared and reloaded; failed reloads
+metadata or permit expiry, displayed data is cleared and reloaded; timers use the
+server snapshot time and a monotonic browser clock, so local wall-clock skew cannot
+cause a refresh loop. Responses already expired in transit are discarded; failed reloads
 do not restore stale values. Readiness is a snapshot of reviewed preconditions,
 never authorization to fetch or ingest a transcript.
 

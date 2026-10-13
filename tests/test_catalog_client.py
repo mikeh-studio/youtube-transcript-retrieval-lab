@@ -3,6 +3,7 @@
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import ClassVar
 from uuid import UUID
 
 import pytest
@@ -11,32 +12,32 @@ from local_preview import catalog_client as c
 
 
 def page():
-    return dict(
-        generated_at="2026-10-13T00:00:00Z",
-        total=1,
-        limit=20,
-        offset=0,
-        scope="private_personal_search",
-        items=[
-            dict(
-                id=str(UUID(int=1)),
-                external_id="AAAAAAAAAAA",
-                url="https://www.youtube.com/watch?v=AAAAAAAAAAA",
-                qualification="not_reviewed",
-                metadata={},
-                missing_fields={key: "unknown" for key in c.FIELDS},
-                labels=[],
-                readiness=dict(
-                    state="blocked",
-                    blockers=["artifact_review_missing"],
-                    expires_at=None,
-                ),
-                searchable="not_checked",
-                first_seen=None,
-                last_seen=None,
-            )
+    return {
+        "generated_at": "2026-10-13T00:00:00Z",
+        "total": 1,
+        "limit": 20,
+        "offset": 0,
+        "scope": "private_personal_search",
+        "items": [
+            {
+                "id": str(UUID(int=1)),
+                "external_id": "AAAAAAAAAAA",
+                "url": "https://www.youtube.com/watch?v=AAAAAAAAAAA",
+                "qualification": "not_reviewed",
+                "metadata": {},
+                "missing_fields": {key: "unknown" for key in c.FIELDS},
+                "labels": [],
+                "readiness": {
+                    "state": "blocked",
+                    "blockers": ["artifact_review_missing"],
+                    "expires_at": None,
+                },
+                "searchable": "not_checked",
+                "first_seen": None,
+                "last_seen": None,
+            }
         ],
-    )
+    }
 
 
 @pytest.mark.parametrize(
@@ -119,7 +120,7 @@ def test_catalog_disabled_external_client_and_capacity_fail_closed(monkeypatch):
 def test_catalog_real_http_no_redirect_or_proxy_and_redacted_errors(monkeypatch):
     class Handler(BaseHTTPRequestHandler):
         mode = "valid"
-        requests = []
+        requests: ClassVar[list[dict]] = []
 
         def do_GET(self):
             self.requests.append(dict(self.headers))
@@ -167,6 +168,48 @@ def test_catalog_real_http_no_redirect_or_proxy_and_redacted_errors(monkeypatch)
                 error.value
             )
         assert len(Handler.requests) == 5
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
+
+
+def test_public_catalog_rejects_rebinding_before_contacting_upstream(monkeypatch):
+    import importlib
+    from urllib.error import HTTPError
+    from urllib.request import Request, urlopen
+
+    monkeypatch.setenv("YT_RAG_SKIP_GLOBAL_SERVICE", "1")
+    from pathlib import Path
+
+    monkeypatch.syspath_prepend(
+        str(Path(__file__).resolve().parents[1] / "local_preview")
+    )
+    handler = importlib.import_module("local_api").Handler
+    calls = []
+
+    def read(*args):
+        calls.append(args)
+        return page()
+
+    monkeypatch.setattr(c, "fetch_catalog", read)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    url = f"http://127.0.0.1:{server.server_port}/v1/catalog/items"
+    try:
+        for headers in [
+            {"Host": "attacker.test"},
+            {"Origin": "http://attacker.test"},
+            {"X-Forwarded-For": "127.0.0.1"},
+        ]:
+            with pytest.raises(HTTPError) as error:
+                urlopen(Request(url, headers=headers))
+            assert error.value.code == 403
+        assert not calls
+        with urlopen(url) as response:
+            assert json.load(response)["total"] == 1
+        assert len(calls) == 1
     finally:
         server.shutdown()
         server.server_close()

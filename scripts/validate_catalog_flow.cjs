@@ -7,6 +7,9 @@ const fs = require('node:fs');
   if (!base || !/^http:\/\/127\.0\.0\.1:\d+$/.test(base)) throw new Error('Set explicit loopback CATALOG_FLOW_URL');
   const browser = await chromium.launch(process.env.CHROME_EXECUTABLE ? {executablePath: process.env.CHROME_EXECUTABLE} : {});
   const page = await browser.newPage({viewport: {width: 1440, height: 1000}});
+  if (process.env.CATALOG_CLOCK_SKEW_MS) await page.addInitScript(skew => {
+    const now = Date.now; Date.now = () => now() + skew;
+  }, Number(process.env.CATALOG_CLOCK_SKEW_MS));
   const errors = [], methods = [];
   page.on('pageerror', e => errors.push(e.message));
   page.on('request', r => {if (r.url().includes('/v1/catalog/')) methods.push(r.method());});
@@ -47,7 +50,7 @@ const fs = require('node:fs');
     await page.getByRole('button',{name:'View details'}).first().click();
     await expect(page.getByRole('dialog')).toBeVisible();
     expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
-    if(output) await page.screenshot({path:output+'/catalog-detail-mobile.png',fullPage:true});
+    if(output) await page.screenshot({path:output+'/catalog-detail-mobile.png'});
     expect(errors).toEqual([]);expect(methods.every(m=>m==='GET')).toBe(true);
     console.log(JSON.stringify({result:'passed',checks:['real API proxy','pagination','language','ontology descendants','empty state','detail provenance','readiness','no-store','redaction','mobile overflow','GET only'],pageErrors:errors}));
   } finally {await browser.close();}
