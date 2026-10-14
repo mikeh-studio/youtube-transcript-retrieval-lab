@@ -4,12 +4,15 @@ The lab is a single local Python process that serves both the HTTP API and the
 browser UI. It stores everything on disk under `data/` and in the browser.
 
 ```text
-Browser UI (local_preview/web)
-  React shell (index.html) + workspace pages: reviews, evidence, evaluation, chunking
+Browser UI (local_preview/web), one shared nav (lab-nav.js)
+  React shell (index.html): Library, Search, Study, Local video
+  Pages: catalog, evaluation, chunking, evidence (Data quality), reviews (Search feedback)
       |  same-origin requests with session cookie + CSRF token
       v
 local_preview/local_api.py  ── browser_boundary.py (Host/Origin/CSRF checks)
   ingestion jobs, search, ask, summaries, study, evaluation, OCR jobs
+      |
+      +── catalog_client.py                            read-only catalog proxy (optional)
       |
       +── retrieval_tools.py / agentic_retrieval.py   tool policy + decision trace
       +── grounded_answer.py                           citations, confidence, abstention
@@ -27,7 +30,7 @@ multilingual/
 local files (data/, gitignored) and browser storage
 ```
 
-## Ask request flow
+## Search and answer flow
 
 1. **Scope.** The request targets selected videos, or all videos. For all
    videos, the multi-vector router ranks videos by identity, overview, and
@@ -44,10 +47,17 @@ local files (data/, gitignored) and browser storage
 
 ## Frontend
 
-`local_preview/react_shell/` is the React source for the main console. `npm run
+The navigation is defined once in `local_preview/web/lab-nav.js`: Catalog,
+Library, Search, Evaluate, and a Tools menu (Chunking, Data quality, Search
+feedback, Local video, Study). The React shell imports it, and the standalone
+pages render it with `renderLabNav()`; `e2e/shell-redesign.spec.ts` checks that
+every page shows the same navigation.
+
+`local_preview/react_shell/` is the React source for Library, Search, Study, and
+Local video. `npm run
 build:web` writes the bundle to `local_preview/web/assets/`, and CI fails if the
-committed bundle does not match the source. The other workspace pages are plain
-HTML and JavaScript in `local_preview/web/`. Running the app does not require
+committed bundle does not match the source. The other pages are plain HTML and
+JavaScript in `local_preview/web/`. Running the app does not require
 Node.js.
 
 ## Data layout
@@ -69,7 +79,11 @@ router artifacts can be rebuilt from it.
 ## Boundaries
 
 - **Network:** the server binds to `127.0.0.1`, rejects cross-origin mutations,
-  and does not trust forwarded headers. See [security](security.md).
+  and does not trust forwarded headers. See [browser security](../BROWSER_SECURITY.md).
+- **Catalog:** the public app reads catalog records from a separate private
+  service through `catalog_client.py`, which accepts only a fixed read-only
+  projection from an explicit loopback URL. Cataloged items are never searchable
+  or ingested because they were discovered. See the [catalog browser](catalog-browser.md).
 - **YouTube:** ingestion uses transcripts, metadata, and timestamp links. It does
   not download video files.
 - **Local-video OCR:** frame extraction and OCR accept local files you own or

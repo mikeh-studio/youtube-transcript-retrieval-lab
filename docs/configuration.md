@@ -57,6 +57,15 @@ need network access.
 
 Each switch can also be set per request; see the [retrieval guide](retrieval.md).
 
+## Catalog
+
+| Variable | Purpose |
+| --- | --- |
+| `CONTENT_LIBRARY_CATALOG_URL` | Numeric loopback URL with port of the private catalog service, for example `http://127.0.0.1:8100` |
+
+Without it, the Catalog page shows an unavailable state; the rest of the lab
+works normally. See the [catalog browser](catalog-browser.md) for its limits.
+
 ## Evaluation dataset generator
 
 | Variable | Purpose |

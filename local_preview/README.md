@@ -1,6 +1,6 @@
 # Local App Guide
 
-Run the local UI and API for transcript ingestion, retrieval testing, evidence review, and evaluation.
+Run the Retrieval Lab UI and API: catalog browsing, transcript indexing, retrieval testing, and evaluation.
 For configuration and design background, see [`docs/`](../docs/architecture.md).
 
 ## Start
@@ -13,11 +13,12 @@ python local_preview/local_api.py
 
 Open:
 
-- `http://127.0.0.1:8000/index.html` - Main console
-- `http://127.0.0.1:8000/reviews.html` - Reviewed chunks
-- `http://127.0.0.1:8000/evidence.html` - Evidence curation
-- `http://127.0.0.1:8000/evaluation.html` - Evaluation workspace
-- `http://127.0.0.1:8000/chunking.html` - Chunking Lab
+- `http://127.0.0.1:8000/catalog.html` - Catalog (needs `CONTENT_LIBRARY_CATALOG_URL`)
+- `http://127.0.0.1:8000/index.html` - Library, then Search (`#/qa`), Study (`#/study`), and Local video (`#/local-video`)
+- `http://127.0.0.1:8000/evaluation.html` - Evaluate
+- `http://127.0.0.1:8000/chunking.html` - Tools → Chunking
+- `http://127.0.0.1:8000/evidence.html` - Tools → Data quality
+- `http://127.0.0.1:8000/reviews.html` - Tools → Search feedback
 
 Use this command for fully offline startup without loading the embedding model:
 
@@ -28,18 +29,12 @@ YT_RAG_FORCE_HASH_EMBEDDINGS=1 python local_preview/local_api.py
 ## What This Includes
 
 - One local process for the HTTP API and static UI.
-- YouTube video and playlist transcript ingestion.
-- Transcript search with `hybrid`, `dense`, and `lexical` modes.
-- Optional deterministic agentic search over semantic, keyword, and raw
-  timestamp-context tools.
-- Citation-backed Q&A with grounded evidence and fallback states.
-- Study Studio for flashcards, topic maps, Explain Topic notes, run history, and quality checks.
-- Search-result review with `relevant` and `not_relevant` labels.
-- Reviewed-chunk analytics.
-- Evidence curation reports generated from local pipeline artifacts.
-- Evaluation query sets, labels, run snapshots, metrics, and run comparison.
-- Chunking Lab for comparing chunking strategies on stored transcripts.
-- Optional local-video OCR for files you own or have permission to process.
+- Catalog: a read-only view of discovered videos from the optional private catalog service.
+- Library: YouTube video and playlist transcript ingestion.
+- Search: `hybrid`, `dense`, and `lexical` modes, optional deterministic agentic search over semantic, keyword, and raw timestamp-context tools, and citation-backed answers with grounded evidence and fallback states.
+- Evaluate: query sets, labels, run snapshots, metrics, run comparison, and Codex-drafted datasets.
+- Tools: Chunking, Data quality (evidence curation reports), Search feedback (`relevant` / `not_relevant` labels from Search), and Local video OCR for files you own or have permission to process.
+- Study (secondary): flashcards, topic maps, Explain Topic notes, summaries, run history, and quality checks.
 - UI language switch for English and Japanese.
 
 ## Runtime Data
@@ -63,7 +58,7 @@ Use the real backend for ingestion checks:
 python local_preview/local_api.py
 ```
 
-Then test through `http://127.0.0.1:8000/index.html` or the JSON API.
+Then test through the Library at `http://127.0.0.1:8000/index.html` or the JSON API.
 
 For an end-to-end ingestion check, capture:
 
@@ -86,7 +81,7 @@ Static hosting or mocked `/v1/*` responses are not valid ingestion verification.
 }
 ```
 
-The Q&A Studio sends these fields automatically when **Video scope** is
+Search sends these fields automatically when **Video scope** is
 **All videos**. Routing details, selected video IDs, fallbacks, and latency are
 returned under `retrieval_details.video_routing`.
 
@@ -109,7 +104,7 @@ Local Video OCR is intentionally separate from the public YouTube transcript flo
 
 - It accepts local `.mp4`, `.m4v`, `.mov`, `.mkv`, and `.webm` files.
 - It creates timestamped frame, OCR, and OCR-index artifacts under `data/`.
-- Q&A Studio can search transcript evidence, OCR evidence, or both.
+- Local video can search transcript evidence, OCR evidence, or both.
 - It requires `ffmpeg` and `ffprobe` on `PATH`.
 
 The main endpoints are:
@@ -162,4 +157,4 @@ The checked-in example query file uses Japanese prompts aligned to the current l
 
 - Ingestion runs synchronously in local mode.
 - If embedding model download is unavailable, local preview can use hashing embeddings.
-- Chunking Lab reads stored `full_transcript` data and does not mutate the saved library or index during preview/search comparison.
+- Chunking reads stored `full_transcript` data and does not mutate the saved library or index during preview/search comparison.

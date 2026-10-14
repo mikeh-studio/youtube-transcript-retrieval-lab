@@ -52,7 +52,7 @@ insufficient-evidence answer behavior still applies.
 
 ## Video-first routing
 
-When Q&A Studio searches **All videos**, `/v1/ask` first shortlists relevant
+When Search runs over **All videos**, `/v1/ask` first shortlists relevant
 videos, then retrieves chunks only from them. The router builds identity
 (title and channel), overview, and timestamped section vectors for each video and
 ranks videos by dense aggregation plus lexical RRF. Router artifacts are stored

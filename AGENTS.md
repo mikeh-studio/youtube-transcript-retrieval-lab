@@ -3,14 +3,16 @@
 Public guidance for contributors and AI coding assistants working in this repo.
 
 ## Project Structure & Module Organization
-- `local_preview/`: the local app. `local_api.py` (HTTP API + static files), `browser_boundary.py` (request boundary), retrieval tools, agentic search, grounded answers, and the evaluation dataset generator. UI bundle in `local_preview/web/`; React source in `local_preview/react_shell/`.
+- `local_preview/`: the local app. `local_api.py` (HTTP API + static files), `catalog_client.py` (read-only catalog proxy), retrieval tools, agentic search, grounded answers, and the evaluation dataset generator. UI pages and bundle in `local_preview/web/`; React source in `local_preview/react_shell/`.
+- `local_preview/web/lab-nav.js`: the single navigation definition (Catalog, Library, Search, Evaluate, Tools). Change nav items here, not in individual pages.
+- `browser_boundary.py`: same-origin request boundary (see `BROWSER_SECURITY.md`).
 - `multilingual/`: core engine (`video_library.py`, `text_processing.py`, `rag_engine.py`, `reranker.py`, `video_routing.py`) and language-specific tests in `multilingual/tests/`.
 - `evals/`: offline retrieval benchmark and `evals/video_routing/` evaluator.
 - `pipelines/`: evidence curation, local-video OCR, and library export scripts.
 - `retrieval/`: OCR and multimodal search helpers.
 - `tests/`: top-level regression tests; `e2e/`: Playwright browser checks.
 - `data/`: local indexed artifacts, runtime data, and cache files (do not commit generated files).
-- `docs/`: architecture, guides (`retrieval.md`, `evaluation.md`, `configuration.md`, `security.md`), data contracts in `docs/contracts/`, and screenshots in `docs/media/`.
+- `docs/`: architecture, guides (`retrieval.md`, `evaluation.md`, `configuration.md`, `catalog-browser.md`), data contracts in `docs/contracts/`, design mocks in `docs/design/`, and screenshots in `docs/media/`.
 
 ## Build, Test, and Development Commands
 - `pip install -r requirements.txt`: install Python dependencies from the repository root.

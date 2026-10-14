@@ -4,7 +4,7 @@ The lab measures retrieval in three ways: an offline benchmark that needs no
 network or keys, an interactive workspace for labeling real results, and tooling that
 turns reviewed evidence into reusable datasets.
 
-![Evaluation workspace scoring retrieval runs with ranking metrics](media/02-evaluation-metrics.png)
+![Evaluate page scoring retrieval runs with ranking metrics](media/02-evaluation-metrics.png)
 
 ## Offline benchmark
 
@@ -37,9 +37,9 @@ The [video-routing evaluator](../evals/video_routing/README.md) scores the
 video-selection stage separately, using synthetic records whose labels stay
 hidden from the router.
 
-## Evaluation workspace
+## Evaluate page
 
-Open `http://127.0.0.1:8000/evaluation.html` to:
+Open **Evaluate** (`http://127.0.0.1:8000/evaluation.html`) to:
 
 - create, import, and export query sets
 - run retrieval and label results with reason codes
@@ -47,12 +47,14 @@ Open `http://127.0.0.1:8000/evaluation.html` to:
 - compare runs with aggregate and per-query deltas
 
 Query sets, labels, and run snapshots are stored in browser `localStorage`.
-Search-result feedback from the main console is stored separately in
-`data/runtime/` and feeds retrieval tuning.
+Relevance feedback given in Search is stored separately in `data/runtime/`,
+feeds retrieval tuning, and is listed under **Tools → Search feedback**. A
+planned Search redesign labels results inline and folds Search feedback into
+Evaluate; see the [design mock](design/search-workbench.png).
 
 ## Draft a dataset with Codex CLI
 
-The workspace can turn one to three ingested transcripts into a six-case
+Evaluate can turn one to three indexed transcripts into a six-case
 retrieval draft. Install the Codex CLI and run `codex login` first.
 
 - Each proposal stays a draft until you approve, edit, or reject it.
@@ -73,7 +75,7 @@ renders reviewer prompts, builds adjudication inputs, and applies approved label
 through `/v1/feedback/search-review`. The commands are in the
 [local app guide](../local_preview/README.md#assisted-labeling-workflow).
 
-## Evidence curation
+## Data quality (evidence curation)
 
 `pipelines/curate_evidence.py` turns ingested transcript chunks into local
 evidence artifacts with heuristic quality signals, topic tags, retrieval
@@ -87,7 +89,7 @@ python pipelines/curate_evidence.py \
   --limit 200
 ```
 
-Inspect the output at `http://127.0.0.1:8000/evidence.html`.
+Inspect the output under **Tools → Data quality** (`http://127.0.0.1:8000/evidence.html`).
 
 ## Limits
 
