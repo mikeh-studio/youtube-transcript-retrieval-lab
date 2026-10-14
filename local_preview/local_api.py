@@ -117,6 +117,7 @@ RETRIEVAL_MODES = {"hybrid", "dense", "lexical"}
 VIDEO_ROUTING_MODES = {"none", "multi_vector"}
 DEFAULT_VIDEO_ROUTING_TOP_K = 3
 MAX_VIDEO_ROUTING_TOP_K = 10
+MAX_SEARCH_VIDEO_SCOPE = 500
 HYBRID_BASELINE_PROFILE = "baseline_rrf"
 HYBRID_OPTIMIZED_PROFILE = "optimized_v1"
 HYBRID_PROFILES = {HYBRID_BASELINE_PROFILE, HYBRID_OPTIMIZED_PROFILE}
@@ -416,6 +417,20 @@ def _env_flag(name: str, default: bool = False) -> bool:
     if not raw:
         return bool(default)
     return raw in {"1", "true", "yes", "on"}
+
+
+def _parse_search_video_scope(value) -> Optional[List[str]]:
+    """Validate the optional /v1/search video scope; None means the whole library."""
+    if value is None:
+        return None
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise ValueError("video_ids must be a list of video ID strings")
+    scoped = list(dict.fromkeys(item.strip() for item in value if item.strip()))
+    if len(scoped) > MAX_SEARCH_VIDEO_SCOPE:
+        raise ValueError(
+            f"video_ids accepts at most {MAX_SEARCH_VIDEO_SCOPE} videos"
+        )
+    return scoped
 
 
 def _coerce_request_flag(value: Any, default: bool = False) -> bool:
@@ -2487,10 +2502,12 @@ class LocalRAGService:
         *,
         video_id: Optional[str] = None,
         label: Optional[str] = None,
+        query: Optional[str] = None,
         limit: int = 500,
     ) -> List[dict]:
         scoped_video = str(video_id or "").strip()
         scoped_label = str(label or "").strip().lower()
+        scoped_query = self._normalize_feedback_query(query or "")
         safe_limit = max(1, min(int(limit), 5000))
 
         with self.feedback_lock:
@@ -2505,6 +2522,13 @@ class LocalRAGService:
                 row
                 for row in rows
                 if str(row.get("label") or "").lower() == scoped_label
+            ]
+        if scoped_query:
+            rows = [
+                row
+                for row in rows
+                if self._normalize_feedback_query(row.get("query") or "")
+                == scoped_query
             ]
 
         rows.sort(key=lambda row: str(row.get("updated_at") or ""), reverse=True)
@@ -8272,6 +8296,7 @@ class Handler(BrowserBoundary, BaseHTTPRequestHandler):
                 params = parse_qs(parsed.query or "")
                 video_id = (params.get("video_id") or [None])[0]
                 label = (params.get("label") or [None])[0]
+                query_filter = (params.get("query") or [None])[0]
                 limit_raw = (params.get("limit") or [500])[0]
                 try:
                     limit = int(limit_raw)
@@ -8290,6 +8315,7 @@ class Handler(BrowserBoundary, BaseHTTPRequestHandler):
                 reviews = SERVICE.list_search_feedback(
                     video_id=video_id,
                     label=label,
+                    query=query_filter,
                     limit=limit,
                 )
                 self._json({"ok": True, "count": len(reviews), "reviews": reviews})
@@ -8730,6 +8756,8 @@ class Handler(BrowserBoundary, BaseHTTPRequestHandler):
                         400,
                     )
                     return
+                video_ids = _parse_search_video_scope(body.get("video_ids"))
+                scope_kwargs = {"video_ids": video_ids} if video_ids is not None else {}
                 agentic = _coerce_request_flag(
                     body.get("agentic", body.get("agentic_retrieval")),
                     default=_env_flag(AGENTIC_RETRIEVAL_ENV),
@@ -8742,6 +8770,7 @@ class Handler(BrowserBoundary, BaseHTTPRequestHandler):
                         retrieval_mode=retrieval_mode,
                         retrieval_profile=retrieval_profile,
                         reranker=body.get("reranker"),
+                        **scope_kwargs,
                     )
                     retrieval = agentic_outcome["retrieval"]
                 else:
@@ -8752,12 +8781,14 @@ class Handler(BrowserBoundary, BaseHTTPRequestHandler):
                         retrieval_mode=retrieval_mode,
                         retrieval_profile=retrieval_profile,
                         reranker=body.get("reranker"),
+                        **scope_kwargs,
                     )
                 self._json(
                     {
                         "ok": True,
                         "query": query,
                         "k": k,
+                        "video_ids": video_ids,
                         "agentic": agentic,
                         "retrieval_mode": retrieval["retrieval_mode"],
                         "retrieval_details": retrieval["details"],
