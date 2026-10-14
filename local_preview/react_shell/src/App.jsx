@@ -26,6 +26,7 @@ const CORE_NAV_ITEMS = [
   },
 ];
 const LIBRARY_NAV_ITEMS = [
+  { key: "catalog", label: "Catalog", icon: "/icons/icon-library.svg", href: "/catalog.html" },
   { key: "reviews", label: "Reviews", icon: "/icons/icon-library.svg", href: "/reviews.html", requiresUnlock: true },
   { key: "evidence", label: "Evidence", icon: "/icons/icon-library.svg", href: "/evidence.html", requiresUnlock: true },
 ];
