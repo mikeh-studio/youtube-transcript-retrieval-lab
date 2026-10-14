@@ -53,6 +53,8 @@ feedback, Local video, Study). The React shell imports it, and the standalone
 pages render it with `renderLabNav()`; `e2e/shell-redesign.spec.ts` checks that
 every page shows the same navigation.
 
+![Shared lab navigation with the Tools menu open on the Search page](media/lab-navigation.png)
+
 `local_preview/react_shell/` is the React source for Library, Search, Study, and
 Local video. `npm run
 build:web` writes the bundle to `local_preview/web/assets/`, and CI fails if the
