@@ -1955,7 +1955,10 @@ class LocalRAGService:
             "applied": (query_matches > 0) or (relevant_count + not_relevant_count > 0),
         }
 
-    def _apply_feedback_rerank(self, *, query: str, rows: List[dict]) -> dict:
+    def _apply_feedback_rerank(
+        self, *, query: str, rows: List[dict], enabled: Optional[bool] = None
+    ) -> dict:
+        tuning_enabled = self.feedback_tuning_enabled if enabled is None else bool(enabled)
         if not rows:
             return {"results": [], "adjusted_count": 0}
 
@@ -1967,7 +1970,7 @@ class LocalRAGService:
             item = dict(row)
             base_score = float(item.get("score", 0.0))
             item["base_score"] = base_score
-            if self.feedback_tuning_enabled:
+            if tuning_enabled:
                 feedback = self._compute_feedback_adjustment(
                     query_tokens=query_tokens, chunk_key=self._chunk_identity(item)
                 )
@@ -1982,7 +1985,7 @@ class LocalRAGService:
                 adjustment = 0.0
             item["feedback_adjustment"] = adjustment
             item["feedback_signal"] = {
-                "applied": bool(feedback["applied"] and self.feedback_tuning_enabled),
+                "applied": bool(feedback["applied"] and tuning_enabled),
                 "query_matches": int(feedback["query_matches"]),
                 "relevant_count": int(feedback["relevant_count"]),
                 "not_relevant_count": int(feedback["not_relevant_count"]),
@@ -3088,7 +3091,9 @@ class LocalRAGService:
         video_ids: Optional[List[str]] = None,
         retrieval_profile: Optional[str] = None,
         reranker: Optional[str] = None,
+        feedback_tuning: Optional[bool] = None,
     ) -> dict:
+        """Retrieve ranked chunks; feedback_tuning=None uses the server default."""
         mode = (retrieval_mode or "hybrid").strip().lower()
         if mode not in RETRIEVAL_MODES:
             raise ValueError(
@@ -3235,7 +3240,14 @@ class LocalRAGService:
             )
 
         pre_rerank_count = len(candidate_rows)
-        reranked = self._apply_feedback_rerank(query=query, rows=candidate_rows)
+        tuning_enabled = (
+            self.feedback_tuning_enabled
+            if feedback_tuning is None
+            else bool(feedback_tuning)
+        )
+        reranked = self._apply_feedback_rerank(
+            query=query, rows=candidate_rows, enabled=tuning_enabled
+        )
         reranked_rows = reranked["results"]
         post_feedback_count = len(reranked_rows)
 
@@ -3267,7 +3279,7 @@ class LocalRAGService:
             "diversity_applied": bool(diverse["diversity_applied"]),
             "selected_per_video_cap": int(diverse["max_per_video"]),
             "feedback_tuning": {
-                "enabled": bool(self.feedback_tuning_enabled),
+                "enabled": tuning_enabled,
                 "adjusted_results": int(reranked["adjusted_count"]),
                 "alpha_query": FEEDBACK_ALPHA_QUERY,
                 "beta_global": FEEDBACK_BETA_GLOBAL,
@@ -3340,10 +3352,14 @@ class LocalRAGService:
         video_ids: Optional[List[str]] = None,
         retrieval_profile: Optional[str] = None,
         reranker: Optional[str] = None,
+        feedback_tuning: Optional[bool] = None,
     ) -> dict:
         """Use semantic, keyword, and transcript-context tools for retrieval."""
         answer_language = self._infer_query_language(question)
         tools = self._get_transcript_retrieval_tools()
+        tuning_options = (
+            {} if feedback_tuning is None else {"feedback_tuning": feedback_tuning}
+        )
 
         def semantic_search_fn(*, query: str, k: int) -> dict:
             return tools.semantic_search(
@@ -3354,6 +3370,7 @@ class LocalRAGService:
                 video_ids=video_ids,
                 retrieval_profile=retrieval_profile,
                 reranker=reranker,
+                **tuning_options,
             )
 
         def keyword_search_fn(*, query: str, k: int) -> dict:
@@ -3365,6 +3382,7 @@ class LocalRAGService:
                 video_ids=video_ids,
                 retrieval_profile=retrieval_profile,
                 reranker=reranker,
+                **tuning_options,
             )
 
         def assess_fn(*, rows: List[dict], retrieval_mode: str) -> dict:
@@ -8758,6 +8776,11 @@ class Handler(BrowserBoundary, BaseHTTPRequestHandler):
                     return
                 video_ids = _parse_search_video_scope(body.get("video_ids"))
                 scope_kwargs = {"video_ids": video_ids} if video_ids is not None else {}
+                feedback_tuning = body.get("feedback_tuning")
+                if feedback_tuning is not None:
+                    if not isinstance(feedback_tuning, bool):
+                        raise ValueError("feedback_tuning must be true or false")
+                    scope_kwargs["feedback_tuning"] = feedback_tuning
                 agentic = _coerce_request_flag(
                     body.get("agentic", body.get("agentic_retrieval")),
                     default=_env_flag(AGENTIC_RETRIEVAL_ENV),

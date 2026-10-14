@@ -141,3 +141,67 @@ def test_list_search_feedback_filters_by_normalized_query():
 
     assert sorted(row["video_id"] for row in rows) == ["vidA", "vidB"]
     assert len(svc.list_search_feedback()) == 3
+
+
+@pytest.mark.parametrize("agentic,kind", [(False, "plain"), (True, "agentic")])
+def test_search_can_disable_feedback_tuning_per_request(service, agentic, kind):
+    handler = _post({"query": "作画", "agentic": agentic, "feedback_tuning": False})
+
+    assert handler.response_status == 200
+    assert service.calls[0] == (kind, service.calls[0][1])
+    assert service.calls[0][1]["feedback_tuning"] is False
+
+
+def test_search_omits_feedback_tuning_by_default(service):
+    _post({"query": "作画"})
+
+    assert "feedback_tuning" not in service.calls[0][1]
+
+
+def test_search_rejects_non_boolean_feedback_tuning(service):
+    handler = _post({"query": "作画", "feedback_tuning": "no"})
+
+    assert handler.response_status == 400
+    assert service.calls == []
+
+
+def test_feedback_rerank_override_ignores_labels():
+    svc = _feedback_service()
+    svc._infer_query_language = lambda query: "en"
+    svc._tokenize_for_lexical = lambda text, language=None: text.split()
+    svc._chunk_identity = lambda row: f"{row['video_id']}:{row['chunk_index']}"
+    svc.save_search_feedback(
+        {
+            "query": "anime direction",
+            "retrieval_mode": "hybrid",
+            "label": "relevant",
+            "video_id": "vidB",
+            "chunk_index": 0,
+            "start": 0.0,
+            "end": 10.0,
+        }
+    )
+    rows = [
+        {"video_id": "vidA", "chunk_index": 0, "score": 0.5},
+        {"video_id": "vidB", "chunk_index": 0, "score": 0.4},
+    ]
+
+    tuned = svc._apply_feedback_rerank(query="anime direction", rows=rows)
+    untuned = svc._apply_feedback_rerank(query="anime direction", rows=rows, enabled=False)
+
+    assert tuned["results"][0]["video_id"] == "vidB"
+    assert [row["video_id"] for row in untuned["results"]] == ["vidA", "vidB"]
+    assert untuned["adjusted_count"] == 0
+
+
+def test_retrieval_tools_forward_feedback_tuning():
+    from retrieval_tools import TranscriptRetrievalTools
+
+    calls = []
+    tools = TranscriptRetrievalTools(library=None, retrieve_fn=lambda query, **kwargs: calls.append(kwargs) or {})
+
+    tools.semantic_search("q", feedback_tuning=False)
+    tools.keyword_search("q")
+
+    assert calls[0]["feedback_tuning"] is False
+    assert "feedback_tuning" not in calls[1]

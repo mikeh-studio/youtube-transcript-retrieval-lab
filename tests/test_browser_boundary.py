@@ -45,6 +45,7 @@ class BrowserBoundaryTests(unittest.TestCase):
                 AGENTIC_RETRIEVAL_ENV="unused",
                 _env_flag=lambda _: False,
                 _coerce_request_flag=lambda value, default: bool(value or default),
+                _parse_search_video_scope=lambda value: value,
                 Path=Path,
                 SERVICE=SimpleNamespace(
                     ingest=lambda **kwargs: cls.effects.append(kwargs) or {},
