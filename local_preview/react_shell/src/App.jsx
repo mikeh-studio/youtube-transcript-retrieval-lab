@@ -1,4 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import {
+  LAB_BRAND,
+  LAB_NAV_PRIMARY,
+  LAB_NAV_TOOLS,
+  LAB_NAV_TOOLS_MENU,
+  labNavLabel,
+} from "../../web/lab-nav.js";
 
 const LOCK_KEY = "yt_rag_ingest_unlocked";
 const LAST_VIDEO_KEY = "yt_rag_last_video_id";
@@ -14,27 +21,6 @@ const ROUTES = {
   STUDY: "/study",
   QA: "/qa",
 };
-const CORE_NAV_ITEMS = [
-  { key: "ingest", label: "Ingest", icon: "/icons/icon-upload.svg", route: ROUTES.INGEST },
-  {
-    key: "studio",
-    label: "Studio",
-    icon: "/icons/icon-chat.svg",
-    route: ROUTES.QA,
-    activeRoutes: [ROUTES.QA, ROUTES.STUDY, ROUTES.TLDR],
-    requiresUnlock: true,
-  },
-];
-const LIBRARY_NAV_ITEMS = [
-  { key: "catalog", label: "Catalog", icon: "/icons/icon-library.svg", href: "/catalog.html" },
-  { key: "reviews", label: "Reviews", icon: "/icons/icon-library.svg", href: "/reviews.html", requiresUnlock: true },
-  { key: "evidence", label: "Evidence", icon: "/icons/icon-library.svg", href: "/evidence.html", requiresUnlock: true },
-];
-const MORE_NAV_ITEMS = [
-  { key: "local-video", label: "Local Video", icon: "/icons/icon-search.svg", href: "/index.html#/local-video" },
-  { key: "evaluation", label: "Evaluation", icon: "/icons/icon-jobs.svg", href: "/evaluation.html", requiresUnlock: true },
-  { key: "chunking", label: "Chunking", icon: "/icons/icon-jobs.svg", href: "/chunking.html", requiresUnlock: true },
-];
 const YOUTUBE_ID_PATTERN = /^[a-zA-Z0-9_-]{11}$/;
 const FALLBACK_LLM_PROVIDER_OPTIONS = {
   chatgpt: {
@@ -770,9 +756,9 @@ function IngestPage({ onSuccess }) {
   return (
     <section className="ingest-stage">
       <header className="hero ingest-hero">
-        <h1>Ingest Gateway</h1>
+        <h1>Library</h1>
         <p className="subtitle">
-          Start here. Once ingest succeeds, TLDR Studio, Study Studio, Q&amp;A Studio, Evaluation, and Reviews unlock.
+          Index YouTube transcripts for retrieval. Search, Evaluate, and the lab tools open after the first video is indexed.
         </p>
       </header>
 
@@ -781,7 +767,7 @@ function IngestPage({ onSuccess }) {
           <img src="/icons/icon-upload.svg" alt="" aria-hidden="true" />
           <span>Paste a YouTube URL</span>
         </h2>
-        <p className="section-desc">Add a video or playlist and unlock the analysis workspace.</p>
+        <p className="section-desc">Add a video or playlist to the retrieval library.</p>
         <form className="grid ingest-compose-form" onSubmit={handleSubmit}>
           <div className="ingest-primary-row">
             <label className="ingest-url-field">
@@ -830,7 +816,7 @@ function IngestPage({ onSuccess }) {
         <div className="section-head">
           <h2 className="section-title">
             <img src="/icons/icon-library.svg" alt="" aria-hidden="true" />
-            <span>Ingested Videos</span>
+            <span>Indexed videos</span>
           </h2>
           <div className="ingest-carousel-controls">
             <button
@@ -1959,7 +1945,7 @@ function QAStudioPage({ locale }) {
         <div className="qa-workbench-head">
           <h2 className="section-title">
             <img src={activeQaTool === "ask" ? "/icons/icon-chat.svg" : "/icons/icon-search.svg"} alt="" aria-hidden="true" />
-            <span>Q&amp;A Workbench</span>
+            <span>Retrieval workbench</span>
           </h2>
           <div className="qa-tabs" role="tablist" aria-label="Q&A mode">
             <button
@@ -3333,24 +3319,37 @@ function StudyStudioPage() {
   );
 }
 
-const STUDIO_MODES = [
-  { route: ROUTES.QA, label: "Ask", icon: "/icons/icon-search.svg" },
+const STUDY_MODES = [
   { route: ROUTES.STUDY, label: "Study", icon: "/icons/icon-library.svg" },
-  { route: ROUTES.TLDR, label: "Summarize", icon: "/icons/icon-chat.svg" },
+  { route: ROUTES.TLDR, label: "Summary", icon: "/icons/icon-chat.svg" },
 ];
 
-function StudioWorkspace({ route, locale }) {
-  const activeMode = STUDIO_MODES.find((mode) => mode.route === route) || STUDIO_MODES[0];
-  const panelId = `studio-panel-${activeMode.label.toLowerCase()}`;
+function SearchWorkspace({ locale }) {
+  return (
+    <section className="studio-workspace">
+      <header className="hero studio-hero">
+        <h1>Search</h1>
+        <p className="subtitle">Retrieve transcript evidence, inspect how it was found, and generate cited answers.</p>
+      </header>
+      <div className="studio-mode-content">
+        <QAStudioPage locale={locale} />
+      </div>
+    </section>
+  );
+}
+
+function StudyWorkspace({ route }) {
+  const activeMode = STUDY_MODES.find((mode) => mode.route === route) || STUDY_MODES[0];
+  const panelId = `study-panel-${activeMode.label.toLowerCase()}`;
 
   return (
     <section className="studio-workspace">
       <header className="hero studio-hero">
-        <h1>Studio</h1>
-        <p className="subtitle">Ask questions, build study material, or summarize an ingested video.</p>
+        <h1>Study</h1>
+        <p className="subtitle">Turn an indexed video into study material or a short summary.</p>
       </header>
-      <div className="studio-mode-tabs" role="tablist" aria-label="Studio mode">
-        {STUDIO_MODES.map((mode) => {
+      <div className="studio-mode-tabs" role="tablist" aria-label="Study tool">
+        {STUDY_MODES.map((mode) => {
           const active = mode.route === activeMode.route;
           return (
             <button
@@ -3369,7 +3368,6 @@ function StudioWorkspace({ route, locale }) {
         })}
       </div>
       <div className="studio-mode-content" id={panelId} role="tabpanel">
-        {route === ROUTES.QA ? <QAStudioPage locale={locale} /> : null}
         {route === ROUTES.STUDY ? <StudyStudioPage /> : null}
         {route === ROUTES.TLDR ? <TLDRStudioPage /> : null}
       </div>
@@ -3486,6 +3484,8 @@ function App() {
     setUnlockChecked(true);
   }
 
+  const brand = LAB_BRAND[locale] || LAB_BRAND["en-US"];
+
   function isNavItemVisible(item) {
     return !item.requiresUnlock || unlocked;
   }
@@ -3504,7 +3504,7 @@ function App() {
     const content = (
       <>
         <img className={mobile ? "bottom-tab-icon" : "nav-icon"} src={item.icon} alt="" aria-hidden="true" />
-        <span className={mobile ? "bottom-tab-label" : "nav-label"}>{item.label}</span>
+        <span className={mobile ? "bottom-tab-label" : "nav-label"}>{labNavLabel(item, locale)}</span>
       </>
     );
 
@@ -3527,45 +3527,47 @@ function App() {
     );
   }
 
-  function NavMenu({ label, icon, items, mobile = false }) {
+  function NavMenu({ menu, items, mobile = false }) {
     const visibleItems = items.filter(isNavItemVisible);
     if (!visibleItems.length) {
       return null;
     }
+    const menuActive = visibleItems.some(isNavItemActive);
+    const label = labNavLabel(menu, locale);
+    const links = visibleItems.map((item) => {
+      const active = isNavItemActive(item);
+      return (
+        <a
+          className={`${mobile ? "bottom-tools-link" : "nav-tools-link"} ${active ? "active" : ""}`}
+          href={item.href}
+          aria-current={active ? "page" : undefined}
+          key={`${mobile ? "bottom-" : ""}tool-${item.key}`}
+        >
+          <img className={mobile ? "bottom-tab-icon" : "nav-icon"} src={item.icon} alt="" aria-hidden="true" />
+          <span>{labNavLabel(item, locale)}</span>
+        </a>
+      );
+    });
 
     if (mobile) {
       return (
-        <details className="bottom-tools-menu" data-nav-group={label.toLowerCase()}>
-          <summary className="bottom-tab-link">
-            <img className="bottom-tab-icon" src={icon} alt="" aria-hidden="true" />
+        <details className="bottom-tools-menu" data-nav-group={menu.key}>
+          <summary className={`bottom-tab-link ${menuActive ? "active" : ""}`}>
+            <img className="bottom-tab-icon" src={menu.icon} alt="" aria-hidden="true" />
             <span className="bottom-tab-label">{label}</span>
           </summary>
-          <div className="bottom-tools-panel">
-            {visibleItems.map((item) => (
-              <a className="bottom-tools-link" href={item.href} key={`bottom-tool-${item.key}`}>
-                <img className="bottom-tab-icon" src={item.icon} alt="" aria-hidden="true" />
-                <span>{item.label}</span>
-              </a>
-            ))}
-          </div>
+          <div className="bottom-tools-panel">{links}</div>
         </details>
       );
     }
 
     return (
-      <details className="nav-tools-menu" data-nav-group={label.toLowerCase()}>
-        <summary className="app-nav-link nav-btn nav-tools-summary">
-          <img className="nav-icon" src={icon} alt="" aria-hidden="true" />
+      <details className="nav-tools-menu" data-nav-group={menu.key}>
+        <summary className={`app-nav-link nav-btn nav-tools-summary ${menuActive ? "active" : ""}`}>
+          <img className="nav-icon" src={menu.icon} alt="" aria-hidden="true" />
           <span className="nav-label">{label}</span>
         </summary>
-        <div className="nav-tools-panel">
-          {visibleItems.map((item) => (
-            <a className="nav-tools-link" href={item.href} key={`tool-${item.key}`}>
-              <img className="nav-icon" src={item.icon} alt="" aria-hidden="true" />
-              <span>{item.label}</span>
-            </a>
-          ))}
-        </div>
+        <div className="nav-tools-panel">{links}</div>
       </details>
     );
   }
@@ -3576,8 +3578,8 @@ function App() {
         <div className="site-intro" data-testid="intro-overlay" aria-hidden="true">
           <div className="site-intro-glow" />
           <div className="site-intro-content">
-            <p className="site-intro-eyebrow">YouTube Transcript Retrieval Lab</p>
-            <p className="site-intro-title">Local Studio</p>
+            <p className="site-intro-eyebrow">{brand.subtitle}</p>
+            <p className="site-intro-title">{brand.title}</p>
           </div>
         </div>
       ) : null}
@@ -3585,17 +3587,16 @@ function App() {
         <a className="brand brand-link" href="#/ingest" onClick={() => navigate(ROUTES.INGEST)}>
           <img src="/icons/icon-play.svg" alt="" aria-hidden="true" />
           <div>
-            <p className="eyebrow">YouTube Transcript Retrieval Lab</p>
-            <p className="brand-sub">Local Studio</p>
+            <p className="eyebrow">{brand.title}</p>
+            <p className="brand-sub">{brand.subtitle}</p>
           </div>
         </a>
         <div className="appbar-actions">
           <nav className="appbar-nav" aria-label="Primary">
-            {CORE_NAV_ITEMS.filter(isNavItemVisible).map((item) => (
+            {LAB_NAV_PRIMARY.filter(isNavItemVisible).map((item) => (
               <NavItem key={item.key} item={item} />
             ))}
-            <NavMenu label="Library" icon="/icons/icon-library.svg" items={LIBRARY_NAV_ITEMS} />
-            <NavMenu label="More" icon="/icons/icon-jobs.svg" items={MORE_NAV_ITEMS} />
+            <NavMenu menu={LAB_NAV_TOOLS_MENU} items={LAB_NAV_TOOLS} />
           </nav>
           <label className="locale-switch">
             <span>Language</span>
@@ -3611,18 +3612,16 @@ function App() {
         <div className="route-scene" key={`scene-${route}-${routeAnimationKey}`}>
           {route === ROUTES.INGEST ? <IngestPage onSuccess={handleIngestSuccess} /> : null}
           {route === ROUTES.LOCAL_VIDEO ? <LocalVideoAnalysisPage locale={locale} /> : null}
-          {route !== ROUTES.INGEST && route !== ROUTES.LOCAL_VIDEO && unlocked ? (
-            <StudioWorkspace route={route} locale={locale} />
-          ) : null}
+          {route === ROUTES.QA && unlocked ? <SearchWorkspace locale={locale} /> : null}
+          {(route === ROUTES.STUDY || route === ROUTES.TLDR) && unlocked ? <StudyWorkspace route={route} /> : null}
         </div>
       </main>
 
       <nav className="bottom-tabbar" aria-label="Primary mobile navigation">
-        {CORE_NAV_ITEMS.filter(isNavItemVisible).map((item) => (
+        {LAB_NAV_PRIMARY.filter(isNavItemVisible).map((item) => (
           <NavItem key={`mobile-${item.key}`} item={item} mobile />
         ))}
-        <NavMenu label="Library" icon="/icons/icon-library.svg" items={LIBRARY_NAV_ITEMS} mobile />
-        <NavMenu label="More" icon="/icons/icon-jobs.svg" items={MORE_NAV_ITEMS} mobile />
+        <NavMenu menu={LAB_NAV_TOOLS_MENU} items={LAB_NAV_TOOLS} mobile />
       </nav>
     </div>
   );
