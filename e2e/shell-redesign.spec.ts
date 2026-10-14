@@ -68,15 +68,15 @@ test("lab navigation is identical across pages and marks the current page", asyn
   }
 });
 
-test("hides lab pages until a video is indexed", async ({ page }) => {
+test("shows locked lab pages as disabled until a video is indexed", async ({ page }) => {
+  await page.route("**/v1/videos", (route) => route.fulfill({ contentType: "application/json", body: '{"videos":[]}' }));
   await page.goto("/index.html#/ingest");
   const nav = page.locator(".appbar-nav");
-  await expect(nav.locator(":scope > .app-nav-link, :scope > .nav-tools-menu > summary")).toHaveText([
-    "Catalog",
-    "Library",
-    "Tools",
-  ]);
+  await expect(nav.locator(":scope > .app-nav-link, :scope > .nav-tools-menu > summary")).toHaveText(PRIMARY_LABELS);
+  await expect(nav.getByRole("button", { name: "Search" })).toBeDisabled();
+  await expect(nav.getByRole("link", { name: "Catalog" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Library", level: 1 })).toBeVisible();
+  await expect(page.getByText("No videos indexed yet.")).toBeVisible();
 });
 
 test("keeps Search separate from the secondary Study tool", async ({ page }) => {
@@ -242,6 +242,7 @@ test("routes All videos before Ask and shows YouTube channel provenance", async 
   });
 
   await page.goto("/index.html#/qa");
+  await page.getByRole("tab", { name: "Answer" }).click();
   await page.getByLabel("Video scope").selectOption("");
   await page.getByLabel("Question").fill("When should I feed the starter?");
   await page.getByRole("button", { name: "Generate Answer" }).click();

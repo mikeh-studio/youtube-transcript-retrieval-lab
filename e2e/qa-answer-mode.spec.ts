@@ -26,6 +26,7 @@ async function prepareQAStudio(page, options = {}) {
     });
   });
   await page.goto("/index.html#/qa");
+  await page.getByRole("tab", { name: "Answer" }).click();
 }
 
 async function mockAskResponse(page, payload) {
