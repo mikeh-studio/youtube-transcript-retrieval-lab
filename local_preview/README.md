@@ -1,6 +1,7 @@
-# YouTube Transcript Retrieval Lab — Local Preview
+# Local App Guide
 
 Run the local UI and API for transcript ingestion, retrieval testing, evidence review, and evaluation.
+For configuration and design background, see [`docs/`](../docs/architecture.md).
 
 ## Start
 
@@ -162,4 +163,3 @@ The checked-in example query file uses Japanese prompts aligned to the current l
 - Ingestion runs synchronously in local mode.
 - If embedding model download is unavailable, local preview can use hashing embeddings.
 - Chunking Lab reads stored `full_transcript` data and does not mutate the saved library or index during preview/search comparison.
-- The Cloudflare production stack remains separate in `production_cloudflare/`.

@@ -3,11 +3,14 @@
 Public guidance for contributors and AI coding assistants working in this repo.
 
 ## Project Structure & Module Organization
-- `multilingual/`: core retrieval pipeline (`video_library.py`, `rag_engine.py`, `text_processing.py`) and language-specific tests in `multilingual/tests/`.
-- `local_preview/`: local HTTP API (`local_api.py`) plus static UI in `local_preview/web/`.
-- `tests/`: top-level regression tests for retrieval, feedback tuning, and library behavior.
+- `local_preview/`: the local app. `local_api.py` (HTTP API + static files), `browser_boundary.py` (request boundary), retrieval tools, agentic search, grounded answers, and the evaluation dataset generator. UI bundle in `local_preview/web/`; React source in `local_preview/react_shell/`.
+- `multilingual/`: core engine (`video_library.py`, `text_processing.py`, `rag_engine.py`, `reranker.py`, `video_routing.py`) and language-specific tests in `multilingual/tests/`.
+- `evals/`: offline retrieval benchmark and `evals/video_routing/` evaluator.
+- `pipelines/`: evidence curation, local-video OCR, and library export scripts.
+- `retrieval/`: OCR and multimodal search helpers.
+- `tests/`: top-level regression tests; `e2e/`: Playwright browser checks.
 - `data/`: local indexed artifacts, runtime data, and cache files (do not commit generated files).
-- `docs/media/`: screenshots used in documentation.
+- `docs/`: architecture, guides (`retrieval.md`, `evaluation.md`, `configuration.md`, `security.md`), data contracts in `docs/contracts/`, and screenshots in `docs/media/`.
 
 ## Build, Test, and Development Commands
 - `pip install -r requirements.txt`: install Python dependencies from the repository root.
@@ -44,7 +47,7 @@ Public guidance for contributors and AI coding assistants working in this repo.
 - Keep commits scoped (one logical change per commit) and include tests/docs with code changes.
 - PRs should include: purpose, key changes, test commands run, and screenshots for UI updates (`local_preview/web/*`).
 - For docs-only or README-only work, state that explicitly in the PR summary.
-- Keep README release notes and `What's New` content concise; avoid repeating the same feature details across multiple bullets or headings.
+- Keep the README a short landing page; put operator detail in `docs/` or `local_preview/README.md` and release notes in `CHANGELOG.md`. Avoid repeating the same feature details across files.
 - Link related issues/tasks and list any required environment variables (for example `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`).
 
 ## Security & Configuration Tips
