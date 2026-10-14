@@ -4,6 +4,7 @@ Public guidance for contributors and AI coding assistants working in this repo.
 
 ## Project Structure & Module Organization
 - `local_preview/`: the local app. `local_api.py` (HTTP API + static files), `catalog_client.py` (read-only catalog proxy), retrieval tools, agentic search, grounded answers, and the evaluation dataset generator. UI pages and bundle in `local_preview/web/`; React source in `local_preview/react_shell/`.
+- `local_preview/react_shell/src/`: `library.jsx` (Library), `workbench.jsx` (Search A/B workbench), `lab.jsx` (shared helpers), and `App.jsx` (routing, Answer flow, Study, Local video). Rebuild the bundle with `npm run build:web` after changes.
 - `local_preview/web/lab-nav.js`: the single navigation definition (Catalog, Library, Search, Evaluate, Tools). Change nav items here, not in individual pages.
 - `browser_boundary.py`: same-origin request boundary (see `BROWSER_SECURITY.md`).
 - `multilingual/`: core engine (`video_library.py`, `text_processing.py`, `rag_engine.py`, `reranker.py`, `video_routing.py`) and language-specific tests in `multilingual/tests/`.

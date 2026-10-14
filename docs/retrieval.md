@@ -22,6 +22,17 @@ scope; see the [benchmark caveats](../evals/README.md#fixture-result).
 After fusion, results are adjusted by stored relevance feedback (disable with
 `YT_RAG_FEEDBACK_TUNING=0`) and diversified so one passage does not fill the list.
 
+## Search request options
+
+`POST /v1/search` also accepts:
+
+| Field | Effect |
+| --- | --- |
+| `video_ids` | List of indexed video IDs to search (up to 500). Omit it to search the whole library; an empty list returns no results. Unknown IDs return `404`. |
+| `feedback_tuning` | `false` skips the relevance-feedback adjustment for this request; omit it to use the server default. The Search workbench always sends `false`, so labels never reshape the rankings being compared. |
+
+Both apply to plain and agentic search.
+
 ## Cross-encoder reranking
 
 Rescores fused candidates with a multilingual cross-encoder

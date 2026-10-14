@@ -1,6 +1,7 @@
 # Design mocks
 
-Static mocks for planned pages. They use sample data and are not wired to the API.
+Static mocks used to agree page designs before building them. They use sample
+data and are not wired to the API.
 
 ## Search workbench
 
@@ -19,5 +20,12 @@ Search becomes the center of the lab. Decisions agreed for the redesign:
 - **Trace before answer.** The routing and agentic tool steps are shown with
   timings; generating an answer is the last step.
 
-Planned order: Library home and indexing flow, then the Search workbench, then
-moving Chunking, Data quality, and Evaluate into the React shell.
+**Status:** built. See the [Search workbench](../media/search-workbench.png) and
+[Library](../media/library.png) as implemented. Differences from the mock:
+
+- Search runs do not use video routing; routing stays in the Answer flow,
+  because it can call an answer provider to expand the query.
+- Both runs skip feedback tuning so labels cannot move the rankings.
+- The Answer tab reuses the existing answer flow with its own settings.
+- Labels are saved per query to the server feedback store. Keeping A/B runs in
+  Evaluate's run history and removing the Search feedback page come next.

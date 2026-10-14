@@ -30,8 +30,8 @@ YT_RAG_FORCE_HASH_EMBEDDINGS=1 python local_preview/local_api.py
 
 - One local process for the HTTP API and static UI.
 - Catalog: a read-only view of discovered videos from the optional private catalog service.
-- Library: YouTube video and playlist transcript ingestion.
-- Search: `hybrid`, `dense`, and `lexical` modes, optional deterministic agentic search over semantic, keyword, and raw timestamp-context tools, and citation-backed answers with grounded evidence and fallback states.
+- Library: YouTube video and playlist transcript ingestion, and a table of indexed videos with chunk counts, chunking status, and catalog review status.
+- Search: an A/B workbench that runs two retrieval setups (`hybrid`, `dense`, or `lexical`, single pass or deterministic agentic, optional reranker) on the same query, with inline relevance labels, per-query metrics, and retrieval traces. The Answer tab produces citation-backed answers with grounded evidence and fallback states.
 - Evaluate: query sets, labels, run snapshots, metrics, run comparison, and Codex-drafted datasets.
 - Tools: Chunking, Data quality (evidence curation reports), Search feedback (`relevant` / `not_relevant` labels from Search), and Local video OCR for files you own or have permission to process.
 - Study (secondary): flashcards, topic maps, Explain Topic notes, summaries, run history, and quality checks.
@@ -92,6 +92,10 @@ policy selects Japanese BM25 or E5 + FAISS, can try the other search tool, and
 then reads nearby evidence from canonical `full_transcript.segments`. The
 existing plain search behavior remains the default. Tool decisions are returned
 under `retrieval_details.agentic_retrieval`.
+
+`POST /v1/search` also accepts `video_ids` (a list of indexed video IDs) and
+`feedback_tuning: false`. `GET /v1/feedback/search-review` accepts `query` to
+list the labels for one query. See [Search request options](../docs/retrieval.md#search-request-options).
 
 Each YouTube record also exposes `source.platform`, canonical video URL, and
 channel ID/name/URL. Set optional `YOUTUBE_API_KEY` to use the YouTube Data API;

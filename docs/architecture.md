@@ -30,7 +30,20 @@ multilingual/
 local files (data/, gitignored) and browser storage
 ```
 
-## Search and answer flow
+## Search workbench flow
+
+1. **Scope.** All indexed videos, chosen videos, or a catalog filter. For a
+   catalog filter, the browser reads matching catalog items and keeps only the
+   indexed videos among them; the result is sent as `video_ids`.
+2. **Run A and Run B.** The same query runs twice through `POST /v1/search`
+   with each run's strategy, mode, hybrid profile, reranker, and top K, and with
+   `feedback_tuning: false` so stored labels cannot move the rankings.
+3. **Compare and label.** The browser computes rank changes between runs and
+   per-query Precision@K and nDCG@K from the labels for that query. Labels are
+   saved with `POST /v1/feedback/search-review` and loaded back with
+   `GET /v1/feedback/search-review?query=…`.
+
+## Answer flow
 
 1. **Scope.** The request targets selected videos, or all videos. For all
    videos, the multi-vector router ranks videos by identity, overview, and
@@ -56,7 +69,9 @@ every page shows the same navigation.
 ![Shared lab navigation with the Tools menu open on the Search page](media/lab-navigation.png)
 
 `local_preview/react_shell/` is the React source for Library, Search, Study, and
-Local video. `npm run
+Local video: `library.jsx` (Library), `workbench.jsx` (Search), `lab.jsx`
+(shared helpers), and `App.jsx` (routing, the Answer flow, Study, and Local
+video). `npm run
 build:web` writes the bundle to `local_preview/web/assets/`, and CI fails if the
 committed bundle does not match the source. The other pages are plain HTML and
 JavaScript in `local_preview/web/`. Running the app does not require
