@@ -1,3 +1,5 @@
+import { renderLabNav } from "./lab-nav.js";
+
 const INGEST_UNLOCK_KEY = "yt_rag_ingest_unlocked";
 if (localStorage.getItem(INGEST_UNLOCK_KEY) !== "1") {
   window.location.replace("./index.html#/ingest");
@@ -13,9 +15,8 @@ const DEFAULT_LOCALE = "en-US";
 // ------------------------------------------------------------------
 const I18N = {
   "en-US": {
-    pageTitle: "YouTube Transcript Retrieval Lab | Chunking",
+    pageTitle: "Retrieval Lab | Chunking",
     localeLabel: "Language",
-    eyebrowText: "YouTube Transcript Retrieval Lab",
     heroTitle: "Chunking Strategy Comparison",
     heroSubtitle: "Compare chunking strategies side-by-side and measure their effect on search results.",
     videoHeading: "Video & Strategy Selection",
@@ -51,17 +52,10 @@ const I18N = {
     paramMaxChars: "Max Chars",
     paramTokenCount: "Token Count",
     paramOverlapFraction: "Overlap Fraction",
-    navIngest: "Ingest",
-    navStudio: "Studio",
-    navReviews: "Reviews",
-    navEvidence: "Evidence",
-    navEvaluation: "Evaluation",
-    navChunking: "Chunking",
   },
   "ja-JP": {
-    pageTitle: "YouTube Transcript Retrieval Lab | チャンキング",
+    pageTitle: "Retrieval Lab | チャンキング",
     localeLabel: "言語",
-    eyebrowText: "YouTube Transcript Retrieval Lab",
     heroTitle: "チャンキング戦略比較",
     heroSubtitle: "チャンキング戦略を並べて比較し、検索結果への影響を測定します。",
     videoHeading: "動画と戦略の選択",
@@ -97,12 +91,6 @@ const I18N = {
     paramMaxChars: "最大文字数",
     paramTokenCount: "トークン数",
     paramOverlapFraction: "オーバーラップ率",
-    navIngest: "取り込み",
-    navStudio: "Studio",
-    navReviews: "レビュー",
-    navEvidence: "エビデンス",
-    navEvaluation: "評価",
-    navChunking: "チャンキング",
   },
 };
 
@@ -113,7 +101,6 @@ const els = {
   localeSelect: document.getElementById("localeSelect"),
   localeLabel: document.getElementById("localeLabel"),
   homeBrandLink: document.getElementById("homeBrandLink"),
-  eyebrowText: document.getElementById("eyebrowText"),
   heroTitle: document.getElementById("heroTitle"),
   heroSubtitle: document.getElementById("heroSubtitle"),
   videoHeading: document.getElementById("videoHeading"),
@@ -153,19 +140,6 @@ const els = {
   exportDesc: document.getElementById("exportDesc"),
   exportBtn: document.getElementById("exportBtn"),
   exportStatus: document.getElementById("exportStatus"),
-  // nav
-  homeNavLink: document.getElementById("homeNavLink"),
-  studioNavLink: document.getElementById("studioNavLink"),
-  reviewsNavLink: document.getElementById("reviewsNavLink"),
-  evidenceNavLink: document.getElementById("evidenceNavLink"),
-  evaluationNavLink: document.getElementById("evaluationNavLink"),
-  chunkingNavLink: document.getElementById("chunkingNavLink"),
-  mobileHomeNavText: document.getElementById("mobileHomeNavText"),
-  mobileStudioNavText: document.getElementById("mobileStudioNavText"),
-  mobileReviewsNavText: document.getElementById("mobileReviewsNavText"),
-  mobileEvidenceNavText: document.getElementById("mobileEvidenceNavText"),
-  mobileEvaluationNavText: document.getElementById("mobileEvaluationNavText"),
-  mobileChunkingNavText: document.getElementById("mobileChunkingNavText"),
 };
 
 // ------------------------------------------------------------------
@@ -179,13 +153,6 @@ let lastSearchK = 5;
 
 function t(key) {
   return (I18N[currentLocale] || I18N[DEFAULT_LOCALE])[key] || key;
-}
-
-function setNavLabel(el, text) {
-  if (!el) return;
-  const label = el.querySelector(".nav-label-text");
-  if (label) { label.textContent = text; return; }
-  el.textContent = text;
 }
 
 async function apiRequest(path, { method = "GET", body } = {}) {
@@ -550,8 +517,7 @@ function exportToEvaluation() {
 function applyLocale() {
   document.title = t("pageTitle");
   if (els.localeLabel) els.localeLabel.textContent = t("localeLabel");
-  if (els.homeBrandLink) els.homeBrandLink.setAttribute("aria-label", t("navIngest"));
-  if (els.eyebrowText) els.eyebrowText.textContent = t("eyebrowText");
+  renderLabNav({ active: "chunking", locale: currentLocale });
 
   const textKeys = [
     "heroTitle", "heroSubtitle", "videoHeading", "videoSelectLabel",
@@ -566,20 +532,6 @@ function applyLocale() {
   if (els.previewBtn) els.previewBtn.textContent = t("previewBtn");
   if (els.searchBtn) els.searchBtn.textContent = t("searchBtn");
   if (els.exportBtn) els.exportBtn.textContent = t("exportBtn");
-
-  // nav labels
-  setNavLabel(els.homeNavLink, t("navIngest"));
-  setNavLabel(els.studioNavLink, t("navStudio"));
-  setNavLabel(els.reviewsNavLink, t("navReviews"));
-  setNavLabel(els.evidenceNavLink, t("navEvidence"));
-  setNavLabel(els.evaluationNavLink, t("navEvaluation"));
-  setNavLabel(els.chunkingNavLink, t("navChunking"));
-  if (els.mobileHomeNavText) els.mobileHomeNavText.textContent = t("navIngest");
-  if (els.mobileStudioNavText) els.mobileStudioNavText.textContent = t("navStudio");
-  if (els.mobileReviewsNavText) els.mobileReviewsNavText.textContent = t("navReviews");
-  if (els.mobileEvidenceNavText) els.mobileEvidenceNavText.textContent = t("navEvidence");
-  if (els.mobileEvaluationNavText) els.mobileEvaluationNavText.textContent = t("navEvaluation");
-  if (els.mobileChunkingNavText) els.mobileChunkingNavText.textContent = t("navChunking");
 
   // re-render strategy param labels
   renderParams(els.strategyAParams, els.strategyASelect.value);

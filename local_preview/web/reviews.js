@@ -1,3 +1,5 @@
+import { renderLabNav } from "./lab-nav.js";
+
 const INGEST_UNLOCK_KEY = "yt_rag_ingest_unlocked";
 if (localStorage.getItem(INGEST_UNLOCK_KEY) !== "1") {
   window.location.replace("./index.html#/ingest");
@@ -11,19 +13,6 @@ const els = {
   localeSelect: document.getElementById("localeSelect"),
   localeLabel: document.getElementById("localeLabel"),
   homeBrandLink: document.getElementById("homeBrandLink"),
-  eyebrowText: document.getElementById("eyebrowText"),
-  homeNavLink: document.getElementById("homeNavLink"),
-  studioNavLink: document.getElementById("studioNavLink"),
-  reviewsNavLink: document.getElementById("reviewsNavLink"),
-  evidenceNavLink: document.getElementById("evidenceNavLink"),
-  evaluationNavLink: document.getElementById("evaluationNavLink"),
-  chunkingNavLink: document.getElementById("chunkingNavLink"),
-  mobileHomeNavText: document.getElementById("mobileHomeNavText"),
-  mobileStudioNavText: document.getElementById("mobileStudioNavText"),
-  mobileReviewsNavText: document.getElementById("mobileReviewsNavText"),
-  mobileEvidenceNavText: document.getElementById("mobileEvidenceNavText"),
-  mobileEvaluationNavText: document.getElementById("mobileEvaluationNavText"),
-  mobileChunkingNavText: document.getElementById("mobileChunkingNavText"),
   heroTitle: document.getElementById("heroTitle"),
   heroSubtitle: document.getElementById("heroSubtitle"),
   filtersHeading: document.getElementById("filtersHeading"),
@@ -59,17 +48,10 @@ const els = {
 
 const I18N = {
   "en-US": {
-    pageTitle: "YouTube Transcript Retrieval Lab | Reviews",
+    pageTitle: "Retrieval Lab | Search feedback",
     localeLabel: "Language",
-    navIngest: "Ingest",
-    navStudio: "Studio",
-    navReviews: "Reviews",
-    navEvidence: "Evidence",
-    eyebrowText: "YouTube Transcript Retrieval Lab",
-    navEvaluation: "Evaluation",
-    navChunking: "Chunking",
-    heroTitle: "Review Analytics",
-    heroSubtitle: "Inspect reviewed chunks, filter by video, and export data.",
+    heroTitle: "Search feedback",
+    heroSubtitle: "Inspect relevance feedback on search results, filter by video, and export it.",
     filtersHeading: "Filters",
     filterVideoLabel: "Video",
     filterLabelLabel: "Review Label",
@@ -102,17 +84,10 @@ const I18N = {
     partialVideoLoadError: "Video summary load failed. Showing reviews without video filter stats.",
   },
   "ja-JP": {
-    pageTitle: "YouTube Transcript Retrieval Lab | レビュー",
+    pageTitle: "Retrieval Lab | 検索フィードバック",
     localeLabel: "言語",
-    navIngest: "取り込み",
-    navStudio: "Studio",
-    navReviews: "レビュー",
-    navEvidence: "エビデンス",
-    eyebrowText: "YouTube Transcript Retrieval Lab",
-    navEvaluation: "評価",
-    navChunking: "チャンキング",
-    heroTitle: "レビュー分析",
-    heroSubtitle: "レビュー済みチャンクを確認し、動画で絞り込み、CSVをエクスポートします。",
+    heroTitle: "検索フィードバック",
+    heroSubtitle: "検索結果への関連性フィードバックを確認し、動画で絞り込み、CSVをエクスポートします。",
     filtersHeading: "フィルター",
     filterVideoLabel: "動画",
     filterLabelLabel: "レビューラベル",
@@ -196,18 +171,6 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll("\"", "&quot;")
     .replaceAll("'", "&#39;");
-}
-
-function setNavLabel(element, text) {
-  if (!element) {
-    return;
-  }
-  const label = element.querySelector(".nav-label-text");
-  if (label) {
-    label.textContent = text;
-    return;
-  }
-  element.textContent = text;
 }
 
 function formatSeconds(sec) {
@@ -435,32 +398,7 @@ function applyLocale(locale) {
 
   els.localeSelect.value = locale;
   els.localeLabel.textContent = t("localeLabel");
-  els.homeBrandLink?.setAttribute("aria-label", t("navIngest"));
-  els.eyebrowText.textContent = t("eyebrowText");
-  setNavLabel(els.homeNavLink, t("navIngest"));
-  setNavLabel(els.studioNavLink, t("navStudio"));
-  setNavLabel(els.reviewsNavLink, t("navReviews"));
-  setNavLabel(els.evidenceNavLink, t("navEvidence"));
-  setNavLabel(els.evaluationNavLink, t("navEvaluation"));
-  setNavLabel(els.chunkingNavLink, t("navChunking"));
-  if (els.mobileHomeNavText) {
-    els.mobileHomeNavText.textContent = t("navIngest");
-  }
-  if (els.mobileStudioNavText) {
-    els.mobileStudioNavText.textContent = t("navStudio");
-  }
-  if (els.mobileReviewsNavText) {
-    els.mobileReviewsNavText.textContent = t("navReviews");
-  }
-  if (els.mobileEvidenceNavText) {
-    els.mobileEvidenceNavText.textContent = t("navEvidence");
-  }
-  if (els.mobileEvaluationNavText) {
-    els.mobileEvaluationNavText.textContent = t("navEvaluation");
-  }
-  if (els.mobileChunkingNavText) {
-    els.mobileChunkingNavText.textContent = t("navChunking");
-  }
+  renderLabNav({ active: "feedback", locale: currentLocale });
   els.heroTitle.textContent = t("heroTitle");
   els.heroSubtitle.textContent = t("heroSubtitle");
   els.filtersHeading.querySelector("span").textContent = t("filtersHeading");

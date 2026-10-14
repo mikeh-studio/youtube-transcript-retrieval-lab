@@ -37,7 +37,7 @@ The local API exposes OCR through explicit local-file routes:
 - `POST /v1/search-multimodal` searches transcript, OCR, or merged evidence.
 - `POST /v1/ask-multimodal` answers from the selected evidence mode.
 
-The UI keeps OCR under **Local Video (Advanced)** in Ingest Gateway. Q&A Studio exposes the evidence mode in the Ask/Search workbench.
+The UI keeps OCR under **Tools → Local video**. Search exposes the evidence mode in the retrieval workbench.
 
 ## Evidence Shape
 

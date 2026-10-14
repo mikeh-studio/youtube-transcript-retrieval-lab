@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Retrieval Lab | Search (mock)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0f0f0f; --surface: #161616; --surface-2: #202020; --surface-3: #2a2a2a;
+    --line: #323232; --line-soft: #262626; --text: #f3f3f3; --muted: #a7a7a7;
+    --red: #ff1f45; --blue: #65bfff; --green: #4fd18b; --amber: #f2b84b;
+    --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 "Roboto", "Noto Sans JP", sans-serif; }
+  button { font: inherit; color: inherit; cursor: pointer; }
+
+  .appbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 20px; border-bottom: 1px solid var(--line-soft); background: #0b0b0b; position: sticky; top: 0; z-index: 5; }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .brand-mark { width: 26px; height: 18px; border-radius: 5px; background: var(--red); position: relative; }
+  .brand-mark::after { content: ""; position: absolute; left: 10px; top: 4px; border-left: 8px solid #fff; border-top: 5px solid transparent; border-bottom: 5px solid transparent; }
+  .brand b { display: block; font-size: 15px; }
+  .brand span { color: var(--muted); font-size: 12px; }
+  .nav { display: flex; gap: 6px; flex-wrap: wrap; }
+  .nav a { padding: 6px 14px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--line); color: var(--text); text-decoration: none; font-size: 13px; font-weight: 500; }
+  .nav a.active { border-color: var(--blue); box-shadow: inset 0 0 0 1px var(--blue); }
+
+  .page { max-width: 1320px; margin: 0 auto; padding: 20px; }
+  .head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
+  .head h1 { margin: 0; font-size: 28px; }
+  .head p { margin: 4px 0 0; color: var(--muted); }
+  .btn { padding: 8px 14px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface-2); font-weight: 500; }
+  .btn.primary { background: var(--red); border-color: var(--red); color: #fff; }
+
+  .panel { background: var(--surface); border: 1px solid var(--line-soft); border-radius: 14px; padding: 16px; }
+  .query { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; }
+  .query input { width: 100%; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface-2); color: var(--text); font: inherit; font-size: 15px; }
+  .scope { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; align-items: center; }
+  .chip { display: inline-flex; gap: 6px; align-items: center; padding: 4px 10px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+  .chip b { color: var(--text); font-weight: 500; }
+  .chip.catalog { border-color: #2c5b53; color: #9fe1cb; }
+  .chip.catalog b { color: #c8f2e2; }
+
+  .grid { display: grid; grid-template-columns: 290px 1fr; gap: 16px; margin-top: 16px; }
+  @media (max-width: 960px) { .grid { grid-template-columns: 1fr; } }
+  .side h2, .main h2 { margin: 0 0 10px; font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 500; }
+  .run { border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin-bottom: 10px; background: var(--surface-2); }
+  .run-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .run-tag { font-family: var(--mono); font-size: 12px; padding: 2px 8px; border-radius: 6px; }
+  .tag-a { background: rgba(101,191,255,.14); color: var(--blue); }
+  .tag-b { background: rgba(242,184,75,.14); color: var(--amber); }
+  .field { display: flex; justify-content: space-between; gap: 8px; padding: 5px 0; border-top: 1px solid var(--line-soft); font-size: 13px; }
+  .field span:first-child { color: var(--muted); }
+  .corpus { display: grid; gap: 6px; margin-top: 14px; }
+  .corpus-row { display: flex; justify-content: space-between; align-items: baseline; padding: 8px 10px; border-radius: 10px; background: var(--surface-2); font-size: 13px; }
+  .corpus-row strong { font-size: 18px; }
+  .corpus-row small { color: var(--muted); display: block; }
+  .arrow { text-align: center; color: var(--muted); font-size: 12px; line-height: 1; }
+
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line-soft); margin-bottom: 14px; }
+  .tabs button { background: none; border: 0; padding: 10px 14px; color: var(--muted); border-bottom: 2px solid transparent; font-weight: 500; }
+  .tabs button.active { color: var(--text); border-bottom-color: var(--red); }
+  .metrics { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+  .metric { flex: 1 1 140px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--line-soft); }
+  .metric small { color: var(--muted); display: block; font-size: 12px; }
+  .metric .vals { font-family: var(--mono); font-size: 15px; margin-top: 2px; }
+  .metric .a { color: var(--blue); } .metric .b { color: var(--amber); }
+  .note { color: var(--muted); font-size: 12px; margin: -6px 0 12px; }
+
+  .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 720px) { .compare { grid-template-columns: 1fr; } }
+  .col-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-weight: 500; }
+  .hit { border: 1px solid var(--line-soft); background: var(--surface-2); border-radius: 12px; padding: 10px 12px; margin-bottom: 8px; }
+  .hit.relevant { border-color: #2f6b4a; }
+  .hit.notrel { opacity: .6; }
+  .hit-top { display: flex; gap: 8px; align-items: baseline; }
+  .rank { font-family: var(--mono); color: var(--muted); width: 18px; flex: none; }
+  .hit-title { font-weight: 500; flex: 1; }
+  .score { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+  .delta { font-family: var(--mono); font-size: 11px; padding: 1px 6px; border-radius: 6px; }
+  .up { background: rgba(79,209,139,.14); color: var(--green); }
+  .down { background: rgba(255,31,69,.14); color: #ff7a8f; }
+  .new { background: rgba(242,184,75,.14); color: var(--amber); }
+  .meta { display: flex; gap: 8px; flex-wrap: wrap; margin: 4px 0 6px 26px; font-size: 12px; color: var(--muted); }
+  .sig { font-family: var(--mono); font-size: 11px; padding: 0 6px; border-radius: 5px; border: 1px solid var(--line); }
+  .snippet { margin: 0 0 8px 26px; font-size: 13px; }
+  .label-row { display: flex; gap: 6px; margin-left: 26px; }
+  .label-row button { padding: 3px 10px; border-radius: 999px; background: transparent; border: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+  .label-row button.on-rel { border-color: var(--green); color: var(--green); }
+  .label-row button.on-not { border-color: #ff7a8f; color: #ff7a8f; }
+
+  .trace { margin-top: 16px; }
+  .steps { list-style: none; margin: 0; padding: 0; counter-reset: step; }
+  .steps li { display: grid; grid-template-columns: 28px 1fr auto; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line-soft); align-items: start; }
+  .steps li::before { counter-increment: step; content: counter(step); width: 22px; height: 22px; border-radius: 50%; background: var(--surface-3); display: grid; place-items: center; font-size: 12px; font-family: var(--mono); }
+  .steps .why { color: var(--muted); font-size: 12px; }
+  .steps .ms { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+  .ok { color: var(--green); } .weak { color: var(--amber); }
+
+  .answer { margin-top: 16px; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .answer p { margin: 0; color: var(--muted); }
+  .callouts { margin-top: 28px; border-top: 1px dashed var(--line); padding-top: 16px; display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+  .callout { font-size: 13px; color: var(--muted); }
+  .callout b { color: var(--text); display: block; margin-bottom: 2px; }
+  .mock-flag { position: fixed; right: 12px; bottom: 12px; background: var(--amber); color: #2a1a00; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 999px; }
+</style>
+</head>
+<body>
+<header class="appbar">
+  <div class="brand"><div class="brand-mark" aria-hidden="true"></div><div><b>Retrieval Lab</b><span>YouTube transcripts</span></div></div>
+  <nav class="nav" aria-label="Primary">
+    <a href="#">Catalog</a><a href="#">Library</a><a href="#" class="active">Search</a><a href="#">Evaluate</a><a href="#">Tools ▾</a>
+  </nav>
+</header>
+
+<main class="page">
+  <div class="head">
+    <div>
+      <h1>Search</h1>
+      <p>Run a query against the indexed library, compare two retrieval setups, and label what comes back.</p>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn">Save to query set</button>
+      <button class="btn">Open in Evaluate</button>
+    </div>
+  </div>
+
+  <section class="panel">
+    <div class="query">
+      <input value="アニメ制作で作画監督は何をチェックしている？" aria-label="Query">
+      <button class="btn primary">Run search</button>
+    </div>
+    <div class="scope">
+      <span class="chip">Scope <b>All indexed · 4 videos</b></span>
+      <span class="chip">Language <b>ja</b></span>
+      <span class="chip catalog">Catalog topic <b>Anime</b> · library/v1</span>
+      <span class="chip catalog">Review status <b>eligible</b></span>
+      <span class="chip">+ Filter</span>
+    </div>
+  </section>
+
+  <div class="grid">
+    <aside class="side">
+      <h2>Retrieval setup</h2>
+      <div class="run">
+        <div class="run-head"><span class="run-tag tag-a">Run A</span><span style="color:var(--muted);font-size:12px">baseline</span></div>
+        <div class="field"><span>Strategy</span><span>Hybrid</span></div>
+        <div class="field"><span>Profile</span><span>baseline_rrf</span></div>
+        <div class="field"><span>Reranker</span><span>Off</span></div>
+        <div class="field"><span>Video routing</span><span>multi_vector · top 3</span></div>
+        <div class="field"><span>Top K</span><span>5</span></div>
+      </div>
+      <div class="run">
+        <div class="run-head"><span class="run-tag tag-b">Run B</span><span style="color:var(--muted);font-size:12px">candidate</span></div>
+        <div class="field"><span>Strategy</span><span>Agentic</span></div>
+        <div class="field"><span>Tools</span><span>BM25 · E5 · context</span></div>
+        <div class="field"><span>Reranker</span><span>Cross-encoder</span></div>
+        <div class="field"><span>Video routing</span><span>multi_vector · top 3</span></div>
+        <div class="field"><span>Top K</span><span>5</span></div>
+      </div>
+      <button class="btn" style="width:100%">+ Swap or edit runs</button>
+
+      <h2 style="margin-top:20px">Corpus in scope</h2>
+      <div class="corpus">
+        <div class="corpus-row"><div>Catalog<small>Discovered, metadata only</small></div><strong>15</strong></div>
+        <div class="arrow">↓ reviewed and indexed</div>
+        <div class="corpus-row"><div>Library<small>Indexed videos in scope</small></div><strong>4</strong></div>
+        <div class="arrow">↓ chunked</div>
+        <div class="corpus-row"><div>Chunks<small>Searchable passages</small></div><strong>312</strong></div>
+      </div>
+    </aside>
+
+    <section class="main panel">
+      <div class="tabs" role="tablist" aria-label="Result views">
+        <button class="active" role="tab" aria-selected="true">Compare A vs B</button>
+        <button role="tab">Run A only</button>
+        <button role="tab">Run B only</button>
+        <button role="tab">Answer</button>
+      </div>
+
+      <div class="metrics">
+        <div class="metric"><small>Labeled</small><div class="vals">4 of 7 unique hits</div></div>
+        <div class="metric"><small>Precision@5</small><div class="vals"><span class="a">A 0.40</span> · <span class="b">B 0.60</span></div></div>
+        <div class="metric"><small>nDCG@5</small><div class="vals"><span class="a">A 0.52</span> · <span class="b">B 0.81</span></div></div>
+        <div class="metric"><small>Overlap</small><div class="vals">3 of 5 shared</div></div>
+      </div>
+      <p class="note">Scores use your labels on this query only. Save it to a query set to track it across runs.</p>
+
+      <div class="compare">
+        <div>
+          <div class="col-head"><span class="run-tag tag-a">A</span> Hybrid · baseline_rrf</div>
+          <div class="hit relevant">
+            <div class="hit-top"><span class="rank">1</span><span class="hit-title">アニメ制作の現場 — インタビュー</span><span class="score">0.0328</span></div>
+            <div class="meta"><span>12:40–13:25</span><span>Studio channel</span><span class="sig">dense</span><span class="sig">bm25</span></div>
+            <p class="snippet">作画監督は原画のキャラクターの顔や線の統一感を最終的に確認して…</p>
+            <div class="label-row"><button class="on-rel">Relevant</button><button>Not relevant</button></div>
+          </div>
+          <div class="hit notrel">
+            <div class="hit-top"><span class="rank">2</span><span class="hit-title">アニメ制作の現場 — インタビュー</span><span class="score">0.0317</span></div>
+            <div class="meta"><span>03:05–03:50</span><span>Studio channel</span><span class="sig">bm25</span></div>
+            <p class="snippet">制作進行はスケジュールと各セクションの連絡を担当していて…</p>
+            <div class="label-row"><button>Relevant</button><button class="on-not">Not relevant</button></div>
+          </div>
+          <div class="hit">
+            <div class="hit-top"><span class="rank">3</span><span class="hit-title">アニメ制作の現場 — Synthetic interview</span><span class="score">0.0301</span></div>
+            <div class="meta"><span>21:10–21:55</span><span>Review channel</span><span class="sig">dense</span></div>
+            <p class="snippet">色彩設計との打ち合わせでは、作画の段階で影の位置を…</p>
+            <div class="label-row"><button>Relevant</button><button>Not relevant</button></div>
+          </div>
+        </div>
+        <div>
+          <div class="col-head"><span class="run-tag tag-b">B</span> Agentic · cross-encoder</div>
+          <div class="hit relevant">
+            <div class="hit-top"><span class="rank">1</span><span class="hit-title">アニメ制作の現場 — インタビュー</span><span class="delta up">=</span><span class="score">0.91</span></div>
+            <div class="meta"><span>12:40–13:25</span><span>Studio channel</span><span class="sig">e5</span><span class="sig">context ±30s</span></div>
+            <p class="snippet">作画監督は原画のキャラクターの顔や線の統一感を最終的に確認して…</p>
+            <div class="label-row"><button class="on-rel">Relevant</button><button>Not relevant</button></div>
+          </div>
+          <div class="hit relevant">
+            <div class="hit-top"><span class="rank">2</span><span class="hit-title">アニメ制作の現場 — インタビュー</span><span class="delta new">new</span><span class="score">0.84</span></div>
+            <div class="meta"><span>13:25–14:05</span><span>Studio channel</span><span class="sig">context</span></div>
+            <p class="snippet">修正指示は赤ペンで原画に直接入れて、動画の段階でもう一度…</p>
+            <div class="label-row"><button class="on-rel">Relevant</button><button>Not relevant</button></div>
+          </div>
+          <div class="hit">
+            <div class="hit-top"><span class="rank">3</span><span class="hit-title">アニメ制作の現場 — Synthetic interview</span><span class="delta up">=</span><span class="score">0.62</span></div>
+            <div class="meta"><span>21:10–21:55</span><span>Review channel</span><span class="sig">e5</span></div>
+            <p class="snippet">色彩設計との打ち合わせでは、作画の段階で影の位置を…</p>
+            <div class="label-row"><button>Relevant</button><button>Not relevant</button></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="trace">
+        <h2>How Run B found it</h2>
+        <ol class="steps">
+          <li><div><b>Routed to 3 of 4 videos</b><div class="why">Identity, overview, and section vectors + lexical RRF. Dropped: Building useful AI products.</div></div><span class="ms">18 ms</span></li>
+          <li><div><b>BM25 (Japanese)</b> <span class="weak">weak evidence</span><div class="why">Top score 0.41 below the 0.55 sufficiency threshold.</div></div><span class="ms">6 ms</span></li>
+          <li><div><b>Switched to E5 + FAISS</b> <span class="ok">sufficient</span><div class="why">3 chunks above threshold in one video.</div></div><span class="ms">41 ms</span></li>
+          <li><div><b>read_context ±30s</b> around 12:40<div class="why">Added the following passage (13:25–14:05) from the canonical transcript.</div></div><span class="ms">2 ms</span></li>
+          <li><div><b>Cross-encoder rerank</b><div class="why">mmarco-mMiniLMv2 rescored 8 candidates.</div></div><span class="ms">120 ms</span></li>
+        </ol>
+      </div>
+
+      <div class="answer panel" style="background:var(--surface-2)">
+        <p>Answer from Run B evidence with citations · ChatGPT gpt-5.4-mini</p>
+        <button class="btn">Generate answer</button>
+      </div>
+    </section>
+  </div>
+
+  <section class="callouts" aria-label="Design notes">
+    <div class="callout"><b>Compare by default</b>A/B columns replace the single result list. Rank changes (=, ▲, new) show what the candidate strategy changed.</div>
+    <div class="callout"><b>Label inline</b>Relevant / Not relevant on each hit feed the same labels Evaluate uses, replacing the separate Search feedback page.</div>
+    <div class="callout"><b>Catalog as scope</b>Catalog topic and review status narrow the search to indexed videos linked to reviewed catalog items. Discovered-only items are never searched.</div>
+    <div class="callout"><b>Trace up front</b>The agentic decision trace is visible, not hidden in a JSON panel. Answering is the last step, not the first.</div>
+  </section>
+</main>
+<div class="mock-flag">Mock · static data</div>
+<script>
+  document.querySelectorAll(".label-row").forEach((row) => {
+    const [rel, not] = row.querySelectorAll("button");
+    const hit = row.closest(".hit");
+    rel.addEventListener("click", () => { rel.classList.toggle("on-rel"); not.classList.remove("on-not"); hit.classList.toggle("relevant", rel.classList.contains("on-rel")); hit.classList.remove("notrel"); });
+    not.addEventListener("click", () => { not.classList.toggle("on-not"); rel.classList.remove("on-rel"); hit.classList.toggle("notrel", not.classList.contains("on-not")); hit.classList.remove("relevant"); });
+  });
+</script>
+</body>
+</html>

@@ -3,274 +3,120 @@
 [![CI](https://github.com/mikeh-studio/youtube-transcript-retrieval-lab/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/mikeh-studio/youtube-transcript-retrieval-lab/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Local-first transcript retrieval workbench that compares semantic, lexical,
-hybrid, and deterministic agentic search before the answer layer. It preserves
-the raw timestamped transcript as evidence, derives E5 + FAISS and Japanese
-BM25 search views, and uses retrieved evidence for citation-backed Q&A.
+A local retrieval lab for English and Japanese YouTube transcripts. Discover
+videos into a catalog, index the ones you review, run retrieval strategies side
+by side, and measure the results with labels and ranking metrics. The raw
+timestamped transcript stays the source of truth for every result and answer.
 
-Compare retrieval runs with Precision@K, Recall@K, MRR, and nDCG@K, then inspect
-the timestamped evidence behind each result. The included eight-query benchmark
-is a deterministic regression fixture with hand-authored dense scores; it does
-not establish real-world retrieval quality. Baseline RRF remains the default
-hybrid profile. See the [benchmark details](evals/README.md#fixture-result).
+![Evaluate workspace scoring retrieval runs with Precision@K, Recall@K, MRR, and nDCG@K](docs/media/02-evaluation-metrics.png)
 
-![Evaluation Metrics](docs/media/02-evaluation-metrics.png)
+## The lab
 
-Catalog browsing is available through the optional [local catalog browser](docs/catalog-browser.md).
+The app follows the lab workflow: **Catalog → Library → Search → Evaluate**.
 
-## Quick Start
+| Page | What it does |
+| --- | --- |
+| **Catalog** | Browses discovered videos with metadata, catalog topics, review status, and provenance. Read-only and optional; it reads from a separate private catalog service. Cataloged videos are not searchable until they are indexed. |
+| **Library** | Indexes YouTube videos and playlists: canonical timestamped transcripts, chunks, and search indexes. |
+| **Search** | Runs hybrid, dense, lexical, or agentic retrieval across the library or chosen videos, shows how results were found, and can generate a cited answer or abstain. |
+| **Evaluate** | Builds query sets, labels results, scores runs with Precision@K, Recall@K, MRR, and nDCG@K, compares runs, and drafts datasets with Codex CLI for human review. |
+| **Tools** | Chunking (compare chunking strategies), Data quality (evidence curation reports), Search feedback (relevance feedback from Search), Local video (OCR for files you own), and Study. |
 
-Python 3.11 is used in CI. From the repository root, create an isolated environment
-(macOS/Linux commands):
+**Study** is a secondary tool: flashcards, topic maps, and five-theme summaries
+built from an indexed video. Answers and study material can use OpenAI,
+Anthropic, or Sakana AI; search, evaluation, and the offline benchmark need no
+provider key.
+
+## Engineering and evaluation
+
+```text
+Catalog (optional private service, metadata only)
+  -> reviewed videos are indexed into the Library
+YouTube transcript + metadata
+  -> canonical timestamped segments (kept as evidence)
+  -> chunks -> E5 + FAISS (semantic) and BM25 (keyword, Japanese-aware)
+  -> optional video routing -> hybrid or agentic retrieval -> optional reranking
+  -> ranked evidence, labels and metrics, or a grounded answer with citations
+```
+
+- **Catalog boundary:** the public app reads a validated, read-only projection
+  of catalog records through a loopback proxy. Discovery, review, and storage
+  live in the private service; cataloging never triggers ingestion.
+- **Retrieval:** dense, lexical, and hybrid (reciprocal-rank fusion) search,
+  with an opt-in multilingual cross-encoder reranker.
+- **Agentic search:** a deterministic, provider-free policy chooses semantic or
+  keyword search, switches tools when evidence is weak, and reads nearby
+  transcript context. Every decision is returned as an inspectable trace.
+- **Video routing:** a multi-vector router ranks videos by identity, overview,
+  and section vectors before chunk retrieval.
+- **Grounding:** answers must cite retrieved chunks; an evidence-sufficiency
+  gate, which also handles cross-lingual matches, decides when to abstain.
+- **Evaluation:** an offline benchmark compares retrieval strategies, and the
+  Evaluate page supports human labels and run comparisons. The checked-in
+  benchmark is an eight-query regression fixture with hand-authored dense scores;
+  it tests the harness and does not establish real-world retrieval quality.
+
+Read the [architecture](docs/architecture.md), [retrieval guide](docs/retrieval.md),
+[evaluation guide](docs/evaluation.md), [catalog browser](docs/catalog-browser.md), and
+[configuration reference](docs/configuration.md).
+
+## How the project evolved
+
+1. **Retrieval workbench:** transcript ingestion, summaries, and chunk
+   comparison grew into an evaluation workspace with labels, ranking metrics,
+   and an offline benchmark. See the [Chunking Lab](https://github.com/mikeh-studio/youtube-transcript-retrieval-lab/pull/6)
+   and [offline benchmark](https://github.com/mikeh-studio/youtube-transcript-retrieval-lab/pull/20).
+2. **Grounded answers:** Q&A moved from free-form answers to citations,
+   confidence levels, and abstention, then gained a cross-lingual evidence gate.
+   See [citation-backed answers](https://github.com/mikeh-studio/youtube-transcript-retrieval-lab/pull/10)
+   and [cross-lingual grounding](https://github.com/mikeh-studio/youtube-transcript-retrieval-lab/pull/36).
+3. **Agentic retrieval:** an LLM retry loop became a deterministic tool policy
+   that is compared against semantic search in the same benchmark. See the
+   [agentic loop](https://github.com/mikeh-studio/youtube-transcript-retrieval-lab/pull/26),
+   [deterministic rewriting](https://github.com/mikeh-studio/youtube-transcript-retrieval-lab/pull/30),
+   and [semantic vs. agentic comparison](https://github.com/mikeh-studio/youtube-transcript-retrieval-lab/pull/38).
+4. **Library-scale search:** questions can be scoped to selected videos or routed
+   across the whole library. See [video scope](https://github.com/mikeh-studio/youtube-transcript-retrieval-lab/pull/31)
+   and [video-first routing](https://github.com/mikeh-studio/youtube-transcript-retrieval-lab/pull/35).
+5. **Study and evaluation tooling:** the Study tool, human-reviewed evaluation
+   datasets drafted with Codex CLI, local request protection, and a versioned
+   library export. See [Study Studio](https://github.com/mikeh-studio/youtube-transcript-retrieval-lab/pull/22),
+   [dataset generator](https://github.com/mikeh-studio/youtube-transcript-retrieval-lab/pull/37),
+   [request boundary](https://github.com/mikeh-studio/youtube-transcript-retrieval-lab/pull/41),
+   and [library export](https://github.com/mikeh-studio/youtube-transcript-retrieval-lab/pull/42).
+6. **Catalog-first lab:** a read-only catalog of discovered videos and a
+   navigation built around the lab workflow. See the
+   [catalog browser](https://github.com/mikeh-studio/youtube-transcript-retrieval-lab/pull/43).
+
+### Next: Search as the lab workbench
+
+Search will compare a baseline and a candidate run side by side by default,
+take relevance labels on each result (folding Search feedback into Evaluate),
+filter by catalog topic and review status, and show the retrieval trace before
+any answer. See the [design mock](docs/design/search-workbench.png).
+
+Release notes live in [`CHANGELOG.md`](CHANGELOG.md); planned work lives in [`TODOS.md`](TODOS.md).
+
+## Run locally
+
+Use Python 3.11 (the CI version). From the repository root:
 
 ```bash
 python3.11 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
-# Preserve any existing machine-specific configuration.
 [ -f .env.local ] || cp .env.example .env.local
-```
-
-Transcript search and the offline benchmark do not require an answer-provider
-key. For citation-backed Q&A, add the key for your selected provider to
-`.env.local` before starting the server:
-
-```env
-OPENAI_API_KEY=your_openai_api_key_here
-ANTHROPIC_API_KEY=your_anthropic_api_key_here
-SAKANA_API_KEY=your_sakana_api_key_here
-```
-
-Optional Sakana overrides:
-
-```env
-SAKANA_MODEL=fugu
-SAKANA_BASE_URL=https://api.sakana.ai/v1
-```
-
-If `OPENAI_MODEL` is not set, ChatGPT calls default to `gpt-5.4-mini`.
-
-Start the API and UI together:
-
-```bash
+# Optional: add OPENAI_API_KEY, ANTHROPIC_API_KEY, or SAKANA_API_KEY for answers.
 python local_preview/local_api.py
 ```
 
-Open the [main console](http://127.0.0.1:8000/index.html), ingest a video with an
-available transcript, then search its evidence. Use the real API server for
-these workflows; a static file server cannot ingest or search videos.
+Open the [Library](http://127.0.0.1:8000/index.html), index a video with an
+available transcript, then use Search and Evaluate. To browse the catalog, set
+`CONTENT_LIBRARY_CATALOG_URL`; see the [catalog browser](docs/catalog-browser.md). The first start downloads
+the `intfloat/multilingual-e5-large` embedding model (about 2.2 GB). To start
+without it, see [offline mode](docs/configuration.md#offline-mode).
 
-| Workspace | Use it to |
-| --- | --- |
-| [Main console](http://127.0.0.1:8000/index.html) | Ingest, search, ask questions, and use Study Studio |
-| [Reviewed chunks](http://127.0.0.1:8000/reviews.html) | Inspect search-result feedback |
-| [Evidence curation](http://127.0.0.1:8000/evidence.html) | Inspect generated curation artifacts |
-| [Evaluation](http://127.0.0.1:8000/evaluation.html) | Label results, compare runs, and draft evaluation datasets |
-| [Chunking Lab](http://127.0.0.1:8000/chunking.html) | Compare chunking strategies on stored transcripts |
-
-Notes:
-
-- `.env` and `.env.local` are gitignored. `.env.example` is the checked-in template.
-- `local_preview/local_api.py` loads `.env`, then `.env.local`; `.env.local` wins for machine-specific overrides.
-- The default embedding model is `intfloat/multilingual-e5-large` (~2.2 GB download
-  on first start). Override it with `YT_RAG_EMBED_MODEL` (E5-family models get the
-  `query:`/`passage:` prefixes automatically; other models such as `BAAI/bge-m3`
-  are embedded without prefixes). Changing the model triggers a one-time automatic
-  rebuild of the transcript index on the next start; OCR indexes are skipped with
-  a warning until re-embedded per video with `python pipelines/embed_ocr.py --video-id <id>`.
-- If model download is unavailable, local preview can fall back to local hashing
-  embeddings. A saved model-built index is preserved on disk (dense search is
-  disabled, lexical search keeps working) until the model is available again.
-- To skip the embedding-model download, run
-  `YT_RAG_FORCE_HASH_EMBEDDINGS=1 python local_preview/local_api.py`. Hashing is a
-  fallback for local operation, not equivalent to E5 semantic retrieval. New
-  YouTube ingestion and provider-backed answers still require network access.
-- Japanese lexical (BM25) search tokenizes with fugashi morphological analysis,
-  falling back to character bigrams if fugashi is unavailable.
-- Optional `YOUTUBE_API_KEY` enables YouTube Data API metadata lookup; without
-  it, ingestion uses best-effort oEmbed metadata. It is not an answer-provider key.
-- Local-video OCR additionally requires `ffmpeg` and `ffprobe` on `PATH`.
-- The built frontend is checked in; running it through the Python API does not
-  require Node.js. See [Development and Tests](#development-and-tests) for frontend
-  builds and browser checks.
-
-### Seed an Evaluation Dataset with Codex
-
-The Evaluation workspace can turn one to three already-ingested transcripts into
-a six-case retrieval draft. Install the Codex CLI, run `codex login`, then open
-`http://127.0.0.1:8000/evaluation.html`. Every proposal remains a draft until you
-approve, edit, or reject each case. Finalization creates a browser query set and
-a downloadable JSONL dataset under the gitignored `data/runtime/eval_generator/`
-directory.
-
-The local API invokes one ephemeral Codex pass in a read-only sandbox, validates
-all cited chunk references against the selected videos, and does not forward
-provider API-key environment variables. `YT_RAG_CODEX_BIN` can select a specific
-CLI executable, and `YT_RAG_CODEX_MODEL` can optionally override its model.
-
-## Stored library export
-
-Export existing timestamped evidence without fetching videos or loading models:
-
-```bash
-python pipelines/export_library.py --data-dir data --output /private/tmp/library-export.json
-```
-
-The export uses a versioned contract shared with the separate content-library
-service. It preserves original records, hashes, segment mappings, and embedding
-inputs. Keep real exports outside Git. See
-[the export contract](docs/contracts/youtube-library-export-v1.md) for validation and
-import boundaries. The local app continues to use its existing storage and search.
-
-## What It Solves
-
-Most RAG demos stop after retrieving chunks. This project focuses on whether retrieval is actually good.
-
-The local workflow lets you:
-
-- ingest transcript evidence
-- compare semantic, lexical, hybrid, and agentic retrieval
-- label retrieved results
-- compute ranking metrics
-- compare runs before and after changes
-- use retrieved evidence in citation-backed answers
-- add OCR evidence from local files you own or have permission to process
-
-## Core Workflow
-
-1. Ingest a YouTube transcript.
-2. Normalize and chunk the transcript with timestamp metadata.
-3. Build a local FAISS index.
-4. Retrieve chunks directly, or let the deterministic agent choose semantic,
-   keyword, and nearby-context tools.
-5. Label results in the Evaluation workspace.
-6. Compare retrieval runs with ranking metrics.
-7. Ask questions backed by retrieved evidence.
-8. Optionally merge transcript evidence with OCR evidence from local video frames.
-
-## Current Capabilities
-
-- English and Japanese transcript workflows.
-- YouTube video and playlist transcript ingestion.
-- Timestamped chunking with strategy comparison in Chunking Lab.
-- Local FAISS indexes for transcript and OCR evidence.
-- Retrieval modes: `dense`, `lexical`, and `hybrid`.
-- Opt-in cross-encoder reranking stage for retrieval candidates.
-- Opt-in deterministic agentic search across semantic, Japanese keyword, and
-  raw timestamp-context tools, with an auditable decision trace.
-- Citation-backed Q&A with fallback states and selectable OpenAI, Claude, or Sakana AI providers.
-- Video-first Ask routing that shortlists relevant videos before retrieving
-  transcript chunks when Q&A Studio searches all videos.
-- Study Studio for transcript-grounded flashcards, topic maps, per-topic explanations, run history, and study-quality checks.
-- Search-result review and assisted labeling helpers.
-- Codex CLI-assisted retrieval dataset drafts with required human review and JSONL export.
-- Browser-local evaluation query sets, labels, run snapshots, and metrics.
-- Read-only evidence curation reports from local pipeline artifacts.
-- Local-video OCR for `.mp4`, `.m4v`, `.mov`, `.mkv`, and `.webm` files.
-
-Historical release notes live in [`CHANGELOG.md`](CHANGELOG.md).
-
-## Architecture
-
-```text
-Browser UI
-  index.html / reviews.html / evidence.html / evaluation.html / chunking.html
-      |
-      v
-local_preview/local_api.py
-  local HTTP API + static files
-      |
-      v
-multilingual/
-  transcript processing, chunking, embeddings, retrieval
-      |
-      v
-local files
-  data/library/          library manifest and per-video records
-  data/index/            transcript FAISS indexes
-  data/index/ocr/        OCR FAISS indexes
-  data/frames/           extracted local-video frames
-  data/processed/        frame and OCR metadata
-  data/runtime/          feedback, ask history, ingest logs, curation artifacts
-  data/cache/summaries/  per-video TLDR cache files
-  browser localStorage   evaluation query sets, runs, and labels
-  browser sessionStorage Study Studio run history
-```
-
-## Project Structure
-
-- `local_preview/` - local web UI, API, and review workflow helpers.
-- `multilingual/` - transcript processing, chunking, embeddings, and retrieval.
-- `evals/` - offline retrieval benchmark datasets, configs, scoring, and reports.
-- `pipelines/` - local OCR, embedding, and evidence curation scripts.
-- `retrieval/` - multimodal search helpers.
-- `production_cloudflare/` - separate Cloudflare deployment stack.
-- `tests/` - repository-level regression tests.
-- `multilingual/tests/` - multilingual module tests.
-
-## Local Video OCR Boundary
-
-The YouTube flow retrieves transcripts and metadata and links evidence to video
-timestamps. Playlist ingestion currently fetches the YouTube playlist page and
-parses video IDs from its HTML; that step can fail if the page structure or
-access behavior changes.
-
-Frame extraction and OCR accept local video files that you own or have permission
-to process. This workflow does not download public YouTube video files or bypass
-access restrictions.
-
-For implementation details, see [`docs/multimodal_ocr_design.md`](docs/multimodal_ocr_design.md).
-
-## Evidence Curation
-
-`pipelines/curate_evidence.py` turns already-ingested transcript chunks into local evidence artifacts under `data/runtime/`. It adds heuristic quality signals, topic tags, retrieval eligibility, run metadata, and a quality report without calling external services.
-
-Example:
-
-```bash
-python pipelines/curate_evidence.py \
-  --dataset-id demo_transcript_evidence \
-  --dataset-version v1 \
-  --language ja \
-  --limit 200
-```
-
-Open `http://127.0.0.1:8000/evidence.html` to inspect the generated artifacts.
-
-## Assisted Labeling
-
-`local_preview/review_agent_workflow.py` batches live `/v1/search` results, renders reviewer prompts, builds adjudication inputs, and applies approved labels through `/v1/feedback/search-review`.
-
-See [`local_preview/README.md`](local_preview/README.md) for the full local operator flow.
-
-## Retrieval Add-ons
-
-Both add-ons are opt-in; the default retrieval pipeline is unchanged.
-
-Cross-encoder reranking rescores fused candidates with a multilingual
-cross-encoder (default `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1`) before
-feedback tuning and diversity selection. Enable it per request with
-`"reranker": "cross_encoder"` on `/v1/search` or `/v1/ask`, or globally with
-`YT_RAG_RERANKER=1`. Override the model with `YT_RAG_RERANKER_MODEL`. If the
-model cannot be downloaded, reranking is skipped and the load error is
-reported in `retrieval_details.reranker`.
-
-Agentic search is available on `/v1/search` and `/v1/ask`. Its deterministic,
-provider-free policy chooses Japanese BM25 or E5 + FAISS, can try the other
-search tool when evidence is weak, and calls `read_context` around strong
-timestamp anchors in the canonical raw transcript. Enable it per request with
-`"agentic": true` or globally with `YT_RAG_AGENTIC_RETRIEVAL=1`.
-The auditable tool trace is returned in `retrieval_details.agentic_retrieval`.
-If no path reaches sufficient evidence, the strongest attempted result set is
-returned and the normal insufficient-evidence answer behavior still applies.
-
-For Q&A across a library, video-first routing and agentic chunk retrieval can
-be combined. See the [video-first Ask request example](local_preview/README.md#video-first-ask-routing)
-for `video_routing`, `video_top_k`, and the returned routing details.
-
-## Offline Retrieval Benchmark
-
-Run the checked-in benchmark without network access or provider keys.
+Run the offline benchmark without network access or provider keys:
 
 ```bash
 python -m evals.runner \
@@ -279,61 +125,48 @@ python -m evals.runner \
   --out evals/reports/latest
 ```
 
-The runner compares dense, lexical, baseline hybrid, optimized hybrid, and
-agentic retrieval, then writes a compact leaderboard plus machine-readable
-metrics. The documented fixture scores are nDCG@10 **0.8452** for baseline RRF
-and **1.0000** for optimized hybrid across eight queries. These test-harness
-results use hand-authored dense scores, not a live embedding-index evaluation.
+For the operator workflows (ingestion checks, assisted labeling, local-video OCR,
+and API examples), see the [local app guide](local_preview/README.md).
 
-The local app keeps baseline RRF as the default hybrid profile unless
-`retrieval_profile` or `YT_RAG_HYBRID_PROFILE` explicitly opts into another
-profile.
-See [`evals/README.md`](evals/README.md) for metrics, latest fixture results,
-and sample-set limitations.
+## Repository map
 
-## Known Limitations
+| Path | Contents |
+| --- | --- |
+| `local_preview/` | The local app: HTTP API, catalog read client, retrieval tools, agentic search, grounded answers, and UI (`web/` pages and shared `lab-nav.js`, `react_shell/` source) |
+| `multilingual/` | Core engine: transcript processing, chunking, embeddings, FAISS/BM25 retrieval, reranking, and video routing |
+| `evals/` | Offline retrieval benchmark and the video-routing evaluator |
+| `pipelines/` | Evidence curation, local-video OCR, and library export scripts |
+| `retrieval/` | OCR and multimodal (transcript + OCR) search helpers |
+| `docs/` | Architecture, guides, data contracts, design mocks, and screenshots |
+| `browser_boundary.py` | Same-origin request boundary for the local server |
+| `tests/`, `multilingual/tests/`, `e2e/` | Python regression tests and Playwright browser checks |
 
-- Evaluation is single-reviewer.
-- Evaluation workspace query sets, labels, and run snapshots are browser-local;
-  clearing browser storage removes them. Search-review feedback is stored
-  separately under `data/runtime/`.
-- Inter-rater agreement and adjudication UI are not implemented.
-- Retrieval quality depends on transcript availability from YouTube.
-- Chunking Lab requires videos with stored `full_transcript`; re-ingest older videos if preview/search comparison reports missing transcript data.
-- The checked-in retrieval benchmark is a small deterministic fixture, not a statistically stable corpus.
+## Known limitations
 
-## Development and Tests
+- Evaluation is single-reviewer; inter-rater agreement is not implemented.
+- Evaluate query sets, labels, and runs are stored in browser `localStorage`
+  and disappear when browser storage is cleared.
+- The checked-in benchmark is a small deterministic fixture, not a statistically
+  stable corpus. Baseline RRF remains the default hybrid profile.
+- Retrieval depends on YouTube transcript availability. Playlist ingestion
+  parses the playlist page and can break if that page changes.
+- The app and the catalog proxy are loopback-only with no account system; see the
+  [browser request boundary](BROWSER_SECURITY.md).
+- Local-video OCR only accepts video files you own or have permission to
+  process. The project does not download YouTube video files.
 
-Install the test runner in the active Python environment and run both suites:
+## Development and tests
 
 ```bash
 python -m pip install pytest
 python -m pytest tests/ multilingual/tests/ -q
 ```
 
-For chunking-specific checks:
+Frontend builds, browser checks, and the full test matrix are covered in
+[development](docs/configuration.md#development-and-tests). Tests and browser
+fixtures do not establish live ingestion or answer quality.
 
-```bash
-HF_HUB_OFFLINE=1 python -m pytest multilingual/tests/test_chunking_strategies.py -q
-python -m pytest tests/test_chunking_api.py -q
-```
+## License
 
-To rebuild the React shell, use Node.js 20.19+ or 22.12+ (required by Vite 7):
-
-```bash
-npm ci
-npm run build:web
-```
-
-The build writes the bundle served by the Python API to `local_preview/web/`.
-CI checks that the committed bundle matches the source and runs the answer-mode
-browser regression. Run that same browser check locally with:
-
-```bash
-npx playwright install chromium
-npx playwright test e2e/qa-answer-mode.spec.ts
-```
-
-Unit tests and browser fixtures do not establish live YouTube ingestion or
-answer quality. See [Ingestion Verification](local_preview/README.md#ingestion-verification)
-for the real-backend checks.
+Code and documentation use the [MIT License](LICENSE). YouTube content,
+transcripts, and metadata remain subject to their owners' terms.

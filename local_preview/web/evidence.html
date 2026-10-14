@@ -4,7 +4,7 @@
     <script src="/browser-session.js"></script>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>YouTube Transcript Retrieval Lab | Evidence</title>
+    <title>Retrieval Lab | Data quality</title>
     <link rel="icon" type="image/svg+xml" href="./icons/favicon-ytrag.svg" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -13,56 +13,15 @@
   </head>
   <body>
     <header class="appbar">
-      <a id="homeBrandLink" class="brand brand-link" href="./index.html" aria-label="Ingest">
+      <a id="homeBrandLink" class="brand brand-link" href="./index.html" aria-label="Retrieval Lab home">
         <img src="./icons/icon-play.svg" alt="" aria-hidden="true" />
         <div>
-          <p id="eyebrowText" class="eyebrow">YouTube Transcript Retrieval Lab</p>
-          <p class="brand-sub">Evidence Workspace</p>
+          <p id="eyebrowText" class="eyebrow">Retrieval Lab</p>
+          <p class="brand-sub">YouTube transcripts</p>
         </div>
       </a>
       <div class="appbar-actions">
-        <nav class="appbar-nav" aria-label="Primary">
-          <a id="homeNavLink" class="app-nav-link" href="./index.html#/ingest">
-            <img class="nav-icon" src="./icons/icon-upload.svg" alt="" aria-hidden="true" />
-            <span class="nav-label nav-label-text">Ingest</span>
-          </a>
-          <a id="studioNavLink" class="app-nav-link" href="./index.html#/qa">
-            <img class="nav-icon" src="./icons/icon-chat.svg" alt="" aria-hidden="true" />
-            <span class="nav-label nav-label-text">Studio</span>
-          </a>
-          <details class="nav-tools-menu" data-nav-group="library">
-            <summary class="app-nav-link nav-btn nav-tools-summary active">
-              <img class="nav-icon" src="./icons/icon-library.svg" alt="" aria-hidden="true" />
-              <span class="nav-label">Library</span>
-            </summary>
-            <div class="nav-tools-panel">
-              <a id="reviewsNavLink" class="nav-tools-link" href="./reviews.html">
-                <img class="nav-icon" src="./icons/icon-library.svg" alt="" aria-hidden="true" />
-                <span class="nav-label-text">Reviews</span>
-              </a>
-              <a id="evidenceNavLink" class="nav-tools-link active" href="./evidence.html">
-                <img class="nav-icon" src="./icons/icon-library.svg" alt="" aria-hidden="true" />
-                <span class="nav-label-text">Evidence</span>
-              </a>
-            </div>
-          </details>
-          <details class="nav-tools-menu" data-nav-group="more">
-            <summary class="app-nav-link nav-btn nav-tools-summary">
-              <img class="nav-icon" src="./icons/icon-jobs.svg" alt="" aria-hidden="true" />
-              <span class="nav-label">More</span>
-            </summary>
-            <div class="nav-tools-panel">
-              <a id="evaluationNavLink" class="nav-tools-link" href="./evaluation.html">
-                <img class="nav-icon" src="./icons/icon-jobs.svg" alt="" aria-hidden="true" />
-                <span class="nav-label-text">Evaluation</span>
-              </a>
-              <a id="chunkingNavLink" class="nav-tools-link" href="./chunking.html">
-                <img class="nav-icon" src="./icons/icon-jobs.svg" alt="" aria-hidden="true" />
-                <span class="nav-label-text">Chunking</span>
-              </a>
-            </div>
-          </details>
-        </nav>
+        <nav class="appbar-nav" aria-label="Primary"></nav>
         <label class="locale-switch">
           <span id="localeLabel">Language</span>
           <select id="localeSelect">
@@ -75,7 +34,7 @@
 
     <main class="shell">
       <header class="hero">
-        <h1 id="heroTitle">Evidence Curation</h1>
+        <h1 id="heroTitle">Data quality</h1>
         <p id="heroSubtitle" class="subtitle">Review curated transcript evidence, eligibility decisions, and pipeline run metadata.</p>
       </header>
 
@@ -215,48 +174,7 @@
       </section>
     </main>
 
-    <nav class="bottom-tabbar" aria-label="Primary mobile navigation">
-      <a id="mobileHomeNavLink" class="bottom-tab-link" href="./index.html#/ingest">
-        <img class="bottom-tab-icon" src="./icons/icon-upload.svg" alt="" aria-hidden="true" />
-        <span id="mobileHomeNavText" class="bottom-tab-label">Ingest</span>
-      </a>
-      <a id="mobileStudioNavLink" class="bottom-tab-link" href="./index.html#/qa">
-        <img class="bottom-tab-icon" src="./icons/icon-chat.svg" alt="" aria-hidden="true" />
-        <span id="mobileStudioNavText" class="bottom-tab-label">Studio</span>
-      </a>
-      <details class="bottom-tools-menu" data-nav-group="library">
-        <summary class="bottom-tab-link active">
-          <img class="bottom-tab-icon" src="./icons/icon-library.svg" alt="" aria-hidden="true" />
-          <span class="bottom-tab-label">Library</span>
-        </summary>
-        <div class="bottom-tools-panel">
-          <a id="mobileReviewsNavLink" class="bottom-tools-link" href="./reviews.html">
-            <img class="bottom-tab-icon" src="./icons/icon-library.svg" alt="" aria-hidden="true" />
-            <span id="mobileReviewsNavText">Reviews</span>
-          </a>
-          <a id="mobileEvidenceNavLink" class="bottom-tools-link active" href="./evidence.html">
-            <img class="bottom-tab-icon" src="./icons/icon-library.svg" alt="" aria-hidden="true" />
-            <span id="mobileEvidenceNavText">Evidence</span>
-          </a>
-        </div>
-      </details>
-      <details class="bottom-tools-menu" data-nav-group="more">
-        <summary class="bottom-tab-link">
-          <img class="bottom-tab-icon" src="./icons/icon-jobs.svg" alt="" aria-hidden="true" />
-          <span class="bottom-tab-label">More</span>
-        </summary>
-        <div class="bottom-tools-panel">
-          <a id="mobileEvaluationNavLink" class="bottom-tools-link" href="./evaluation.html">
-            <img class="bottom-tab-icon" src="./icons/icon-jobs.svg" alt="" aria-hidden="true" />
-            <span id="mobileEvaluationNavText">Evaluation</span>
-          </a>
-          <a id="mobileChunkingNavLink" class="bottom-tools-link" href="./chunking.html">
-            <img class="bottom-tab-icon" src="./icons/icon-jobs.svg" alt="" aria-hidden="true" />
-            <span id="mobileChunkingNavText">Chunking</span>
-          </a>
-        </div>
-      </details>
-    </nav>
+    <nav class="bottom-tabbar" aria-label="Primary mobile navigation"></nav>
 
     <script type="module" src="./evidence.js"></script>
   </body>

@@ -1,3 +1,5 @@
+import { renderLabNav } from "./lab-nav.js";
+
 const INGEST_UNLOCK_KEY = "yt_rag_ingest_unlocked";
 if (localStorage.getItem(INGEST_UNLOCK_KEY) !== "1") {
   window.location.replace("./index.html#/ingest");
@@ -23,19 +25,6 @@ const els = {
   localeSelect: document.getElementById("localeSelect"),
   localeLabel: document.getElementById("localeLabel"),
   homeBrandLink: document.getElementById("homeBrandLink"),
-  eyebrowText: document.getElementById("eyebrowText"),
-  homeNavLink: document.getElementById("homeNavLink"),
-  studioNavLink: document.getElementById("studioNavLink"),
-  reviewsNavLink: document.getElementById("reviewsNavLink"),
-  evidenceNavLink: document.getElementById("evidenceNavLink"),
-  evaluationNavLink: document.getElementById("evaluationNavLink"),
-  chunkingNavLink: document.getElementById("chunkingNavLink"),
-  mobileHomeNavText: document.getElementById("mobileHomeNavText"),
-  mobileStudioNavText: document.getElementById("mobileStudioNavText"),
-  mobileReviewsNavText: document.getElementById("mobileReviewsNavText"),
-  mobileEvidenceNavText: document.getElementById("mobileEvidenceNavText"),
-  mobileEvaluationNavText: document.getElementById("mobileEvaluationNavText"),
-  mobileChunkingNavText: document.getElementById("mobileChunkingNavText"),
   heroTitle: document.getElementById("heroTitle"),
   heroSubtitle: document.getElementById("heroSubtitle"),
   guidelinesHeading: document.getElementById("guidelinesHeading"),
@@ -125,15 +114,8 @@ const els = {
 
 const I18N = {
   "en-US": {
-    pageTitle: "YouTube Transcript Retrieval Lab | Evaluation",
+    pageTitle: "Retrieval Lab | Evaluate",
     localeLabel: "Language",
-    navIngest: "Ingest",
-    eyebrowText: "YouTube Transcript Retrieval Lab",
-    navStudio: "Studio",
-    navReviews: "Reviews",
-    navEvidence: "Evidence",
-    navEvaluation: "Evaluation",
-    navChunking: "Chunking",
     heroTitle: "Retrieval Strategy Evaluation",
     heroSubtitle: "Create query sets, run ranked retrieval snapshots, label results locally, and compare metrics across runs.",
     guidelinesHeading: "Relevance Guidelines",
@@ -256,15 +238,8 @@ const I18N = {
     unlabeled: "unlabeled",
   },
   "ja-JP": {
-    pageTitle: "YouTube Transcript Retrieval Lab | 評価",
+    pageTitle: "Retrieval Lab | 評価",
     localeLabel: "言語",
-    navIngest: "取り込み",
-    eyebrowText: "YouTube Transcript Retrieval Lab",
-    navStudio: "Studio",
-    navReviews: "レビュー",
-    navEvidence: "エビデンス",
-    navEvaluation: "評価",
-    navChunking: "チャンキング",
     heroTitle: "セマンティック検索評価",
     heroSubtitle: "クエリセット作成、検索スナップショット実行、ローカルラベリング、ラン比較を行います。",
     guidelinesHeading: "関連性ラベルガイド",
@@ -442,18 +417,6 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll("\"", "&quot;")
     .replaceAll("'", "&#39;");
-}
-
-function setNavLabel(element, text) {
-  if (!element) {
-    return;
-  }
-  const label = element.querySelector(".nav-label-text");
-  if (label) {
-    label.textContent = text;
-    return;
-  }
-  element.textContent = text;
 }
 
 function formatMetric(value) {
@@ -1740,32 +1703,7 @@ function applyLocale(locale) {
 
   els.localeSelect.value = locale;
   els.localeLabel.textContent = t("localeLabel");
-  els.homeBrandLink?.setAttribute("aria-label", t("navIngest"));
-  els.eyebrowText.textContent = t("eyebrowText");
-  setNavLabel(els.homeNavLink, t("navIngest"));
-  setNavLabel(els.studioNavLink, t("navStudio"));
-  setNavLabel(els.reviewsNavLink, t("navReviews"));
-  setNavLabel(els.evidenceNavLink, t("navEvidence"));
-  setNavLabel(els.evaluationNavLink, t("navEvaluation"));
-  setNavLabel(els.chunkingNavLink, t("navChunking"));
-  if (els.mobileHomeNavText) {
-    els.mobileHomeNavText.textContent = t("navIngest");
-  }
-  if (els.mobileStudioNavText) {
-    els.mobileStudioNavText.textContent = t("navStudio");
-  }
-  if (els.mobileReviewsNavText) {
-    els.mobileReviewsNavText.textContent = t("navReviews");
-  }
-  if (els.mobileEvidenceNavText) {
-    els.mobileEvidenceNavText.textContent = t("navEvidence");
-  }
-  if (els.mobileEvaluationNavText) {
-    els.mobileEvaluationNavText.textContent = t("navEvaluation");
-  }
-  if (els.mobileChunkingNavText) {
-    els.mobileChunkingNavText.textContent = t("navChunking");
-  }
+  renderLabNav({ active: "evaluate", locale: currentLocale });
   els.heroTitle.textContent = t("heroTitle");
   els.heroSubtitle.textContent = t("heroSubtitle");
   els.guidelinesHeading.textContent = t("guidelinesHeading");
