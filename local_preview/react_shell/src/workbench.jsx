@@ -92,8 +92,8 @@ function runRequestBody(run, query, language, videoIds) {
   return {
     query,
     k: Number(run.k) || 5,
-    retrieval_mode: run.mode,
-    retrieval_profile: run.mode === "hybrid" ? run.profile : undefined,
+    retrieval_mode: run.strategy === "agentic" ? undefined : run.mode,
+    retrieval_profile: run.strategy !== "agentic" && run.mode === "hybrid" ? run.profile : undefined,
     agentic: run.strategy === "agentic",
     reranker: run.reranker,
     language: language || undefined,
@@ -106,9 +106,9 @@ function runRequestBody(run, query, language, videoIds) {
 function describeRun(run) {
   const parts = [run.strategy === "agentic" ? "Agentic" : run.mode[0].toUpperCase() + run.mode.slice(1)];
   if (run.strategy === "agentic") {
-    parts.push(run.mode);
+    parts.push("automatic tools");
   }
-  if (run.mode === "hybrid") {
+  if (run.strategy !== "agentic" && run.mode === "hybrid") {
     parts.push(run.profile);
   }
   if (run.reranker === "cross_encoder") {
@@ -192,15 +192,17 @@ function RunSetup({ id, run, onChange }) {
           <option value="agentic">Agentic</option>
         </select>
       </label>
-      <label>
-        <span>{run.strategy === "agentic" ? "Starting mode" : "Mode"}</span>
+      {run.strategy === "agentic" ? (
+        <p className="lab-hint">Tools are chosen automatically from the query: dense or BM25 search, then nearby context.</p>
+      ) : <label>
+        <span>Mode</span>
         <select value={run.mode} onChange={(event) => update("mode", event.target.value)} aria-label={`Run ${id} mode`}>
           <option value="hybrid">Hybrid</option>
           <option value="dense">Dense (E5)</option>
           <option value="lexical">Lexical (BM25)</option>
         </select>
-      </label>
-      {run.mode === "hybrid" ? (
+      </label>}
+      {run.strategy !== "agentic" && run.mode === "hybrid" ? (
         <label>
           <span>Hybrid profile</span>
           <select value={run.profile} onChange={(event) => update("profile", event.target.value)} aria-label={`Run ${id} hybrid profile`}>
@@ -231,7 +233,7 @@ function RunSetup({ id, run, onChange }) {
   );
 }
 
-function ResultCard({ row, rank, delta, label, onLabel }) {
+function ResultCard({ row, rank, delta, label, onLabel, disabled }) {
   const url = safeExternalUrl(row?.url);
   const provenance = evidenceProvenanceLabel(row);
   const text = String(row?.text || "").replace(/\s+/g, " ").trim();
@@ -258,7 +260,7 @@ function ResultCard({ row, rank, delta, label, onLabel }) {
           type="button"
           className={label?.label === "relevant" ? "on-relevant" : ""}
           aria-pressed={label?.label === "relevant"}
-          disabled={label?.pending}
+          disabled={disabled || label?.pending}
           onClick={() => onLabel(row, "relevant")}
         >
           Relevant
@@ -267,7 +269,7 @@ function ResultCard({ row, rank, delta, label, onLabel }) {
           type="button"
           className={label?.label === "not_relevant" ? "on-not-relevant" : ""}
           aria-pressed={label?.label === "not_relevant"}
-          disabled={label?.pending}
+          disabled={disabled || label?.pending}
           onClick={() => onLabel(row, "not_relevant")}
         >
           Not relevant
@@ -379,6 +381,7 @@ export function SearchWorkbench({ renderAnswer }) {
   const [error, setError] = useState("");
   const [labels, setLabels] = useState({});
   const [saveMessage, setSaveMessage] = useState("");
+  const labelSavePending = Object.values(labels).some((entry) => entry.pending);
 
   useEffect(() => {
     apiRequest("/v1/videos")
@@ -443,16 +446,16 @@ export function SearchWorkbench({ renderAnswer }) {
           next[key] = { label: review.label };
         }
       });
-      setLabels(next);
+      return next;
     } catch (_) {
-      setLabels({});
+      return {};
     }
   }
 
   async function runSearch(event) {
     event.preventDefault();
     const text = query.trim();
-    if (!text) {
+    if (!text || loading || labelSavePending) {
       return;
     }
     setLoading(true);
@@ -473,8 +476,9 @@ export function SearchWorkbench({ renderAnswer }) {
           return { error: errorInfo(runError, "Search failed.").userMessage, ms: performance.now() - started, run: runs[id] };
         }
       };
-      const [a, b] = await Promise.all([runOne("A"), runOne("B"), loadLabels(text)]);
+      const [a, b, nextLabels] = await Promise.all([runOne("A"), runOne("B"), loadLabels(text)]);
       setOutcomes({ A: a, B: b });
+      setLabels(nextLabels);
       setSearchedQuery(text);
       setScopeSummary(scope.summary);
       if (view === "answer") {
@@ -489,18 +493,19 @@ export function SearchWorkbench({ renderAnswer }) {
 
   async function labelRow(row, label, runId) {
     const key = chunkKey(row);
-    if (!key || labels[key]?.pending || labels[key]?.label === label) {
+    if (loading || !key || labels[key]?.pending || labels[key]?.label === label) {
       return;
     }
     const previous = labels[key];
     setLabels((prev) => ({ ...prev, [key]: { label, pending: true } }));
     const run = outcomes[runId]?.run || runs[runId];
+    const retrievalMode = outcomes[runId]?.response?.retrieval_mode || run.mode;
     try {
       await apiRequest("/v1/feedback/search-review", {
         method: "POST",
         body: {
           query: searchedQuery,
-          retrieval_mode: run.mode,
+          retrieval_mode: retrievalMode,
           label,
           video_id: row.video_id,
           chunk_index: row.chunk_index ?? null,
@@ -514,7 +519,7 @@ export function SearchWorkbench({ renderAnswer }) {
           lexical_score: optionalNumber(row.lexical_score),
           hybrid_score: optionalNumber(row.hybrid_score),
           rank: row.rank ?? null,
-          model: run.mode,
+          model: retrievalMode,
         },
       });
       setLabels((prev) => ({ ...prev, [key]: { label } }));
@@ -588,6 +593,7 @@ export function SearchWorkbench({ renderAnswer }) {
               rank={index + 1}
               delta={otherRanks ? deltaFor(key, index + 1, otherRanks, otherId) : null}
               label={labels[key]}
+              disabled={loading}
               onLabel={(target, value) => labelRow(target, value, id)}
             />
           );
@@ -624,7 +630,7 @@ export function SearchWorkbench({ renderAnswer }) {
                 aria-label="Query"
               />
             </label>
-            <button className="btn" type="submit" disabled={loading || !query.trim()}>
+            <button className="btn" type="submit" disabled={loading || labelSavePending || !query.trim()}>
               {loading ? "Running…" : "Run A and B"}
             </button>
           </div>
@@ -758,7 +764,7 @@ export function SearchWorkbench({ renderAnswer }) {
                 <div className="lab-result-head">
                   <p className="lab-muted">“{searchedQuery}” · {scopeSummary}</p>
                   <div className="lab-result-actions">
-                    <button className="btn secondary" type="button" onClick={saveToEvaluate}>Save to query set</button>
+                    <button className="btn secondary" type="button" onClick={saveToEvaluate} disabled={loading || labelSavePending}>Save to query set</button>
                     <a className="btn secondary" href="/evaluation.html">Open Evaluate</a>
                   </div>
                 </div>

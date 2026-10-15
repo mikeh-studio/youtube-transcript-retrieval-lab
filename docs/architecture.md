@@ -36,8 +36,10 @@ local files (data/, gitignored) and browser storage
    catalog filter, the browser reads matching catalog items and keeps only the
    indexed videos among them; the result is sent as `video_ids`.
 2. **Run A and Run B.** The same query runs twice through `POST /v1/search`
-   with each run's strategy, mode, hybrid profile, reranker, and top K, and with
-   `feedback_tuning: false` so stored labels cannot move the rankings.
+   with each run's settings and `feedback_tuning: false`, so stored labels
+   cannot move the rankings. A single-pass run sets its mode, hybrid profile,
+   reranker, and top K; an agentic run chooses its own tools, so only its
+   reranker and top K are set. Labels record the mode the server actually used.
 3. **Compare and label.** The browser computes rank changes between runs and
    per-query Precision@K and nDCG@K from the labels for that query. Labels are
    saved with `POST /v1/feedback/search-review` and loaded back with

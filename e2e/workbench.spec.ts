@@ -62,7 +62,7 @@ async function mockWorkbench(page, { existingReviews = [], catalogItems = null }
       body: JSON.stringify({
         ok: true,
         agentic,
-        retrieval_mode: body.retrieval_mode,
+        retrieval_mode: agentic ? "lexical" : body.retrieval_mode,
         result_count: 3,
         results: agentic ? RESULTS_B : RESULTS_A,
         retrieval_details: agentic ? AGENTIC_TRACE : {},
@@ -139,7 +139,7 @@ test("loads existing labels, saves new ones, and scores both runs", async ({ pag
     label: "relevant",
     video_id: "animeVideo1",
     chunk_index: 13,
-    retrieval_mode: "hybrid",
+    retrieval_mode: "lexical",
   });
   await columnA.locator(".lab-hit").nth(1).getByRole("button", { name: "Not relevant" }).click();
 
@@ -209,3 +209,69 @@ test("keeps the answer flow in the Answer tab with the current query", async ({ 
   await expect(page.getByLabel("Question")).toHaveValue("作画監督");
   await expect(page.getByRole("button", { name: "Generate Answer" })).toBeVisible();
 });
+
+test("agentic setup exposes automatic tools and saves the actual retrieval mode", async ({ page }) => {
+  const calls = await mockWorkbench(page);
+  await page.goto("/index.html#/qa");
+  await expect(page.getByLabel("Run B mode", { exact: true })).toHaveCount(0);
+  await expect(page.getByLabel("Run B hybrid profile")).toHaveCount(0);
+  await expect(page.locator('.lab-run[data-run="B"]')).toContainText("Tools are chosen automatically");
+  await page.getByLabel("Run B strategy").selectOption("retrieval");
+  await page.getByLabel("Run B mode", { exact: true }).selectOption("lexical");
+  await page.getByLabel("Run B strategy").selectOption("agentic");
+  await page.getByLabel("Query").fill("作画監督");
+  await page.getByRole("button", { name: "Run A and B" }).click();
+  await page.locator('.lab-column[data-run="B"] .lab-hit').first().getByRole("button", { name: "Relevant", exact: true }).click();
+  expect(calls.search.find((body) => body.agentic).retrieval_profile).toBeUndefined();
+  expect(calls.search.find((body) => body.agentic).retrieval_mode).toBeUndefined();
+  await expect.poll(() => calls.reviews.length).toBe(1);
+  expect(calls.reviews[0].retrieval_mode).toBe("lexical");
+  await expect(page.locator('.lab-column[data-run="B"] .lab-column-head')).not.toContainText("baseline_rrf");
+});
+
+test("keeps labels tied to their results while another query is running", async ({ page }) => {
+  await mockWorkbench(page);
+  await runQuery(page, "first query");
+  const relevant = page.locator('.lab-column[data-run="A"] .lab-hit').first().getByRole("button", { name: "Relevant", exact: true });
+  await relevant.click();
+  await expect(relevant).toBeEnabled();
+
+  let releaseSearch;
+  const held = new Promise<void>((resolve) => { releaseSearch = resolve; });
+  await page.route("**/v1/search", async (route) => {
+    await held;
+    await route.fallback();
+  });
+  await page.getByLabel("Query").fill("second query");
+  await page.getByRole("button", { name: "Run A and B" }).click();
+  await expect(relevant).toBeDisabled();
+  await expect(relevant).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "Save to query set" })).toBeDisabled();
+  releaseSearch();
+  await expect(page.locator(".lab-result-head")).toContainText("second query");
+  await expect(relevant).toHaveAttribute("aria-pressed", "false");
+});
+
+for (const failed of [false, true]) {
+  test(`waits for a pending label save before changing queries (${failed ? "failure" : "success"})`, async ({ page }) => {
+    await mockWorkbench(page);
+    await runQuery(page, "first query");
+    let releaseSave;
+    const held = new Promise<void>((resolve) => { releaseSave = resolve; });
+    await page.route("**/v1/feedback/search-review", async (route) => {
+      if (route.request().method() !== "POST") return route.fallback();
+      await held;
+      await route.fulfill({ status: failed ? 500 : 200, contentType: "application/json", body: failed ? '{"error":{"message":"save failed"}}' : '{"ok":true}' });
+    });
+    const relevant = page.locator('.lab-column[data-run="A"] .lab-hit').first().getByRole("button", { name: "Relevant", exact: true });
+    await relevant.click();
+    await page.getByLabel("Query").fill("second query");
+    await expect(page.getByRole("button", { name: "Run A and B" })).toBeDisabled();
+    releaseSave();
+    await expect(page.getByRole("button", { name: "Run A and B" })).toBeEnabled();
+    await page.getByRole("button", { name: "Run A and B" }).click();
+    await expect(page.locator(".lab-result-head")).toContainText("second query");
+    await expect(relevant).toHaveAttribute("aria-pressed", "false");
+    await expect(page.locator(".lab-metrics")).toContainText("0 of 4 unique hits");
+  });
+}
