@@ -6,10 +6,31 @@ import {
   LAB_NAV_TOOLS_MENU,
   labNavLabel,
 } from "../../web/lab-nav.js";
+import {
+  FEEDBACK_REVISION_STORAGE_KEY,
+  FriendlyError,
+  LAST_VIDEO_KEY,
+  YOUTUBE_ID_PATTERN,
+  apiRequest,
+  errorInfo,
+  evidenceProvenanceLabel,
+  evidenceSource,
+  extractVideoId,
+  formatRange,
+  formatSeconds,
+  makeFriendlyError,
+  markFeedbackRevision,
+  navigate,
+  optionalNumber,
+  readLocalStorage,
+  safeExternalUrl,
+  thumbnailUrlForVideo,
+  writeLocalStorage,
+} from "./lab.jsx";
+import { LibraryPage } from "./library.jsx";
+import { SearchWorkbench } from "./workbench.jsx";
 
 const LOCK_KEY = "yt_rag_ingest_unlocked";
-const LAST_VIDEO_KEY = "yt_rag_last_video_id";
-const FEEDBACK_REVISION_STORAGE_KEY = "youtube-rag-feedback-revision";
 const LOCALE_STORAGE_KEY = "youtube-rag-ui-locale";
 const INTRO_SEEN_SESSION_KEY = "yt_rag_intro_seen";
 const STUDY_HISTORY_SESSION_KEY = "yt_rag_study_history_v2";
@@ -21,7 +42,6 @@ const ROUTES = {
   STUDY: "/study",
   QA: "/qa",
 };
-const YOUTUBE_ID_PATTERN = /^[a-zA-Z0-9_-]{11}$/;
 const FALLBACK_LLM_PROVIDER_OPTIONS = {
   chatgpt: {
     default: "gpt-5.4-mini",
@@ -293,34 +313,6 @@ function readHashRoute() {
   return ROUTES.INGEST;
 }
 
-function navigate(route) {
-  window.location.hash = route;
-}
-
-function markFeedbackRevision() {
-  try {
-    localStorage.setItem(FEEDBACK_REVISION_STORAGE_KEY, String(Date.now()));
-  } catch (_) {
-    // best effort only for cross-tab review refreshes
-  }
-}
-
-function readLocalStorage(key, fallback = "") {
-  try {
-    return localStorage.getItem(key) ?? fallback;
-  } catch (_) {
-    return fallback;
-  }
-}
-
-function writeLocalStorage(key, value) {
-  try {
-    localStorage.setItem(key, value);
-  } catch (_) {
-    // best effort only; storage failures should not break generated output
-  }
-}
-
 function readStudyHistory() {
   try {
     const parsed = JSON.parse(sessionStorage.getItem(STUDY_HISTORY_SESSION_KEY) || "[]");
@@ -353,104 +345,6 @@ function makeStudyRunId() {
   return `study-${Date.now()}-${randomPart}`;
 }
 
-function optionalNumber(value) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-async function apiRequest(path, { method = "GET", body } = {}) {
-  let response;
-  try {
-    response = await fetch(path, {
-      method,
-      cache: "no-store",
-      headers: {
-        "content-type": "application/json",
-      },
-      body: body ? JSON.stringify(body) : undefined,
-    });
-  } catch (error) {
-    throw makeFriendlyError(
-      "Could not connect to the backend server.",
-      String(error?.message || error),
-    );
-  }
-
-  const rawText = await response.text();
-  let payload = null;
-  try {
-    payload = rawText ? JSON.parse(rawText) : {};
-  } catch (error) {
-    throw makeFriendlyError(
-      "Could not connect to the backend server.",
-      [
-        `Expected JSON from ${path}, but received a non-JSON response.`,
-        `Parse error: ${String(error?.message || error)}`,
-        rawText.slice(0, 1200),
-      ].filter(Boolean).join("\n\n"),
-    );
-  }
-  if (!response.ok) {
-    const message = payload?.error?.message || `Request failed (${response.status})`;
-    throw makeFriendlyError(message, JSON.stringify(payload, null, 2) || rawText || message);
-  }
-  return payload;
-}
-
-function makeFriendlyError(userMessage, debugMessage = "") {
-  const error = new Error(userMessage);
-  error.userMessage = userMessage;
-  error.debugMessage = debugMessage || userMessage;
-  return error;
-}
-
-function errorInfo(error, fallbackMessage = "Request failed.") {
-  if (!error) {
-    return null;
-  }
-  return {
-    userMessage: error.userMessage || String(error.message || error || fallbackMessage),
-    debugMessage: error.debugMessage || String(error.message || error || fallbackMessage),
-  };
-}
-
-function FriendlyError({ error, title = "Something went wrong.", actionLabel = "Retry", onRetry }) {
-  const info = errorInfo(error, title);
-  if (!info) {
-    return null;
-  }
-  return (
-    <div className="friendly-error" role="alert">
-      <div className="friendly-error-main">
-        <strong>{title}</strong>
-        <span>{info.userMessage}</span>
-      </div>
-      {onRetry ? (
-        <button className="btn secondary" type="button" onClick={onRetry}>
-          {actionLabel}
-        </button>
-      ) : null}
-      <details className="friendly-error-debug">
-        <summary>Debug details</summary>
-        <pre>{info.debugMessage}</pre>
-      </details>
-    </div>
-  );
-}
-
-function formatSeconds(value) {
-  const seconds = Math.max(0, Math.floor(Number(value || 0)));
-  const minutes = Math.floor(seconds / 60);
-  const remaining = seconds % 60;
-  return `${minutes}:${String(remaining).padStart(2, "0")}`;
-}
-
-function formatRange(startValue, endValue) {
-  const start = Number(startValue || 0);
-  const end = Number(endValue ?? startValue ?? 0);
-  return `${formatSeconds(start)} - ${formatSeconds(end)}`;
-}
-
 function evidenceTimestamp(row) {
   if (row?.timestamp_hhmmss) {
     return row.timestamp_hhmmss;
@@ -471,62 +365,6 @@ function evidenceLanguage(row) {
 
 function evidenceFramePath(row) {
   return row?.frame_path || row?.metadata?.frame_path || "";
-}
-
-function evidenceSource(row) {
-  const source = row?.source || row?.metadata?.source;
-  return source && typeof source === "object" ? source : null;
-}
-
-function evidenceProvenanceLabel(row) {
-  const source = evidenceSource(row);
-  if (!source) {
-    return "";
-  }
-  const platform = String(source.platform || "youtube").trim();
-  const channel = String(source.channel?.name || "").trim();
-  const platformLabel = platform.toLowerCase() === "youtube" ? "YouTube" : platform;
-  return channel ? `${platformLabel} · ${channel}` : platformLabel;
-}
-
-function extractVideoId(value) {
-  const raw = String(value || "").trim();
-  if (YOUTUBE_ID_PATTERN.test(raw)) {
-    return raw;
-  }
-  const patterns = [
-    /[?&]v=([a-zA-Z0-9_-]{11})/,
-    /youtu\.be\/([a-zA-Z0-9_-]{11})/,
-    /embed\/([a-zA-Z0-9_-]{11})/,
-  ];
-  for (const pattern of patterns) {
-    const match = raw.match(pattern);
-    if (match) {
-      return match[1];
-    }
-  }
-  return null;
-}
-
-function thumbnailUrlForVideo(videoId) {
-  const scopedVideoId = String(videoId || "").trim();
-  if (!YOUTUBE_ID_PATTERN.test(scopedVideoId)) {
-    return "";
-  }
-  return `https://i.ytimg.com/vi/${encodeURIComponent(scopedVideoId)}/hqdefault.jpg`;
-}
-
-function safeExternalUrl(value) {
-  const raw = String(value || "").trim();
-  if (!raw) {
-    return "";
-  }
-  try {
-    const parsed = new URL(raw, window.location.origin);
-    return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.href : "";
-  } catch (_) {
-    return "";
-  }
 }
 
 function qaAnswerText(locale, key, vars = {}) {
@@ -574,343 +412,6 @@ function prefersReducedMotion() {
     return false;
   }
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-}
-
-function IngestPage({ onSuccess }) {
-  const [url, setUrl] = useState("");
-  const [mode, setMode] = useState("single");
-  const [language, setLanguage] = useState("ja");
-  const [force, setForce] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [status, setStatus] = useState("Enter a YouTube URL to unlock the workspace.");
-  const [rawResponse, setRawResponse] = useState("");
-  const [ingestedVideos, setIngestedVideos] = useState([]);
-  const [isLoadingVideos, setIsLoadingVideos] = useState(true);
-  const [videosError, setVideosError] = useState("");
-  const [deletingVideoId, setDeletingVideoId] = useState("");
-  const carouselRef = useRef(null);
-
-  async function loadIngestedVideos({ silent = false } = {}) {
-    if (!silent) {
-      setIsLoadingVideos(true);
-      setVideosError(null);
-    }
-    try {
-      const payload = await apiRequest("/v1/videos");
-      const rows = Array.isArray(payload?.videos) ? payload.videos : [];
-      const orderedRows = rows.slice().reverse();
-      setIngestedVideos(orderedRows);
-      return orderedRows;
-    } catch (error) {
-      if (!silent) {
-        setVideosError(error);
-      }
-      return [];
-    } finally {
-      if (!silent) {
-        setIsLoadingVideos(false);
-      }
-    }
-  }
-
-  async function refreshIngestedVideosUntilVisible(expectedVideoIds, timeoutMs = 8000, intervalMs = 300) {
-    const required = Array.from(
-      new Set((expectedVideoIds || []).map((row) => String(row || "").trim()).filter(Boolean)),
-    );
-    if (!required.length) {
-      await loadIngestedVideos();
-      return true;
-    }
-
-    const startedAt = Date.now();
-    while (Date.now() - startedAt <= timeoutMs) {
-      const rows = await loadIngestedVideos({ silent: true });
-      const ids = new Set(rows.map((row) => String(row.video_id || "").trim()).filter(Boolean));
-      const allFound = required.every((id) => ids.has(id));
-      if (allFound) {
-        return true;
-      }
-      await new Promise((resolve) => window.setTimeout(resolve, intervalMs));
-    }
-    await loadIngestedVideos();
-    return false;
-  }
-
-  useEffect(() => {
-    loadIngestedVideos().catch(() => {});
-  }, []);
-
-  async function handleSubmit(event) {
-    event.preventDefault();
-    if (!url.trim()) {
-      return;
-    }
-    setIsSubmitting(true);
-    setStatus("Running ingestion...");
-    setRawResponse("");
-    try {
-      const payload = await apiRequest("/v1/ingest/videos", {
-        method: "POST",
-        body: {
-          url: url.trim(),
-          mode,
-          language,
-          force,
-        },
-      });
-      const acceptedCount = Number(payload?.queued_count || 0) + Number(payload?.skipped_count || 0);
-      if (!payload?.ok || acceptedCount <= 0) {
-        throw new Error("Ingest request was accepted but no jobs were created.");
-      }
-      const completedJobs = (payload?.jobs || []).filter((job) => job?.status === "completed");
-      const completedVideoIds = completedJobs
-        .map((job) => String(job?.video_id || "").trim())
-        .filter(Boolean);
-      const firstVideo =
-        payload?.jobs?.[0]?.video_id
-        || payload?.skipped?.[0]?.video_id
-        || "";
-      setRawResponse(JSON.stringify(payload, null, 2));
-
-      if (completedJobs.length) {
-        setIngestedVideos((prev) => {
-          const byId = new Map();
-          prev.forEach((row) => {
-            const id = String(row?.video_id || "").trim();
-            if (id) {
-              byId.set(id, row);
-            }
-          });
-          completedJobs.forEach((job) => {
-            const id = String(job?.video_id || "").trim();
-            if (!id) {
-              return;
-            }
-            const existing = byId.get(id) || {};
-            byId.set(id, {
-              video_id: id,
-              title: String(job?.title || existing.title || `Video ${id}`),
-              language: String(job?.language || existing.language || language),
-              num_chunks: Number(existing.num_chunks || 0),
-            });
-          });
-          return Array.from(byId.values());
-        });
-      }
-
-      const refreshed = await refreshIngestedVideosUntilVisible(completedVideoIds);
-      if (refreshed) {
-        const label = completedVideoIds.length === 1 ? "video" : "videos";
-        setStatus(`Ingest successful. ${completedVideoIds.length} ${label} added and list refreshed.`);
-      } else {
-        setStatus("Ingest completed, but list refresh is still catching up. Use Reload list.");
-      }
-      onSuccess(firstVideo);
-    } catch (error) {
-      const info = errorInfo(error, "Ingest failed.");
-      setStatus(`Ingest failed. ${info.userMessage}`);
-      setRawResponse(info.debugMessage);
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
-
-  async function deleteVideo(videoId) {
-    const scopedVideoId = String(videoId || "").trim();
-    if (!scopedVideoId) {
-      return;
-    }
-    const confirmed = window.confirm(`Delete ${scopedVideoId} from the library?`);
-    if (!confirmed) {
-      return;
-    }
-    setDeletingVideoId(scopedVideoId);
-    try {
-      await apiRequest(`/v1/videos/${encodeURIComponent(scopedVideoId)}`, {
-        method: "DELETE",
-      });
-      if (localStorage.getItem(LAST_VIDEO_KEY) === scopedVideoId) {
-        localStorage.removeItem(LAST_VIDEO_KEY);
-      }
-      setStatus(`Deleted ${scopedVideoId} from the library.`);
-      await loadIngestedVideos();
-    } catch (error) {
-      const info = errorInfo(error, "Delete failed.");
-      setStatus(`Delete failed. ${info.userMessage}`);
-    } finally {
-      setDeletingVideoId("");
-    }
-  }
-
-  function scrollCarousel(direction) {
-    if (!carouselRef.current) {
-      return;
-    }
-    const step = Math.max(carouselRef.current.clientWidth * 0.8, 280);
-    carouselRef.current.scrollBy({
-      left: direction * step,
-      behavior: "smooth",
-    });
-  }
-
-  return (
-    <section className="ingest-stage">
-      <header className="hero ingest-hero">
-        <h1>Library</h1>
-        <p className="subtitle">
-          Index YouTube transcripts for retrieval. Search, Evaluate, and the lab tools open after the first video is indexed.
-        </p>
-      </header>
-
-      <section className="panel ingest-panel primary-ingest-panel">
-        <h2 className="section-title">
-          <img src="/icons/icon-upload.svg" alt="" aria-hidden="true" />
-          <span>Paste a YouTube URL</span>
-        </h2>
-        <p className="section-desc">Add a video or playlist to the retrieval library.</p>
-        <form className="grid ingest-compose-form" onSubmit={handleSubmit}>
-          <div className="ingest-primary-row">
-            <label className="ingest-url-field">
-              <span>YouTube URL</span>
-              <input
-                required
-                value={url}
-                onChange={(event) => setUrl(event.target.value)}
-                placeholder="Paste a video or playlist URL"
-              />
-            </label>
-            <button className="btn ingest-submit-btn" type="submit" disabled={isSubmitting}>
-              {isSubmitting ? "Submitting..." : "Run Ingestion"}
-            </button>
-          </div>
-
-          <div className="ingest-advanced-grid">
-            <label>
-              <span>Mode</span>
-              <select value={mode} onChange={(event) => setMode(event.target.value)}>
-                <option value="single">single</option>
-                <option value="playlist">playlist</option>
-              </select>
-            </label>
-            <label>
-              <span>Language</span>
-              <select value={language} onChange={(event) => setLanguage(event.target.value)}>
-                <option value="ja">ja</option>
-                <option value="en">en</option>
-              </select>
-            </label>
-            <label className="checkbox ingest-force-check">
-              <input type="checkbox" checked={force} onChange={(event) => setForce(event.target.checked)} />
-              <span>Force reingest</span>
-            </label>
-          </div>
-        </form>
-        <div className="search-summary">{status}</div>
-        <details className="raw-json">
-          <summary>Raw JSON</summary>
-          <pre className="output">{rawResponse}</pre>
-        </details>
-      </section>
-
-      <section className="panel ingest-library-panel">
-        <div className="section-head">
-          <h2 className="section-title">
-            <img src="/icons/icon-library.svg" alt="" aria-hidden="true" />
-            <span>Indexed videos</span>
-          </h2>
-          <div className="ingest-carousel-controls">
-            <button
-              className="btn secondary ingest-reload-btn"
-              type="button"
-              onClick={() => loadIngestedVideos().catch(() => {})}
-            >
-              Reload list
-            </button>
-            <button
-              className="btn secondary ingest-scroll-btn"
-              type="button"
-              onClick={() => scrollCarousel(-1)}
-              disabled={!ingestedVideos.length}
-              aria-label="Scroll videos left"
-            >
-              ◀
-            </button>
-            <button
-              className="btn secondary ingest-scroll-btn"
-              type="button"
-              onClick={() => scrollCarousel(1)}
-              disabled={!ingestedVideos.length}
-              aria-label="Scroll videos right"
-            >
-              ▶
-            </button>
-          </div>
-        </div>
-
-        {videosError ? (
-          <FriendlyError
-            error={videosError}
-            title="Could not load ingested videos."
-            onRetry={() => loadIngestedVideos().catch(() => {})}
-          />
-        ) : null}
-
-        {isLoadingVideos ? (
-          <div className="search-empty">Loading ingested videos...</div>
-        ) : null}
-
-        {!isLoadingVideos && !ingestedVideos.length ? (
-          <div className="search-empty">No ingested videos yet.</div>
-        ) : null}
-
-        {!isLoadingVideos && ingestedVideos.length ? (
-          <div className="ingest-carousel" ref={carouselRef}>
-            {ingestedVideos.map((video) => {
-              const videoId = String(video.video_id || "").trim();
-              const reviewHref = `/reviews.html?video_id=${encodeURIComponent(videoId)}`;
-              const isDeleting = deletingVideoId === videoId;
-              const thumbnailUrl = thumbnailUrlForVideo(videoId);
-              return (
-                <article className="ingest-video-card" key={videoId}>
-                  <div className={`ingest-video-thumb ${thumbnailUrl ? "" : "fallback-only"}`}>
-                    <span className="ingest-thumb-fallback">
-                      <img src="/icons/icon-play.svg" alt="" aria-hidden="true" />
-                    </span>
-                    {thumbnailUrl ? (
-                      <img
-                        src={thumbnailUrl}
-                        alt=""
-                        loading="lazy"
-                        referrerPolicy="no-referrer"
-                        onError={(event) => {
-                          event.currentTarget.style.display = "none";
-                        }}
-                      />
-                    ) : null}
-                  </div>
-                  <h3 className="ingest-video-title">{video.title || videoId}</h3>
-                  <p className="ingest-video-meta">ID: {videoId}</p>
-                  <p className="ingest-video-meta">Language: {video.language || "-"}</p>
-                  <p className="ingest-video-meta">Chunks: {Number(video.num_chunks || 0)}</p>
-                  <div className="ingest-video-actions">
-                    <a className="btn secondary" href={reviewHref}>Review</a>
-                    <button
-                      className="btn secondary danger"
-                      type="button"
-                      disabled={isDeleting}
-                      onClick={() => deleteVideo(videoId).catch(() => {})}
-                    >
-                      {isDeleting ? "Deleting..." : "Delete"}
-                    </button>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        ) : null}
-      </section>
-    </section>
-  );
 }
 
 function LocalVideoAnalysisPage({ locale }) {
@@ -1657,7 +1158,7 @@ function RetrievalVisuals({ response, rows }) {
   );
 }
 
-function QAStudioPage({ locale }) {
+function QAStudioPage({ locale, initialQuestion = "" }) {
   const [askVideos, setAskVideos] = useState([]);
   const [askVideoId, setAskVideoId] = useState("");
   const [isLoadingAskVideos, setIsLoadingAskVideos] = useState(true);
@@ -1670,7 +1171,7 @@ function QAStudioPage({ locale }) {
   const [searchResponse, setSearchResponse] = useState(null);
   const [searchError, setSearchError] = useState("");
 
-  const [question, setQuestion] = useState("");
+  const [question, setQuestion] = useState(initialQuestion);
   const [kAsk, setKAsk] = useState(5);
   const [askMode, setAskMode] = useState("hybrid");
   const [askAgentic, setAskAgentic] = useState(true);
@@ -3319,6 +2820,8 @@ function StudyStudioPage() {
   );
 }
 
+const LOCKED_NAV_HINT = "Index a video in the Library first";
+
 const STUDY_MODES = [
   { route: ROUTES.STUDY, label: "Study", icon: "/icons/icon-library.svg" },
   { route: ROUTES.TLDR, label: "Summary", icon: "/icons/icon-chat.svg" },
@@ -3326,15 +2829,9 @@ const STUDY_MODES = [
 
 function SearchWorkspace({ locale }) {
   return (
-    <section className="studio-workspace">
-      <header className="hero studio-hero">
-        <h1>Search</h1>
-        <p className="subtitle">Retrieve transcript evidence, inspect how it was found, and generate cited answers.</p>
-      </header>
-      <div className="studio-mode-content">
-        <QAStudioPage locale={locale} />
-      </div>
-    </section>
+    <SearchWorkbench
+      renderAnswer={(question) => <QAStudioPage locale={locale} initialQuestion={question} />}
+    />
   );
 }
 
@@ -3486,8 +2983,8 @@ function App() {
 
   const brand = LAB_BRAND[locale] || LAB_BRAND["en-US"];
 
-  function isNavItemVisible(item) {
-    return !item.requiresUnlock || unlocked;
+  function isNavItemLocked(item) {
+    return Boolean(item.requiresUnlock) && !unlocked;
   }
 
   function isNavItemActive(item) {
@@ -3500,6 +2997,7 @@ function App() {
 
   function NavItem({ item, mobile = false }) {
     const active = isNavItemActive(item);
+    const locked = isNavItemLocked(item);
     const className = mobile ? `bottom-tab-link ${active ? "active" : ""}` : `app-nav-link nav-btn ${active ? "active" : ""}`;
     const content = (
       <>
@@ -3508,6 +3006,13 @@ function App() {
       </>
     );
 
+    if (locked) {
+      return (
+        <button type="button" className={`${className} locked`} disabled title={LOCKED_NAV_HINT}>
+          {content}
+        </button>
+      );
+    }
     if (item.route) {
       return (
         <button
@@ -3528,14 +3033,23 @@ function App() {
   }
 
   function NavMenu({ menu, items, mobile = false }) {
-    const visibleItems = items.filter(isNavItemVisible);
-    if (!visibleItems.length) {
-      return null;
-    }
-    const menuActive = visibleItems.some(isNavItemActive);
+    const menuActive = items.some(isNavItemActive);
     const label = labNavLabel(menu, locale);
-    const links = visibleItems.map((item) => {
+    const links = items.map((item) => {
       const active = isNavItemActive(item);
+      if (isNavItemLocked(item)) {
+        return (
+          <span
+            className={`${mobile ? "bottom-tools-link" : "nav-tools-link"} locked`}
+            aria-disabled="true"
+            title={LOCKED_NAV_HINT}
+            key={`${mobile ? "bottom-" : ""}tool-${item.key}`}
+          >
+            <img className={mobile ? "bottom-tab-icon" : "nav-icon"} src={item.icon} alt="" aria-hidden="true" />
+            <span>{labNavLabel(item, locale)}</span>
+          </span>
+        );
+      }
       return (
         <a
           className={`${mobile ? "bottom-tools-link" : "nav-tools-link"} ${active ? "active" : ""}`}
@@ -3593,7 +3107,7 @@ function App() {
         </a>
         <div className="appbar-actions">
           <nav className="appbar-nav" aria-label="Primary">
-            {LAB_NAV_PRIMARY.filter(isNavItemVisible).map((item) => (
+            {LAB_NAV_PRIMARY.map((item) => (
               <NavItem key={item.key} item={item} />
             ))}
             <NavMenu menu={LAB_NAV_TOOLS_MENU} items={LAB_NAV_TOOLS} />
@@ -3610,7 +3124,7 @@ function App() {
 
       <main className={`shell react-shell-main ${route === ROUTES.INGEST ? "ingest-route" : ""}`}>
         <div className="route-scene" key={`scene-${route}-${routeAnimationKey}`}>
-          {route === ROUTES.INGEST ? <IngestPage onSuccess={handleIngestSuccess} /> : null}
+          {route === ROUTES.INGEST ? <LibraryPage onSuccess={handleIngestSuccess} /> : null}
           {route === ROUTES.LOCAL_VIDEO ? <LocalVideoAnalysisPage locale={locale} /> : null}
           {route === ROUTES.QA && unlocked ? <SearchWorkspace locale={locale} /> : null}
           {(route === ROUTES.STUDY || route === ROUTES.TLDR) && unlocked ? <StudyWorkspace route={route} /> : null}
@@ -3618,7 +3132,7 @@ function App() {
       </main>
 
       <nav className="bottom-tabbar" aria-label="Primary mobile navigation">
-        {LAB_NAV_PRIMARY.filter(isNavItemVisible).map((item) => (
+        {LAB_NAV_PRIMARY.map((item) => (
           <NavItem key={`mobile-${item.key}`} item={item} mobile />
         ))}
         <NavMenu menu={LAB_NAV_TOOLS_MENU} items={LAB_NAV_TOOLS} mobile />

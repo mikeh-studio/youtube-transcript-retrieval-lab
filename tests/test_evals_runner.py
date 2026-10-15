@@ -21,7 +21,14 @@ def test_runner_writes_reports_and_selects_optimized_config(tmp_path):
     assert (tmp_path / "latest" / "per_query_results.jsonl").exists()
     assert result["selected_run"]["name"] == "optimized_hybrid"
     assert result["thresholds"]["small_sample"] is True
-    assert result["thresholds"]["passed"] is True
+    # Quality checks are deterministic on the fixture. The p95 latency check
+    # compares sub-millisecond wall-clock timings, so CI noise can fail it; the
+    # CLI still enforces it with --fail-on-threshold.
+    checks = result["thresholds"]["checks"]
+    assert any(check["metric"] == "p95_latency_ms" for check in checks)
+    quality_checks = [check for check in checks if check["metric"] != "p95_latency_ms"]
+    assert quality_checks
+    assert all(check["passed"] for check in quality_checks), quality_checks
     agentic = next(run for run in result["runs"] if run["name"] == "agentic")
     assert agentic["strategy"] == "agentic"
     assert "Precision@5" in agentic["metrics"]

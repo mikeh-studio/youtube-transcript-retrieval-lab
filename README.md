@@ -8,7 +8,7 @@ videos into a catalog, index the ones you review, run retrieval strategies side
 by side, and measure the results with labels and ranking metrics. The raw
 timestamped transcript stays the source of truth for every result and answer.
 
-![Evaluate workspace scoring retrieval runs with Precision@K, Recall@K, MRR, and nDCG@K](docs/media/02-evaluation-metrics.png)
+![Search comparing a single-pass hybrid run with an agentic run on a Japanese query, with rank changes, relevance labels, and per-query Precision@K and nDCG@K](docs/media/search-workbench.png)
 
 ## The lab
 
@@ -17,8 +17,8 @@ The app follows the lab workflow: **Catalog → Library → Search → Evaluate*
 | Page | What it does |
 | --- | --- |
 | **Catalog** | Browses discovered videos with metadata, catalog topics, review status, and provenance. Read-only and optional; it reads from a separate private catalog service. Cataloged videos are not searchable until they are indexed. |
-| **Library** | Indexes YouTube videos and playlists: canonical timestamped transcripts, chunks, and search indexes. |
-| **Search** | Runs hybrid, dense, lexical, or agentic retrieval across the library or chosen videos, shows how results were found, and can generate a cited answer or abstain. |
+| **Library** | Indexes YouTube videos and playlists, and lists indexed videos with chunk counts, chunking status, and catalog review status. |
+| **Search** | Compares two retrieval setups side by side on one query (for example single-pass hybrid against agentic with reranking), with rank changes, relevance labels, per-query Precision@K and nDCG@K, and the trace of how each run found its results. Scope it to all videos, chosen videos, or a catalog filter. An Answer tab generates a cited answer or abstains. |
 | **Evaluate** | Builds query sets, labels results, scores runs with Precision@K, Recall@K, MRR, and nDCG@K, compares runs, and drafts datasets with Codex CLI for human review. |
 | **Tools** | Chunking (compare chunking strategies), Data quality (evidence curation reports), Search feedback (relevance feedback from Search), Local video (OCR for files you own), and Study. |
 
@@ -84,18 +84,16 @@ Read the [architecture](docs/architecture.md), [retrieval guide](docs/retrieval.
    [dataset generator](https://github.com/mikeh-studio/youtube-transcript-retrieval-lab/pull/37),
    [request boundary](https://github.com/mikeh-studio/youtube-transcript-retrieval-lab/pull/41),
    and [library export](https://github.com/mikeh-studio/youtube-transcript-retrieval-lab/pull/42).
-6. **Catalog-first lab:** a read-only catalog of discovered videos and a
-   navigation built around the lab workflow. See the
-   [catalog browser](https://github.com/mikeh-studio/youtube-transcript-retrieval-lab/pull/43).
+6. **Catalog-first lab:** a read-only catalog of discovered videos, a
+   navigation built around the lab workflow, a Library of indexed videos, and
+   Search rebuilt as an A/B workbench. See the [catalog browser](https://github.com/mikeh-studio/youtube-transcript-retrieval-lab/pull/43),
+   [lab navigation](https://github.com/mikeh-studio/youtube-transcript-retrieval-lab/pull/44), and the [Search workbench design](docs/design/README.md).
 
-### Next: Search as the lab workbench
+### Next
 
-Search will compare a baseline and a candidate run side by side by default,
-take relevance labels on each result (folding Search feedback into Evaluate),
-filter by catalog topic and review status, and show the retrieval trace before
-any answer. See the [design mock](docs/design/search-workbench.png).
-
-Release notes live in [`CHANGELOG.md`](CHANGELOG.md); planned work lives in [`TODOS.md`](TODOS.md).
+Move Evaluate, Chunking, and Data quality into the same app shell; keep Search
+A/B runs in Evaluate's run history; and fold the Search feedback page into
+Evaluate.
 
 ## Run locally
 
