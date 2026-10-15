@@ -95,8 +95,6 @@ Move Evaluate, Chunking, and Data quality into the same app shell; keep Search
 A/B runs in Evaluate's run history; and fold the Search feedback page into
 Evaluate.
 
-Release notes live in [`CHANGELOG.md`](CHANGELOG.md); planned work lives in [`TODOS.md`](TODOS.md).
-
 ## Run locally
 
 Use Python 3.11 (the CI version). From the repository root:

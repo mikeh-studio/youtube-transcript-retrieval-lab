@@ -50,7 +50,7 @@ Public guidance for contributors and AI coding assistants working in this repo.
 - Keep commits scoped (one logical change per commit) and include tests/docs with code changes.
 - PRs should include: purpose, key changes, test commands run, and screenshots for UI updates (`local_preview/web/*`).
 - For docs-only or README-only work, state that explicitly in the PR summary.
-- Keep the README a short landing page; put operator detail in `docs/` or `local_preview/README.md` and release notes in `CHANGELOG.md`. Avoid repeating the same feature details across files.
+- Keep the README a short landing page; put operator detail in `docs/` or `local_preview/README.md`; the history lives in pull requests. Avoid repeating the same feature details across files.
 - Link related issues/tasks and list any required environment variables (for example `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`).
 
 ## Security & Configuration Tips

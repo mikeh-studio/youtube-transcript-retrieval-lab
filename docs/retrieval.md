@@ -93,4 +93,4 @@ response status is `answered`, `insufficient_evidence`, or `error`, with a
 `0.2` for models that accept it.
 
 The sufficiency thresholds are hand-tuned and not yet measured by answer-level
-evaluation; see [`TODOS.md`](../TODOS.md).
+evaluation.
