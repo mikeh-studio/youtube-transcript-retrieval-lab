@@ -37,6 +37,19 @@ The [video-routing evaluator](../evals/video_routing/README.md) scores the
 video-selection stage separately, using synthetic records whose labels stay
 hidden from the router.
 
+## Label in Search
+
+Search compares Run A and Run B on one query. Mark each result **Relevant** or
+**Not relevant**; the label is saved for that query and chunk, appears in both
+columns, and updates the per-query Precision@K and nDCG@K for both runs. Both
+runs skip feedback tuning, so labeling does not change the rankings being
+compared. **Save to query set** adds the query to the **Saved from Search**
+query set in Evaluate so it can be re-run later.
+
+![Evaluate showing the Saved from Search query set with queries saved from Search](media/evaluate-saved-from-search.png)
+
+![Search comparing two runs with relevance labels and per-query metrics](media/search-workbench.png)
+
 ## Evaluate page
 
 Open **Evaluate** (`http://127.0.0.1:8000/evaluation.html`) to:
@@ -47,10 +60,9 @@ Open **Evaluate** (`http://127.0.0.1:8000/evaluation.html`) to:
 - compare runs with aggregate and per-query deltas
 
 Query sets, labels, and run snapshots are stored in browser `localStorage`.
-Relevance feedback given in Search is stored separately in `data/runtime/`,
-feeds retrieval tuning, and is listed under **Tools → Search feedback**. A
-planned Search redesign labels results inline and folds Search feedback into
-Evaluate; see the [design mock](design/search-workbench.png).
+Labels given in Search are stored separately in `data/runtime/`, feed the
+server's default feedback tuning, and are listed under **Tools → Search
+feedback**. Folding that page into Evaluate is planned.
 
 ## Draft a dataset with Codex CLI
 
@@ -96,4 +108,4 @@ Inspect the output under **Tools → Data quality** (`http://127.0.0.1:8000/evid
 - Labels come from a single reviewer; inter-rater agreement and adjudication UI
   are not implemented.
 - Answer quality (citation precision, faithfulness, abstention correctness) is
-  not yet scored; see [`TODOS.md`](../TODOS.md).
+  not yet scored.

@@ -53,7 +53,7 @@ need network access.
 | `YT_RAG_RERANKER=1` | Enable cross-encoder reranking for every request |
 | `YT_RAG_RERANKER_MODEL` | Cross-encoder model override |
 | `YT_RAG_AGENTIC_RETRIEVAL=1` | Enable agentic search for every request |
-| `YT_RAG_FEEDBACK_TUNING=0` | Disable feedback-based score adjustment |
+| `YT_RAG_FEEDBACK_TUNING=0` | Disable feedback-based score adjustment by default (Search always disables it per request) |
 
 Each switch can also be set per request; see the [retrieval guide](retrieval.md).
 

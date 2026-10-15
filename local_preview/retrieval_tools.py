@@ -26,6 +26,7 @@ class TranscriptRetrievalTools:
         video_ids: Optional[list[str]] = None,
         retrieval_profile: Optional[str] = None,
         reranker: Optional[str] = None,
+        **retrieve_options,
     ) -> dict:
         """Delegate to the existing E5 + FAISS dense-search path."""
         return self._retrieve_fn(
@@ -37,6 +38,7 @@ class TranscriptRetrievalTools:
             video_ids=video_ids,
             retrieval_profile=retrieval_profile,
             reranker=reranker,
+            **retrieve_options,
         )
 
     def keyword_search(
@@ -49,6 +51,7 @@ class TranscriptRetrievalTools:
         video_ids: Optional[list[str]] = None,
         retrieval_profile: Optional[str] = None,
         reranker: Optional[str] = None,
+        **retrieve_options,
     ) -> dict:
         """Delegate to the existing Japanese-aware BM25 search path."""
         return self._retrieve_fn(
@@ -60,6 +63,7 @@ class TranscriptRetrievalTools:
             video_ids=video_ids,
             retrieval_profile=retrieval_profile,
             reranker=reranker,
+            **retrieve_options,
         )
 
     def read_context(

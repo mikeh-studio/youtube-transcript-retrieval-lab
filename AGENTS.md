@@ -4,6 +4,7 @@ Public guidance for contributors and AI coding assistants working in this repo.
 
 ## Project Structure & Module Organization
 - `local_preview/`: the local app. `local_api.py` (HTTP API + static files), `catalog_client.py` (read-only catalog proxy), retrieval tools, agentic search, grounded answers, and the evaluation dataset generator. UI pages and bundle in `local_preview/web/`; React source in `local_preview/react_shell/`.
+- `local_preview/react_shell/src/`: `library.jsx` (Library), `workbench.jsx` (Search A/B workbench), `lab.jsx` (shared helpers), and `App.jsx` (routing, Answer flow, Study, Local video). Rebuild the bundle with `npm run build:web` after changes.
 - `local_preview/web/lab-nav.js`: the single navigation definition (Catalog, Library, Search, Evaluate, Tools). Change nav items here, not in individual pages.
 - `browser_boundary.py`: same-origin request boundary (see `BROWSER_SECURITY.md`).
 - `multilingual/`: core engine (`video_library.py`, `text_processing.py`, `rag_engine.py`, `reranker.py`, `video_routing.py`) and language-specific tests in `multilingual/tests/`.
@@ -49,7 +50,7 @@ Public guidance for contributors and AI coding assistants working in this repo.
 - Keep commits scoped (one logical change per commit) and include tests/docs with code changes.
 - PRs should include: purpose, key changes, test commands run, and screenshots for UI updates (`local_preview/web/*`).
 - For docs-only or README-only work, state that explicitly in the PR summary.
-- Keep the README a short landing page; put operator detail in `docs/` or `local_preview/README.md` and release notes in `CHANGELOG.md`. Avoid repeating the same feature details across files.
+- Keep the README a short landing page; put operator detail in `docs/` or `local_preview/README.md`; the history lives in pull requests. Avoid repeating the same feature details across files.
 - Link related issues/tasks and list any required environment variables (for example `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`).
 
 ## Security & Configuration Tips
