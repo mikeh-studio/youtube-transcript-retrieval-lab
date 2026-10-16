@@ -1,0 +1,24 @@
+include pyproject.toml README.md LICENSE
+include browser_boundary.py
+include scripts/check_distribution.py retrieval_lab/public-files.txt
+include scripts/smoke_installed.py
+recursive-include retrieval_lab *.py
+recursive-include local_preview *.py
+recursive-include local_preview/web *.html *.js *.css *.svg
+recursive-include local_preview/schemas *.json
+recursive-include local_preview/examples *.json
+recursive-include multilingual *.py
+recursive-include pipelines *.py
+recursive-include retrieval *.py
+recursive-include evals *.py
+recursive-include evals/configs *.yaml
+recursive-include evals/datasets *.json *.jsonl
+recursive-include evals/fixtures *.json
+prune tests
+prune multilingual/tests
+prune data
+prune docs
+prune local_preview/data
+prune local_preview/react_shell
+prune evals/reports
+global-exclude *.pyc .env .env.*

@@ -16,9 +16,6 @@ from typing import Any, Dict, List, Optional
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
-LOCAL_PREVIEW_DIR = ROOT_DIR / "local_preview"
-if str(LOCAL_PREVIEW_DIR) not in sys.path:
-    sys.path.insert(0, str(LOCAL_PREVIEW_DIR))
 
 os.environ.setdefault("YT_RAG_SKIP_GLOBAL_SERVICE", "1")
 

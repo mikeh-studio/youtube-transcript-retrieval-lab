@@ -24,7 +24,11 @@ from typing import Iterable, Iterator, Optional
 
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
-DEFAULT_DATA_DIR = ROOT_DIR / "data"
+if __package__ in (None, "") and str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+from local_preview.config import RuntimeConfig
+
+DEFAULT_DATA_DIR = RuntimeConfig.resolve().data_dir
 PIPELINE_NAME = "transcript_evidence_curation"
 PIPELINE_VERSION = "v1"
 MODEL_NAME = "heuristic_quality_scorer"

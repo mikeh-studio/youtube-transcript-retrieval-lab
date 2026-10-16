@@ -10,7 +10,9 @@ from typing import Iterable, Iterator
 
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
-DEFAULT_DATA_DIR = ROOT_DIR / "data"
+from local_preview.config import RuntimeConfig
+
+DEFAULT_DATA_DIR = RuntimeConfig.resolve().data_dir
 VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 

@@ -8,6 +8,10 @@ videos into a catalog, index the ones you review, run retrieval strategies side
 by side, and measure the results with labels and ranking metrics. The raw
 timestamped transcript stays the source of truth for every result and answer.
 
+The app can also be installed as a Python package with its built UI included.
+See [installation and the public/private boundary](docs/public-package.md) for
+isolated data paths, release checks, and the staged integration handoff.
+
 ![Search comparing a single-pass hybrid run with an agentic run on a Japanese query, with rank changes, relevance labels, and per-query Precision@K and nDCG@K](docs/media/search-workbench.png)
 
 ## The lab
