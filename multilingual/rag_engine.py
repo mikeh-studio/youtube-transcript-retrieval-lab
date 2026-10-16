@@ -84,15 +84,18 @@ class RAGEngine:
 
     DEFAULT_MODEL = "claude-sonnet-4-5-20250929"
 
-    def __init__(self, library=None, model=None):
+    def __init__(self, library=None, model=None, *, data_dir=None):
         """Initialize the RAG engine.
 
         Args:
             library: VideoLibrary instance (created if not provided).
+            data_dir: Explicit writable library path for the application launcher.
             model: Anthropic model to use for generation. Defaults to the
                 ANTHROPIC_MODEL environment variable, then DEFAULT_MODEL.
         """
-        self.library = library or VideoLibrary()
+        self.library = library if library is not None else (
+            VideoLibrary(data_dir=data_dir) if data_dir is not None else VideoLibrary()
+        )
         self.model = (
             model
             or os.environ.get("ANTHROPIC_MODEL", "").strip()

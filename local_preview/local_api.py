@@ -44,19 +44,13 @@ except Exception:  # pragma: no cover
     openai = None
     OpenAI = None
 
-try:
-    from dotenv import load_dotenv
-except Exception:  # pragma: no cover
-    load_dotenv = None
-
-
 ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-if load_dotenv is not None:
-    load_dotenv(ROOT_DIR / ".env")
-    load_dotenv(ROOT_DIR / ".env.local", override=True)
+from local_preview.config import RuntimeConfig, startup_config
+
+APP_CONFIG = startup_config()
 
 from browser_boundary import BrowserBoundary
 
@@ -80,19 +74,19 @@ from pipelines.video_ocr_common import (  # noqa: E402
 )
 from retrieval.ocr_retriever import OCREvidenceRetriever  # noqa: E402
 from retrieval.search_multimodal import merge_evidence  # noqa: E402
-from feedback_keys import (  # noqa: E402
+from retrieval_lab.feedback_keys import (  # noqa: E402
     feedback_chunk_key,
     feedback_query_hash,
     feedback_record_key,
     normalize_feedback_query,
 )
-from agentic_retrieval import (  # noqa: E402
+from retrieval_lab.agentic_retrieval import (  # noqa: E402
     heuristic_query_rewrite,
     normalize_query_for_compare,
     run_agentic_tool_search,
 )
-from retrieval_tools import TranscriptRetrievalTools  # noqa: E402
-from grounded_answer import (  # noqa: E402
+from retrieval_lab.retrieval_tools import TranscriptRetrievalTools  # noqa: E402
+from retrieval_lab.grounded_answer import (  # noqa: E402
     ANSWER_CONFIDENCE_LEVELS,
     ANSWER_STATUSES,
     assess_grounded_answer_evidence,
@@ -104,7 +98,7 @@ from grounded_answer import (  # noqa: E402
     default_insufficient_answer,
     normalize_grounded_answer_payload,
 )
-from eval_generator import EvalGeneratorError, EvalGeneratorService  # noqa: E402
+from local_preview.eval_generator import EvalGeneratorError, EvalGeneratorService  # noqa: E402
 
 
 VIDEO_ID_RE = re.compile(r"[a-zA-Z0-9_-]{11}")
@@ -620,9 +614,10 @@ class LocalVideoOCRJob:
 
 
 class LocalRAGService:
-    def __init__(self):
+    def __init__(self, config: Optional[RuntimeConfig] = None):
+        self.config = config or APP_CONFIG
         self.lock = threading.Lock()
-        self.engine = RAGEngine()
+        self.engine = RAGEngine(data_dir=str(self.config.data_dir))
         self.openai_model = (
             str(os.environ.get("OPENAI_MODEL") or "gpt-5.4-mini").strip()
             or "gpt-5.4-mini"
@@ -643,11 +638,11 @@ class LocalRAGService:
         self.feedback_lock = threading.Lock()
         self.video_router_lock = threading.Lock()
         self.video_router = None
-        self.runtime_data_dir = ROOT_DIR / "data" / "runtime"
-        self.cache_data_dir = ROOT_DIR / "data" / "cache"
+        self.runtime_data_dir = self.config.data_dir / "runtime"
+        self.cache_data_dir = self.config.data_dir / "cache"
         self.summary_cache_dir = self.cache_data_dir / "summaries"
         self.study_section_cache_dir = self.cache_data_dir / "study_sections"
-        self.legacy_data_dir = Path(__file__).resolve().parent / "data"
+        self.legacy_data_dir = self.config.legacy_data_dir
         self.feedback_path = self.runtime_data_dir / "search_feedback.json"
         self.legacy_feedback_path = self.legacy_data_dir / "search_feedback.json"
         self.feedback: Dict[str, dict] = {}
@@ -844,7 +839,7 @@ class LocalRAGService:
                 }
 
             service = EvalGeneratorService(
-                root_dir=ROOT_DIR,
+                root_dir=getattr(self, "config", APP_CONFIG).workspace_dir,
                 runtime_dir=self.runtime_data_dir,
                 video_getter=generator_video,
             )
@@ -1158,7 +1153,7 @@ class LocalRAGService:
             )
         path = Path(raw).expanduser()
         if not path.is_absolute():
-            path = ROOT_DIR / path
+            path = getattr(self, "config", APP_CONFIG).workspace_dir / path
         path = path.resolve()
         if not path.exists():
             raise ValueError(f"video_path does not exist: {path}")
@@ -1170,7 +1165,7 @@ class LocalRAGService:
         return path
 
     def _local_ocr_data_dir(self) -> Path:
-        return ROOT_DIR / "data"
+        return getattr(self, "config", APP_CONFIG).data_dir
 
     def start_local_video_ocr_job(
         self,
@@ -1393,7 +1388,7 @@ class LocalRAGService:
             self.ask_history_lock = threading.Lock()
         if not hasattr(self, "ask_history_path"):
             self.ask_history_path = (
-                Path(__file__).resolve().parent / "data" / "ask_history.json"
+                getattr(self, "config", APP_CONFIG).data_dir / "runtime" / "ask_history.json"
             )
         if not hasattr(self, "ask_history") or not isinstance(self.ask_history, dict):
             self.ask_history = {}
@@ -1584,16 +1579,21 @@ class LocalRAGService:
     def _load_ask_history(self) -> None:
         self._ensure_ask_history_state()
         self.ask_history_path.parent.mkdir(parents=True, exist_ok=True)
-        source_path = self._resolve_existing_path(
-            self.ask_history_path, self.legacy_ask_history_path
-        )
-        if source_path is None:
-            return
-        try:
-            raw = json.loads(source_path.read_text(encoding="utf-8"))
-        except Exception:
-            self.ask_history = {}
-            return
+        raw = {}
+        self._ask_history_invalid_primary = False
+        for source_path in (self.ask_history_path, self.legacy_ask_history_path):
+            if source_path is None or not source_path.exists():
+                continue
+            try:
+                candidate = json.loads(source_path.read_text(encoding="utf-8"))
+                if not isinstance(candidate, dict):
+                    raise ValueError("Ask history must be a JSON object")
+            except (OSError, UnicodeError, ValueError):
+                if source_path == self.ask_history_path:
+                    self._ask_history_invalid_primary = True
+                continue
+            raw = candidate
+            break
 
         normalized: Dict[str, List[dict]] = {}
         if isinstance(raw, dict):
@@ -1618,6 +1618,17 @@ class LocalRAGService:
     def _persist_ask_history(self) -> None:
         self._ensure_ask_history_state()
         self.ask_history_path.parent.mkdir(parents=True, exist_ok=True)
+        if getattr(self, "_ask_history_invalid_primary", False) and self.ask_history_path.exists():
+            # Preserve damaged bytes before the first recovery write. If the
+            # backup cannot be made, fail rather than overwrite the original.
+            damaged = self.ask_history_path.read_bytes()
+            backup = self.ask_history_path.with_name(
+                f"ask_history.corrupt-{uuid.uuid4().hex}.json"
+            )
+            descriptor = os.open(backup, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(descriptor, "wb") as handle:
+                handle.write(damaged)
+            self._ask_history_invalid_primary = False
         temp_path = self.ask_history_path.with_suffix(".tmp")
         temp_path.write_text(
             json.dumps(self.ask_history, ensure_ascii=False, indent=2),
@@ -5232,7 +5243,7 @@ class LocalRAGService:
         safe_video_id = re.sub(r"[^a-zA-Z0-9_-]+", "_", str(video_id or "").strip())
         base_dir = getattr(self, "study_section_cache_dir", None)
         if base_dir is None:
-            base_dir = getattr(self, "cache_data_dir", ROOT_DIR / "data" / "cache") / "study_sections"
+            base_dir = getattr(self, "cache_data_dir", APP_CONFIG.data_dir / "cache") / "study_sections"
             self.study_section_cache_dir = base_dir
         return Path(base_dir) / f"{safe_video_id or 'unknown'}.json"
 
@@ -7919,13 +7930,9 @@ class LocalRAGService:
         return response
 
 
-SERVICE = (
-    None
-    if str(os.environ.get("YT_RAG_SKIP_GLOBAL_SERVICE", "0")).strip().lower()
-    in {"1", "true", "yes", "on"}
-    else LocalRAGService()
-)
-WEB_DIR = Path(__file__).resolve().parent / "web"
+# Imports are inert: model/index initialization belongs to the launcher.
+SERVICE = None
+WEB_DIR = APP_CONFIG.static_dir
 
 
 class Handler(BrowserBoundary, BaseHTTPRequestHandler):
@@ -9029,10 +9036,12 @@ class Handler(BrowserBoundary, BaseHTTPRequestHandler):
             )
 
 
-def main(argv: List[str]) -> int:
-    global SERVICE
+def main(argv: List[str], *, config: Optional[RuntimeConfig] = None) -> int:
+    global SERVICE, WEB_DIR
+    if config is not None:
+        WEB_DIR = config.static_dir
     if SERVICE is None:
-        SERVICE = LocalRAGService()
+        SERVICE = LocalRAGService(config=config)
 
     host = "127.0.0.1"
     port = 8000
