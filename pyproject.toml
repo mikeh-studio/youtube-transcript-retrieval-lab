@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "youtube-transcript-retrieval-lab"
+version = "0.2.0"
+description = "Local transcript retrieval, evidence, and evaluation workbench"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = [
+  "youtube-transcript-api", "fugashi", "unidic-lite", "faiss-cpu",
+  "sentence-transformers", "numpy", "anthropic", "openai", "python-dotenv",
+]
+
+[project.optional-dependencies]
+ocr = ["easyocr"]
+dev = ["pytest", "build"]
+
+[project.scripts]
+retrieval-lab = "retrieval_lab.cli:main"
+
+[tool.setuptools]
+packages = ["retrieval_lab", "local_preview", "multilingual", "pipelines", "retrieval", "evals", "evals.video_routing"]
+py-modules = ["browser_boundary"]
+include-package-data = false
+
+[tool.setuptools.package-data]
+retrieval_lab = ["public-files.txt"]
+local_preview = ["web/*.html", "web/*.js", "web/*.css", "web/assets/*.js", "web/icons/*.svg", "schemas/*.json", "examples/*.json"]
+evals = ["configs/*.yaml", "datasets/*.json", "datasets/*.jsonl", "fixtures/*.json"]

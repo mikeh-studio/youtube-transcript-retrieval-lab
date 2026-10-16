@@ -16,7 +16,10 @@ from http.cookiejar import CookieJar
 from urllib.parse import urlsplit
 from urllib.request import HTTPCookieProcessor, Request, build_opener
 
-from feedback_keys import (
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from retrieval_lab.feedback_keys import (
     feedback_chunk_key,
     feedback_query_hash,
     feedback_record_key,

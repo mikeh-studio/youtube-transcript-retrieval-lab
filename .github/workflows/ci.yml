@@ -21,11 +21,36 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt pytest
 
-      - name: Run repository test suite
-        run: pytest tests/ -q
+      - name: Run both Python regression suites with isolated fixtures
+        env:
+          HF_HUB_OFFLINE: "1"
+          YT_RAG_FORCE_HASH_EMBEDDINGS: "1"
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+        run: pytest tests/ multilingual/tests/ -q
 
-      - name: Run chunking regression suite
-        run: HF_HUB_OFFLINE=1 pytest multilingual/tests/test_chunking_strategies.py -q
+  distribution:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build wheel and source archive
+        run: |
+          python -m pip install build
+          python -m build
+          python scripts/check_distribution.py dist/*
+      - name: Install wheel in a separate environment and exercise the real app
+        run: |
+          python -m venv "$RUNNER_TEMP/retrieval-install"
+          "$RUNNER_TEMP/retrieval-install/bin/python" -m pip install dist/*.whl
+          "$RUNNER_TEMP/retrieval-install/bin/python" scripts/smoke_installed.py --output-dir "$RUNNER_TEMP/retrieval-smoke"
+      - name: Rebuild from the source archive and repeat installed checks
+        run: |
+          "$RUNNER_TEMP/retrieval-install/bin/python" -m pip wheel --no-deps dist/*.tar.gz --wheel-dir "$RUNNER_TEMP/rebuilt"
+          python scripts/check_distribution.py "$RUNNER_TEMP"/rebuilt/*.whl
+          "$RUNNER_TEMP/retrieval-install/bin/python" -m pip install --no-deps --force-reinstall "$RUNNER_TEMP"/rebuilt/*.whl
+          "$RUNNER_TEMP/retrieval-install/bin/python" scripts/smoke_installed.py --output-dir "$RUNNER_TEMP/retrieval-smoke-source"
 
   frontend-qa:
     runs-on: ubuntu-latest
