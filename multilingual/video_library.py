@@ -776,7 +776,8 @@ class VideoLibrary:
             saved = dict(LEGACY_EMBEDDING_METADATA)
 
         matches = all(
-            saved.get(key) == current.get(key) for key in ("backend", "model", "dim")
+            saved.get(key) == current.get(key)
+            for key in ("backend", "model", "dim", "revision")
         )
         count_ok = int(self.index.ntotal) == len(self.chunk_map)
         index_dim_ok = int(self.index.d) == int(current.get("dim") or 0)

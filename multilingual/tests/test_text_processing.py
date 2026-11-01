@@ -130,3 +130,37 @@ class TestEmbeddingModelConfig:
             e5_processor.encode_query("shared fallback text"),
             bge_processor.encode_query("shared fallback text"),
         )
+
+
+def test_local_snapshot_preserves_logical_e5_identity(monkeypatch):
+    from multilingual import text_processing as module
+
+    calls = []
+
+    class Encoder:
+        def get_sentence_embedding_dimension(self):
+            return 1024
+
+    def load(name, **options):
+        calls.append((name, options))
+        return Encoder()
+
+    monkeypatch.setattr(module, "SentenceTransformer", load)
+    monkeypatch.setenv("YT_RAG_FORCE_HASH_EMBEDDINGS", "0")
+    monkeypatch.setenv("YT_RAG_EMBED_MODEL", "intfloat/multilingual-e5-large")
+    monkeypatch.setenv("YT_RAG_EMBED_LOCAL_PATH", "/cached/snapshot")
+    monkeypatch.setenv("YT_RAG_EMBED_REVISION", "pinned-revision")
+    monkeypatch.setenv("HF_HUB_OFFLINE", "1")
+    processor = module.TextProcessor()
+    assert calls == [
+        ("/cached/snapshot", {"revision": "pinned-revision", "local_files_only": True})
+    ]
+    assert processor.query_prefix == "query: "
+    assert processor.passage_prefix == "passage: "
+    monkeypatch.setenv("YT_RAG_EMBED_REVISION", "different-after-load")
+    assert processor.embedding_metadata() == {
+        "backend": "sentence_transformers",
+        "model": "intfloat/multilingual-e5-large",
+        "dim": 1024,
+        "revision": "pinned-revision",
+    }

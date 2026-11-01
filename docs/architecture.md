@@ -110,3 +110,28 @@ router artifacts can be rebuilt from it.
 - **Library export:** `pipelines/export_library.py` writes stored evidence
   through a [versioned contract](contracts/youtube-library-export-v1.md) without
   fetching videos or loading models.
+
+
+## Experimental MCP companion
+
+The private experimental companion is a separate source-neutral evidence
+service using PostgreSQL/pgvector, not the E5/FAISS browser workbench described
+above. Its MCP interface lets an authorized assistant request scoped evidence;
+MCP is the protocol boundary, not the component that generates answers.
+
+A host-prefetched client can give each returned canonical passage an issued ID,
+retain its original text/version/source link, and validate the model's selected
+IDs and exact quotations before rendering an answer. These mechanical checks
+cannot establish relevance, speaker attribution or semantic completeness. A
+stock MCP assistant does not automatically receive that host validation layer.
+
+Assumption-first answers and multi-video synthesis remain experimental. A
+reasonable stated scope must preserve explicit video constraints, distinguish
+speakers/events and explain missing evidence. They are not public defaults or
+verified quality improvements. The independent answer-quality and cost study
+is incomplete; paused evaluation artifacts remain local.
+
+An explicit versioned export/import can transfer stored transcripts between the
+two runtimes. The export contract alone does not imply production migration,
+automatic synchronization or availability of the private implementation. The
+public app and its base test suite do not require private repository access.
