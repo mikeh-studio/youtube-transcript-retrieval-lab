@@ -26,12 +26,22 @@ Balanced, and Quality profiles to models for each provider.
 | --- | --- |
 | `YT_RAG_EMBED_MODEL` | Embedding model (default `intfloat/multilingual-e5-large`, about 2.2 GB) |
 | `YT_RAG_FORCE_HASH_EMBEDDINGS=1` | Skip the model and use local hashing embeddings |
+| `YT_RAG_EMBED_LOCAL_PATH` | Optional path to a previously cached model snapshot; keep `YT_RAG_EMBED_MODEL` set to its logical model ID |
+| `YT_RAG_EMBED_REVISION` | Optional model revision recorded in index metadata; a changed revision makes the saved index incompatible |
+| `HF_HUB_OFFLINE=1` | Load model files locally without a Hugging Face download |
 
 E5-family models get `query:` and `passage:` prefixes automatically; other
 models, such as `BAAI/bge-m3`, are embedded without prefixes. Changing the model
 rebuilds the transcript index once on the next start. OCR indexes are skipped
 with a warning until each video is re-embedded with
 `python pipelines/embed_ocr.py --video-id <id>`.
+
+For a cached snapshot, point `YT_RAG_EMBED_LOCAL_PATH` to the model's local
+directory and set `YT_RAG_EMBED_REVISION` to its revision. Use the matching
+logical `YT_RAG_EMBED_MODEL` so E5 query/passage prefixes stay correct. Local
+paths are not saved as model identities. Changing the revision rebuilds the
+index from stored chunks; expect local embedding work on startup. OCR indexes
+must also be rebuilt when their embedding space changes.
 
 ### Offline mode
 
