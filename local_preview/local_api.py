@@ -7605,12 +7605,15 @@ class LocalRAGService:
         model: Optional[str] = None,
         evidence_question: Optional[str] = None,
         evidence_language: Optional[str] = None,
+        max_output_tokens: int = ASK_MAX_TOKENS,
+        strict_evidence: bool = False,
+        output_language: Optional[str] = None,
     ) -> dict:
         scoped_provider = str(provider or DEFAULT_ASK_PROVIDER).strip().lower()
         if scoped_provider not in ASK_PROVIDERS:
             raise ValueError(_provider_error_message())
 
-        answer_language = self._infer_query_language(question)
+        answer_language = output_language or self._infer_query_language(question)
         selected_model = self._resolve_llm_model(scoped_provider, model)
         retrieved_chunks = build_retrieved_chunks_payload(sources)
         citations = build_citation_catalog(sources)
@@ -7632,7 +7635,10 @@ class LocalRAGService:
                 "model": selected_model,
             }
 
-        evidence = assess_grounded_answer_evidence(
+        # Explicitly selected canonical passages do not carry trusted retrieval
+        # scores. Do not apply the retrieval-score gate to this separate flow;
+        # ask the model to abstain when the selected evidence is insufficient.
+        evidence = {"sufficient": True, "warnings": [], "confidence_cap": "medium"} if strict_evidence else assess_grounded_answer_evidence(
             question=evidence_question or question,
             rows=sources,
             retrieval_mode=retrieval_mode,
@@ -7659,18 +7665,29 @@ class LocalRAGService:
             answer_language=answer_language,
         )
 
+        if strict_evidence:
+            system_prompt += "\nUse only the selected excerpts. Return insufficient_evidence if they do not answer the question. Do not infer a speaker from the video title. If speaker attribution is not explicit in the selected evidence, state that it is unknown."
+
         try:
             llm = self._llm_text_response(
                 provider=scoped_provider,
                 system_prompt=system_prompt,
                 user_message=user_message,
-                max_tokens=ASK_MAX_TOKENS,
+                max_tokens=max_output_tokens,
                 temperature=ASK_TEMPERATURE,
                 model=selected_model,
             )
             parsed = _extract_json_payload(llm["text"])
             if not isinstance(parsed, dict):
                 raise ValueError("Grounded answer response must be a JSON object.")
+            if strict_evidence:
+                valid_ids = {str(c["citation_id"]) for c in citations}
+                raw_citations = parsed.get("citations", [])
+                inline_ids = re.findall(r"\[(\d+)\]", str(parsed.get("answer") or ""))
+                if (not isinstance(raw_citations, list) or
+                    any(not isinstance(c, dict) or str(c.get("citation_id")) not in valid_ids for c in raw_citations) or
+                    any(c not in valid_ids for c in inline_ids)):
+                    raise ValueError("Answer references an unknown citation ID.")
             normalized = normalize_grounded_answer_payload(
                 raw_payload=parsed,
                 citations=citations,
@@ -7935,6 +7952,8 @@ class Handler(BrowserBoundary, BaseHTTPRequestHandler):
     def _set_headers(self, status=200, content_type="application/json; charset=utf-8"):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "no-referrer")
         self.send_header(
             "Cache-Control", "no-store, no-cache, must-revalidate, max-age=0"
         )
@@ -7951,6 +7970,8 @@ class Handler(BrowserBoundary, BaseHTTPRequestHandler):
     def _download(self, payload: bytes, filename: str):
         self.send_response(200)
         self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "no-referrer")
         self.send_header(
             "Content-Disposition", f'attachment; filename="{filename}"'
         )
@@ -8009,6 +8030,24 @@ class Handler(BrowserBoundary, BaseHTTPRequestHandler):
         path = parsed.path
 
         try:
+            if path == "/v1/evaluation/reports" or path.startswith("/v1/evaluation/reports/"):
+                from local_preview.evaluation_reports import EvaluationReportStore
+                store = EvaluationReportStore(SERVICE.runtime_data_dir / "evaluation_reports")
+                if path == "/v1/evaluation/reports":
+                    self._json({"ok": True, "reports": store.list_reports()})
+                else:
+                    report = store.get_report(unquote(path.rsplit("/", 1)[-1]))
+                    if report is None:
+                        self._json({"ok": False, "error": {"code": "NOT_FOUND", "message": "Report not found"}}, 404)
+                    else:
+                        self._json({"ok": True, "report": report})
+                return
+
+            if path == "/v1/workspace/settings":
+                from local_preview.evidence_workspace import settings
+                self._json({"ok": True, **settings(SERVICE, LLM_MODEL_OPTIONS)})
+                return
+
             if path.startswith("/v1/catalog/"):
                 from local_preview.catalog_client import CatalogClientError, fetch_catalog
 
@@ -8364,10 +8403,16 @@ class Handler(BrowserBoundary, BaseHTTPRequestHandler):
                 },
                 exc.status,
             )
-        except Exception as exc:
+        except Exception:
             traceback.print_exc()
             self._json(
-                {"ok": False, "error": {"code": "INTERNAL_ERROR", "message": str(exc)}},
+                {
+                    "ok": False,
+                    "error": {
+                        "code": "INTERNAL_ERROR",
+                        "message": "An internal error occurred. Check the local server log for details.",
+                    },
+                },
                 500,
             )
 
@@ -8421,10 +8466,16 @@ class Handler(BrowserBoundary, BaseHTTPRequestHandler):
                 },
                 404,
             )
-        except Exception as exc:
+        except Exception:
             traceback.print_exc()
             self._json(
-                {"ok": False, "error": {"code": "INTERNAL_ERROR", "message": str(exc)}},
+                {
+                    "ok": False,
+                    "error": {
+                        "code": "INTERNAL_ERROR",
+                        "message": "An internal error occurred. Check the local server log for details.",
+                    },
+                },
                 500,
             )
 
@@ -8433,7 +8484,35 @@ class Handler(BrowserBoundary, BaseHTTPRequestHandler):
         path = parsed.path
 
         try:
+            if path == "/v1/evaluation/reports" and int(self.headers.get("Content-Length", "0") or "0") > 10_000_000:
+                raise ValueError("Report exceeds the 10 MB limit")
+            if path.startswith("/v1/evidence/") and int(self.headers.get("Content-Length", "0") or "0") > 2_500_000:
+                raise ValueError("Evidence request is too large")
             body = self._read_json_body()
+            if not isinstance(body, dict):
+                raise ValueError("Request body must be a JSON object")
+
+            if path == "/v1/evaluation/reports":
+                from local_preview.evaluation_reports import EvaluationReportStore
+                store = EvaluationReportStore(SERVICE.runtime_data_dir / "evaluation_reports")
+                self._json({"ok": True, "report": store.import_report(body)})
+                return
+
+            if path in {"/v1/evidence/snapshots", "/v1/evidence/context", "/v1/evidence/estimate", "/v1/evidence/answer"}:
+                from local_preview.evidence_workspace import EvidenceWorkspace
+                if not hasattr(SERVICE, "_evidence_workspace"):
+                    SERVICE._evidence_workspace = EvidenceWorkspace(SERVICE)
+                workspace = SERVICE._evidence_workspace
+                if path.endswith("/snapshots"):
+                    result = workspace.create(body)
+                elif path.endswith("/context"):
+                    result = workspace.context(body)
+                elif path.endswith("/estimate"):
+                    result = workspace.estimate(body)
+                else:
+                    result = workspace.answer(body)
+                self._json({"ok": True, **result})
+                return
 
             if path == "/v1/eval-generator/jobs":
                 job = SERVICE._eval_generator_service().start_job(
@@ -9022,10 +9101,16 @@ class Handler(BrowserBoundary, BaseHTTPRequestHandler):
                 },
                 404,
             )
-        except Exception as exc:
+        except Exception:
             traceback.print_exc()
             self._json(
-                {"ok": False, "error": {"code": "INTERNAL_ERROR", "message": str(exc)}},
+                {
+                    "ok": False,
+                    "error": {
+                        "code": "INTERNAL_ERROR",
+                        "message": "An internal error occurred. Check the local server log for details.",
+                    },
+                },
                 500,
             )
 

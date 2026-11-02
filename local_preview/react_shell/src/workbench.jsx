@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { FindWorkspace } from "./find.jsx";
 import {
   apiRequest,
   errorInfo,
@@ -344,7 +345,6 @@ function readScopeHandoff() {
       handoff?.mode === "videos"
       && Array.isArray(handoff.videoIds)
       && handoff.videoIds.length
-      && Date.now() - Number(handoff.at || 0) < HANDOFF_MAX_AGE_MS
     ) {
       return handoff.videoIds.map(String);
     }
@@ -362,8 +362,9 @@ function clearScopeHandoff() {
   }
 }
 
-export function SearchWorkbench({ renderAnswer }) {
+function CompareWorkbench() {
   const [handoffVideoIds] = useState(readScopeHandoff);
+  const searchRevision = useRef(0);
   const [videos, setVideos] = useState([]);
   const [query, setQuery] = useState("");
   const [language, setLanguage] = useState("");
@@ -382,6 +383,9 @@ export function SearchWorkbench({ renderAnswer }) {
   const [labels, setLabels] = useState({});
   const [saveMessage, setSaveMessage] = useState("");
   const labelSavePending = Object.values(labels).some((entry) => entry.pending);
+
+  useEffect(() => { searchRevision.current += 1; setLoading(false); }, [query, language, scopeMode, selectedVideoIds, catalogTerm, catalogQualification, runs]);
+  useEffect(() => () => { searchRevision.current += 1; }, []);
 
   useEffect(() => {
     apiRequest("/v1/videos")
@@ -461,7 +465,7 @@ export function SearchWorkbench({ renderAnswer }) {
     setLoading(true);
     setError("");
     setSaveMessage("");
-    clearScopeHandoff();
+    const revision = ++searchRevision.current;
     try {
       const scope = await resolveScope();
       const runOne = async (id) => {
@@ -477,6 +481,7 @@ export function SearchWorkbench({ renderAnswer }) {
         }
       };
       const [a, b, nextLabels] = await Promise.all([runOne("A"), runOne("B"), loadLabels(text)]);
+      if (revision !== searchRevision.current) return;
       setOutcomes({ A: a, B: b });
       setLabels(nextLabels);
       setSearchedQuery(text);
@@ -485,9 +490,9 @@ export function SearchWorkbench({ renderAnswer }) {
         setView("compare");
       }
     } catch (scopeError) {
-      setError(String(scopeError?.message || scopeError));
+      if (revision === searchRevision.current) setError(String(scopeError?.message || scopeError));
     } finally {
-      setLoading(false);
+      if (revision === searchRevision.current) setLoading(false);
     }
   }
 
@@ -716,7 +721,6 @@ export function SearchWorkbench({ renderAnswer }) {
           ["compare", "Compare A vs B"],
           ["a", "Run A"],
           ["b", "Run B"],
-          ["answer", "Answer"],
         ].map(([value, label]) => (
           <button
             key={value}
@@ -734,7 +738,7 @@ export function SearchWorkbench({ renderAnswer }) {
       {view === "answer" ? (
         <section className="panel studio-mode-content lab-answer">
           <p className="lab-hint">Generate a cited answer. The answer flow has its own retrieval settings; it does not use Run A or Run B.</p>
-          {renderAnswer(searchedQuery || query)}
+          <p>Use Find to answer from selected passages.</p>
         </section>
       ) : null}
 
@@ -802,4 +806,10 @@ export function SearchWorkbench({ renderAnswer }) {
       ) : null}
     </section>
   );
+}
+
+
+export function SearchWorkbench() {
+  const [mode, setMode] = useState("find");
+  return <section><div className="workspace-mode" role="tablist" aria-label="Search mode"><button role="tab" aria-selected={mode === "find"} className={mode === "find" ? "active" : ""} onClick={() => setMode("find")}>Find</button><button role="tab" aria-selected={mode === "compare"} className={mode === "compare" ? "active" : ""} onClick={() => setMode("compare")}>Compare</button></div>{mode === "find" ? <FindWorkspace /> : <CompareWorkbench />}</section>;
 }

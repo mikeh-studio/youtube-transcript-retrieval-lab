@@ -185,7 +185,7 @@ test("generates, reviews, and finalizes a Codex retrieval dataset", async ({ pag
     });
   });
 
-  await page.goto("/evaluation.html");
+  await page.goto("/evaluation-workbench.html");
   await expect(page.getByText("Codex CLI ready")).toBeVisible();
   await page.getByLabel("Demo Interview").check();
   await page.getByRole("button", { name: "Generate 6 Cases" }).click();

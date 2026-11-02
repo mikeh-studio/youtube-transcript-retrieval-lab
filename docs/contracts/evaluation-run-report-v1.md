@@ -1,0 +1,20 @@
+# Evaluation run report review contract
+
+The local report endpoint accepts an explicit JSON import. The server writes a sanitized, immutable content-addressed snapshot under its runtime data directory; it never discovers or scans private report folders. `GET /v1/evaluation/reports` returns `{reports: [...]}`, `GET /v1/evaluation/reports/{id}` returns `{report: ...}`, and `POST /v1/evaluation/reports` accepts a report object and returns `{report: ...}`. An identical import resolves to the same ID. Missing values remain null or absent; completed execution does not imply a semantic grade.
+
+The `evaluation-run-report/v1` envelope has `run_id`, optional `source`, status, identifiers and timestamps, and `profiles`. Each profile has an ID, model, effort, status, `arms` keyed by workflow (`direct`, `mcp`), and optional `cases`. Arms can carry counts, `grades`, `metrics`, stage-keyed `ranking`, `usage`, and `cost`. Cases can contain question, answer, status, grades, evidence, citations and trace. Ranking keys include `precision_at_1`, `precision_at_5`, `precision_at_10`, corresponding recall, `mrr_at_10`, `ndcg_at_10`, and optional `auc` with an explicit `auc_contract`. Stage keys are `initial_retrieval` and `final_evidence`. Reasoning output tokens are a subset of output tokens. An API-equivalent estimate is not a subscription charge.
+
+The adapter also recognizes `subscription-review/v1` and heldout raw run reports, preserving only supported review fields. Unknown fields and unsupported source structures are discarded. Common credential formats, credential-bearing URLs, and local home/runtime paths inside supported fields are redacted. This is not a general personal-information classifier; review reports before sharing them. Import errors identify invalid envelopes; they do not trigger evaluation or grading. Compatibility requires known equal dataset, corpus, query set and criteria hashes, stage and cutoff, plus matching model and effort. Unknown provenance cannot establish a baseline. Metric attribution is not inferred when the source does not record contributing cases.
+
+Where recorded, validation failures appear in `validation_failure` (also exposed as `error`). A rejected selection is `attempted_output` with `status: rejected`; it is an attempted response, not an accepted answer or a canonical citation. Its supported fields include `answer_status`, `answer`, `claims` (text, kind, citation IDs), `missing_parts`, and `refinement_hint`. Evidence preserves supplied text and source identifiers, title, URL, rank, and timestamp; `trace.retrieval_payloads[].hits` retains supported ranked retrieval metadata. Unknown nested fields are discarded.
+
+Explicit `contributors`, `contributor_ids`, `case_ids`, or `question_ids` can be retained at report, profile, arm, or metric-object level. They are not inferred from aggregate counts; a metric without usable recorded contributor IDs has no supported question drilldown. Supplied model, effort, stage, cutoff, and identity hashes are retained at their recorded scope. Cases may retain recorded usage and cost, or API requests with usage and uncached cost, alongside their recorded grades. A cost comparison requires an appropriate matched population and complete cost basis; aggregate totals alone do not establish a matched-case ratio or eligibility.
+
+Recorded answer-quality distributions may place `good`, `partial`, and `poor` counts directly in the `answer_quality` object or under its `distribution` object; the corresponding capitalized keys are also retained. Missing counts are not inferred.
+
+An explicitly illustrative report can set `source_type: demo`. The dashboard then
+shows a persistent “Demo data — not measured results” disclosure across views.
+This flag does not fill missing fields or qualify the report for cost assessment;
+it identifies supplied values as mock presentation data. The public example in
+`docs/examples/evaluation-demo.json` contains fabricated aggregates only and is
+never automatically imported into a user's library.
