@@ -1,0 +1,13 @@
+# Audited dependency floors, 2026-11-01. These prevent a reused environment from
+# silently retaining versions with known advisories. This is not a full lockfile;
+# CI audits the resolved environment, including transitive dependencies.
+anyio>=4.16.0
+certifi>=2026.10.23
+filelock>=4.2.6
+fsspec>=2026.9.0
+idna>=3.20
+python-dotenv>=1.2.4
+sentence-transformers>=6.2.0
+torch>=2.15.0
+transformers>=5.22.1
+urllib3>=2.8.0

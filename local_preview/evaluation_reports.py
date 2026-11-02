@@ -28,7 +28,33 @@ _METRIC_KEYS = {
     "gold_recall@5": "recall_at_5",
     "gold_recall@10": "recall_at_10",
 }
-_SECRET = re.compile(r"(?:sk-|Bearer\s+)[A-Za-z0-9_\-]{12,}", re.I)
+_SECRET = re.compile(
+    r"(?:sk-|Bearer\s+)[A-Za-z0-9_\-]{12,}"
+    r"|\bgh[pousr]_[A-Za-z0-9]{20,}"
+    r"|\bgithub_pat_[A-Za-z0-9_]{20,}"
+    r"|\b(?:AKIA|ASIA)[A-Z0-9]{16}\b"
+    r"|(?s:-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----.*?"
+    r"-----END (?:RSA |EC |OPENSSH )?PRIVATE KEY-----)",
+    re.I,
+)
+_URL_CREDENTIAL = re.compile(r"(https?://)[^\s/@]+@", re.I)
+_QUERY_CREDENTIAL = re.compile(
+    r"([?&](?:api[_-]?key|access[_-]?token|token|secret|password|"
+    r"authorization|signature|x-amz-signature|x-amz-credential|"
+    r"x-amz-security-token)=)[^&#\s]*",
+    re.I,
+)
+_LOCAL_PATH = re.compile(
+    r"(?<![\w:/])/(?:Users|home|private|tmp|var)/[^\s]+"
+    r"|(?<![\w])(?:[A-Za-z]:\\(?:Users|Documents and Settings)\\)[^\r\n\"<>|]+"
+)
+
+
+def _redact_text(value):
+    """Redact common credentials and local paths inside allowed text fields."""
+    value = _URL_CREDENTIAL.sub(r"\1[redacted]@", value)
+    value = _QUERY_CREDENTIAL.sub(r"\1[redacted]", value)
+    return _LOCAL_PATH.sub("[local path]", _SECRET.sub("[redacted]", value))
 
 
 def _clean(value, depth=0):
@@ -42,6 +68,7 @@ def _clean(value, depth=0):
                     for name, arm in v.items()
                     if isinstance(name, str)
                     and re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", name)
+                    and _redact_text(name) == name
                 }
                 if k == "arms" and isinstance(v, dict)
                 else _clean(v, depth + 1)
@@ -58,11 +85,7 @@ def _clean(value, depth=0):
     if isinstance(value, str):
         if len(value) > 100000:
             raise ValueError("Report field is too long")
-        return re.sub(
-            r"(?<![\w:/])/(?:Users|home|private|tmp|var)/[^\s]+",
-            "[local path]",
-            _SECRET.sub("[redacted]", value),
-        )
+        return _redact_text(value)
     raise ValueError("Report contains unsupported data")
 
 

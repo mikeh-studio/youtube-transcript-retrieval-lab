@@ -21,6 +21,7 @@ search and the offline evaluation fixture.
 ```bash
 python3.11 -m venv .venv
 source .venv/bin/activate
+python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 [ -f .env.local ] || cp .env.example .env.local
 python local_preview/local_api.py
@@ -154,7 +155,7 @@ deletions persist across restarts, and cached model revisions guard index compat
 - Interactive labels are single-reviewer; benchmark fixture results are not a statistically representative corpus evaluation.
 - Evaluate query sets and runs use browser storage; clearing it removes them.
 - Retrieval depends on transcript availability. Playlist page parsing can change.
-- The app is loopback-only and has no account system. [Browser request boundary](BROWSER_SECURITY.md).
+- The app is loopback-only and has no account system. [Security and privacy](SECURITY.md) · [Browser request boundary](BROWSER_SECURITY.md).
 - OCR accepts only local video files you own or have permission to process; the project does not download YouTube video files.
 
 ## Development
