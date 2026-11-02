@@ -853,6 +853,7 @@ class LocalRAGService:
 
     def delete_video(self, video_id: str):
         self.engine.library.remove_video(video_id)
+        self.engine.library.save()
         self._mark_video_router_stale()
         self._delete_ask_history(video_id)
 

@@ -158,15 +158,28 @@ class TextProcessor:
             print("Using local hashing embeddings; embedding model startup skipped.")
             return
 
-        print(f"Loading embedding model {self.embed_model_name} (this may take a moment)...")
+        print(
+            f"Loading embedding model {self.embed_model_name} (this may take a moment)..."
+        )
         try:
-            self.embed_model = SentenceTransformer(self.embed_model_name)
-            self.embedding_backend = "sentence_transformers"
-            self.embed_dim = int(
-                self.embed_model.get_sentence_embedding_dimension()
+            model_options = {}
+            revision = os.environ.get("YT_RAG_EMBED_REVISION", "").strip()
+            if revision:
+                model_options["revision"] = revision
+            if os.environ.get("HF_HUB_OFFLINE", "0") == "1":
+                model_options["local_files_only"] = True
+            self.embed_model = SentenceTransformer(
+                os.environ.get("YT_RAG_EMBED_LOCAL_PATH", "").strip()
+                or self.embed_model_name,
+                **model_options,
             )
+            self.embed_revision = revision
+            self.embedding_backend = "sentence_transformers"
+            self.embed_dim = int(self.embed_model.get_sentence_embedding_dimension())
         except Exception as e:
-            print(f"  Warning: embedding model unavailable ({e}). Falling back to local hashing embeddings.")
+            print(
+                f"  Warning: embedding model unavailable ({e}). Falling back to local hashing embeddings."
+            )
             self.embed_model = None
             self.embedding_backend = "hashing"
             self.query_prefix = ""
@@ -175,11 +188,14 @@ class TextProcessor:
     def embedding_metadata(self):
         """Describe the active embedding space (used for index compatibility checks)."""
         if self.embedding_backend == "sentence_transformers":
-            return {
+            metadata = {
                 "backend": "sentence_transformers",
                 "model": self.embed_model_name,
                 "dim": int(self.embed_dim),
             }
+            if self.embed_revision:
+                metadata["revision"] = self.embed_revision
+            return metadata
         return {"backend": "hashing", "model": "local_hash", "dim": int(self.embed_dim)}
 
     def _hash_embedding(self, text: str) -> np.ndarray:
