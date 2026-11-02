@@ -85,7 +85,7 @@ test("runs an Evaluation query set with the agentic tool strategy", async ({ pag
     });
   });
 
-  await page.goto("/evaluation.html");
+  await page.goto("/evaluation-workbench.html");
   await page.getByLabel("Search Strategy").selectOption("agentic");
   await expect(page.getByLabel("Direct Retrieval Mode")).toBeDisabled();
   await page.getByRole("button", { name: "Run Query Set" }).click();

@@ -1,447 +1,213 @@
 import { expect, test } from "./fixtures";
 
-async function prepareQAStudio(page, options = {}) {
-  const {
-    locale,
-    lastVideoId = "vid1",
-    videos = [
-      { video_id: "vid1", title: "Demo Video" },
-      { video_id: "vid2", title: "Demo Video 2" },
-    ],
-  } = options;
-  await page.addInitScript(({ initLocale, initLastVideoId }) => {
-    localStorage.setItem("yt_rag_ingest_unlocked", "1");
-    if (initLastVideoId) {
-      localStorage.setItem("yt_rag_last_video_id", initLastVideoId);
-    }
-    if (initLocale) {
-      localStorage.setItem("youtube-rag-ui-locale", initLocale);
-    }
-  }, { initLocale: locale ?? null, initLastVideoId: lastVideoId });
-  await page.route("**/v1/videos", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ ok: true, videos }),
-    });
+test("preserves scoped evidence and requires review before answering", async ({
+  page,
+}) => {
+  const requests: { path: string; body: any }[] = [];
+  const row = {
+    id: "p1",
+    video_id: "video1",
+    video_title: "First video",
+    chunk_index: 0,
+    start: 10,
+    end: 20,
+    text: "Original transcript passage.",
+    url: "https://www.youtube.com/watch?v=video1&t=10s",
+  };
+  await page.addInitScript(() => {
+    sessionStorage.setItem("yt_rag_intro_seen", "1");
+    sessionStorage.setItem(
+      "yt_rag_search_scope",
+      JSON.stringify({ mode: "videos", videoIds: ["video1"], at: Date.now() }),
+    );
+  });
+  await page.route("**/v1/videos", (route) =>
+    route.fulfill({
+      json: {
+        videos: [
+          { video_id: "video1", title: "First video", num_chunks: 2 },
+          { video_id: "video2", title: "Second video", num_chunks: 1 },
+        ],
+      },
+    }),
+  );
+  await page.route("**/v1/search", (route) => {
+    requests.push({ path: "search", body: route.request().postDataJSON() });
+    return route.fulfill({ json: { results: [row] } });
+  });
+  await page.route("**/v1/evidence/**", (route) => {
+    const path = new URL(route.request().url()).pathname.split("/").pop()!;
+    const body = route.request().postDataJSON();
+    requests.push({ path, body });
+    if (path === "snapshots")
+      return route.fulfill({ json: { snapshot_id: "s1", passages: [row] } });
+    if (path === "estimate")
+      return route.fulfill({
+        json: {
+          estimated_cost: null,
+          snapshot_id: "s1",
+          estimate_id: "e1",
+          input_tokens_estimate: 620,
+          estimate_basis: "Approximate character heuristic.",
+        },
+      });
+    if (path === "answer")
+      return route.fulfill({
+        json: { answer: "A cited answer.", citations: [] },
+      });
+    return route.fulfill({ json: { passages: [] } });
   });
   await page.goto("/index.html#/qa");
-  await page.getByRole("tab", { name: "Answer" }).click();
-}
-
-async function mockAskResponse(page, payload) {
-  await page.route("**/v1/ask", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify(payload),
-    });
-  });
-}
-
-test("renders citation-backed answer state and evidence toggle in Q&A studio", async ({ page }) => {
-  await mockAskResponse(page, {
-    ok: true,
-    question: "What is the product intent?",
-    k: 4,
-    status: "answered",
-    answer: "It is designed as a local-first, explainable demo [1] [2].",
-    confidence: "high",
-    citations: [
-      {
-        citation_id: 1,
-        video_id: "vid1",
-        video_title: "Demo Video",
-        chunk_id: "vid1:2",
-        start_seconds: 65,
-        end_seconds: 88,
-        timestamp_label: "1:05",
-        timestamp_range_label: "1:05-1:28",
-        snippet: "The speaker says the product runs fully offline and stores runtime data locally.",
-        reason: "This excerpt supports the local-first claim.",
-        url: "https://www.youtube.com/watch?v=vid1&t=65s",
-        language: "en",
-        score: 0.91,
-      },
-      {
-        citation_id: 2,
-        video_id: "vid2",
-        video_title: "Demo Video 2",
-        chunk_id: "vid2:0",
-        start_seconds: 12,
-        end_seconds: 30,
-        timestamp_label: "0:12",
-        timestamp_range_label: "0:12-0:30",
-        snippet: "A later excerpt says the local preview is portfolio-friendly and optimized for explainability.",
-        reason: "This excerpt supports the portfolio/demo framing.",
-        url: "https://www.youtube.com/watch?v=vid2&t=12s",
-        language: "en",
-        score: 0.84,
-      },
-    ],
-    retrieved_chunks: [],
-    warnings: [],
-    provider: "chatgpt",
-    model: "gpt-4o-mini",
-    sources: [],
-    retrieval_mode: "hybrid",
-    retrieval_details: { fusion: "rrf" },
-    result_count: 2,
-  });
-  await prepareQAStudio(page);
-
-  await page.getByLabel("Question").fill("What is the product intent?");
-  await page.getByRole("button", { name: "Generate Answer" }).click();
-
-  await expect(page.getByTestId("answer-status")).toHaveText("Answered from evidence");
-  await expect(page.getByTestId("answer-panel")).toContainText("local-first, explainable demo [1] [2]");
+  await expect(page.getByText("First video").first()).toBeVisible();
+  await page.getByLabel("Query").fill("What happened?");
+  await page.getByRole("button", { name: "Find passages" }).click();
   await expect(
-    page.getByText(
-      "Answer generated from retrieved evidence. May be incomplete if source coverage is limited.",
-    ),
+    page.getByText("Original transcript passage.", { exact: true }),
   ).toBeVisible();
-  await expect(page.getByTestId("answer-citation-card")).toHaveCount(2);
-
-  await page.getByTestId("answer-evidence-toggle").click();
-  await expect(page.getByTestId("answer-citation-card")).toHaveCount(0);
-});
-
-test("keeps source links visible when answer mode falls back to insufficient evidence", async ({ page }) => {
-  await mockAskResponse(page, {
-    ok: true,
-    question: "What is the refund policy?",
-    k: 4,
-    status: "insufficient_evidence",
-    answer: "Insufficient transcript evidence to answer confidently from the retrieved excerpts.",
-    confidence: "low",
-    citations: [],
-    retrieved_chunks: [
-      {
-        video_id: "vid1",
-        video_title: "Demo Video",
-        video_url: "https://www.youtube.com/watch?v=vid1",
-        chunk_index: 9,
-        start_seconds: 140,
-        end_seconds: 168,
-        timestamp_label: "2:20",
-        timestamp_range_label: "2:20-2:48",
-        url: "https://www.youtube.com/watch?v=vid1&t=140s",
-        rank: 1,
-        score: 0.58,
-        snippet: "This excerpt talks about local setup steps and startup logs.",
-        language: "en",
-      },
-    ],
-    warnings: ["The best retrieved chunk is too weak to support a grounded answer."],
-    provider: "chatgpt",
-    model: "gpt-4o-mini",
-    sources: [],
-    retrieval_mode: "dense",
-    retrieval_details: {},
-    result_count: 1,
+  const reviewButton = page.getByRole("button", {
+    name: "Review cost and answer",
   });
-  await prepareQAStudio(page);
-
-  await page.getByLabel("Question").fill("What is the refund policy?");
-  await page.getByRole("button", { name: "Generate Answer" }).click();
-
-  await expect(page.getByTestId("answer-status")).toHaveText("Insufficient evidence");
-  await expect(page.getByTestId("answer-citation-card")).toHaveCount(1);
-  await expect(page.getByRole("link", { name: "Open source" })).toHaveAttribute(
-    "href",
-    "https://www.youtube.com/watch?v=vid1&t=140s",
+  await expect(reviewButton).toBeInViewport();
+  await expect(page.locator(".workspace-reading-scroll")).toHaveAttribute(
+    "tabindex",
+    "0",
   );
+  expect(requests.find((r) => r.path === "search")?.body.video_ids).toEqual([
+    "video1",
+  ]);
+  await page.getByRole("button", { name: "Review cost and answer" }).click();
+  await expect(page.getByText("Estimated cost unavailable.")).toBeVisible();
+  await expect(page.getByText("Estimated input tokens: 620")).toBeVisible();
+  await expect(
+    page.getByText("Approximate character heuristic."),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Generate answer" }),
+  ).toBeDisabled();
+  await page
+    .getByLabel(
+      "I understand the cost is unavailable and generation may incur charges.",
+    )
+    .check();
+  await page.getByRole("button", { name: "Generate answer" }).click();
+  await expect(page.getByText("A cited answer.")).toBeVisible();
+  expect(requests.find((r) => r.path === "answer")?.body).toMatchObject({
+    snapshot_id: "s1",
+    passage_ids: ["p1"],
+    estimate_id: "e1",
+    cost_acknowledged: true,
+  });
+  await page.getByLabel("Query").fill("A different question");
+  await expect(page.getByText("A cited answer.")).toHaveCount(0);
 });
 
-test("renders localized answer panel copy in Japanese locale", async ({ page }) => {
-  await mockAskResponse(page, {
-    ok: true,
-    question: "指輪のシーンについて何と言っている？",
-    k: 4,
-    status: "answered",
-    answer: "指輪のシーンは感情の余韻を大事にした演出として語られています [1]。",
-    confidence: "medium",
-    citations: [
-      {
-        citation_id: 1,
-        video_id: "vid-ja-1",
-        video_title: "葬送のフリーレン ラジオ",
-        chunk_id: "vid-ja-1:3",
-        start_seconds: 182,
-        end_seconds: 215,
-        timestamp_label: "3:02",
-        timestamp_range_label: "3:02-3:35",
-        snippet: "指輪のシーンでは余韻が残るように音楽の入り方を調整したと話している。",
-        reason: "この引用が指輪のシーンに関する説明を支えている。",
-        url: "https://www.youtube.com/watch?v=vid-ja-1&t=182s",
-        language: "ja",
-        score: 0.88,
+test("keeps selected collapsed context and applies saved answer language", async ({
+  page,
+}) => {
+  const requests: { path: string; body: any }[] = [];
+  const original = {
+    id: "p1",
+    video_id: "video1",
+    video_title: "First video",
+    chunk_index: 0,
+    start: 10,
+    end: 20,
+    text: "Original passage.",
+    url: "https://www.youtube.com/watch?v=video1&t=10s",
+  };
+  const neighbor = {
+    ...original,
+    id: "p2",
+    chunk_index: 1,
+    start: 20,
+    end: 30,
+    text: "Neighbor passage.",
+  };
+  await page.addInitScript(() => {
+    sessionStorage.setItem("yt_rag_intro_seen", "1");
+  });
+  await page.route("**/v1/videos", (route) =>
+    route.fulfill({
+      json: {
+        videos: [{ video_id: "video1", title: "First video", num_chunks: 2 }],
       },
-    ],
-    retrieved_chunks: [],
-    warnings: [],
-    provider: "chatgpt",
-    model: "gpt-4o-mini",
-    sources: [],
-    retrieval_mode: "hybrid",
-    retrieval_details: { fusion: "rrf" },
-    result_count: 1,
-  });
-  await prepareQAStudio(page, { locale: "ja-JP" });
-
-  await page.getByLabel("Question").fill("指輪のシーンについて何と言っている？");
-  await page.getByRole("button", { name: "Generate Answer" }).click();
-
-  await expect(page.getByTestId("answer-status")).toHaveText("根拠付きで回答");
-  await expect(
-    page.getByText("取得した根拠から生成した回答です。ソースの範囲次第で不完全な場合があります。"),
-  ).toBeVisible();
-  await expect(page.getByRole("button", { name: "根拠を隠す" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "この位置から再生" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "ソースを開く" })).toHaveAttribute(
-    "href",
-    "https://www.youtube.com/watch?v=vid-ja-1&t=182s",
+    }),
   );
-});
-
-test("visualizes agentic attempts and reranked results", async ({ page }) => {
-  let requestBody = null;
-  await page.route("**/v1/ask", async (route) => {
-    requestBody = route.request().postDataJSON();
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        ok: true,
-        question: "How is the retrieval update different?",
-        k: 5,
-        status: "answered",
-        answer: "The system retries weak retrieval and reranks candidate evidence [1] [2].",
-        confidence: "high",
-        citations: [
-          {
-            citation_id: 1,
-            video_id: "vid1",
-            video_title: "Retrieval Architecture",
-            chunk_index: 7,
-            start_seconds: 65,
-            end_seconds: 88,
-            timestamp_range_label: "1:05-1:28",
-            snippet: "Weak evidence triggers a rewritten query before answer generation.",
-            reason: "Supports the retry loop.",
-            url: "https://www.youtube.com/watch?v=vid1&t=65s",
-            language: "en",
-            rank: 1,
-            pre_rerank_rank: 3,
-            pre_rerank_score: 0.42,
-            rerank_score: 0.94,
-            score: 0.94,
-          },
-          {
-            citation_id: 2,
-            video_id: "vid2",
-            video_title: "Ranking Pipeline",
-            chunk_index: 2,
-            start_seconds: 12,
-            end_seconds: 30,
-            timestamp_range_label: "0:12-0:30",
-            snippet: "A cross-encoder rescored the fused candidate pool.",
-            reason: "Supports the reranking stage.",
-            url: "https://www.youtube.com/watch?v=vid2&t=12s",
-            language: "en",
-            rank: 2,
-            pre_rerank_rank: 1,
-            pre_rerank_score: 0.81,
-            rerank_score: 0.78,
-            score: 0.78,
-          },
-        ],
-        retrieved_chunks: [],
-        warnings: [],
-        provider: "chatgpt",
-        model: "gpt-5.4-mini",
-        retrieval_mode: "lexical",
-        retrieval_details: {
-          fusion: "rrf",
-          dense_candidates: 30,
-          lexical_candidates: 30,
-          pre_rerank_candidate_count: 42,
-          post_feedback_candidate_count: 42,
-          feedback_tuning: { enabled: true, adjusted_results: 2 },
-          reranker: {
-            requested: "cross_encoder",
-            applied: true,
-            model: "cross-encoder/test-model",
-            scored_count: 42,
-            error: null,
-          },
-          agentic_retrieval: {
-            enabled: true,
-            applied: true,
-            sufficient: true,
-            stopped_reason: "sufficient_evidence",
-            final_query: "retrieval retry reranking",
-            final_retrieval_mode: "lexical",
-            final_tool: "read_context",
-            final_k: 5,
-            attempts: [
-              {
-                attempt: 1,
-                strategy: "initial",
-                tool: "semantic_search",
-                query: "How is the retrieval update different?",
-                retrieval_mode: "dense",
-                k: 5,
-                result_count: 1,
-                sufficient: false,
-                reason_code: "single_weak_chunk",
-                confidence_cap: "low",
-              },
-              {
-                attempt: 2,
-                strategy: "rewrite_query",
-                tool: "keyword_search",
-                query: "retrieval retry reranking",
-                retrieval_mode: "lexical",
-                k: 5,
-                result_count: 5,
-                sufficient: true,
-                reason_code: "multi_chunk_support",
-                confidence_cap: "high",
-              },
-              {
-                attempt: 3,
-                strategy: "read_context",
-                tool: "read_context",
-                query: "retrieval retry reranking",
-                retrieval_mode: "lexical",
-                k: 5,
-                result_count: 5,
-                sufficient: true,
-                reason_code: "multi_chunk_support",
-                confidence_cap: "high",
-                calls: [{ video_id: "vid1", timestamp: 65, window: 30 }],
-              },
-            ],
-          },
+  await page.route("**/v1/workspace/settings", (route) =>
+    route.fulfill({ json: { providers: [] } }),
+  );
+  await page.route("**/v1/search", (route) =>
+    route.fulfill({ json: { results: [original] } }),
+  );
+  await page.route("**/v1/evidence/**", (route) => {
+    const path = new URL(route.request().url()).pathname.split("/").pop()!;
+    const body = route.request().postDataJSON();
+    requests.push({ path, body });
+    if (path === "snapshots")
+      return route.fulfill({
+        json: {
+          snapshot_id: "s1",
+          passages: body.passages.map((p: any) =>
+            p.chunk_index === 0 ? original : neighbor,
+          ),
         },
-        result_count: 2,
-      }),
-    });
+      });
+    if (path === "context")
+      return route.fulfill({ json: { passages: [original, neighbor] } });
+    if (path === "estimate")
+      return route.fulfill({
+        json: { estimated_cost: null, estimate_id: "e1" },
+      });
+    return route.fulfill({ json: { answer: "回答", citations: [] } });
   });
-
-  await prepareQAStudio(page);
-  await page.getByLabel("Question").fill("How is the retrieval update different?");
-  await expect(page.getByLabel("Video scope")).toHaveValue("vid1");
-  await expect(page.getByLabel("Agentic tool search")).toBeChecked();
-  await page.getByLabel("Reranker").selectOption("cross_encoder");
-  await page.getByRole("button", { name: "Generate Answer" }).click();
-
-  await expect.poll(() => requestBody).toMatchObject({
-    agentic: true,
-    video_id: "vid1",
-    reranker: "cross_encoder",
-    retrieval_mode: "hybrid",
+  await page.goto("/index.html#/settings");
+  await page.getByLabel("Output language").selectOption("ja");
+  await page.getByRole("button", { name: "Save defaults" }).click();
+  await page
+    .getByRole("button", { name: "Search", exact: true })
+    .first()
+    .click();
+  await page.getByLabel("Query").fill("What happened?");
+  await page.reload();
+  await expect(page.getByLabel("Query")).toHaveValue("What happened?");
+  await page.getByRole("button", { name: "Find passages" }).click();
+  await page
+    .getByRole("button", { name: /Read surrounding transcript/ })
+    .click();
+  await page
+    .locator(".workspace-context")
+    .getByLabel("Include in answer")
+    .check();
+  await page
+    .getByRole("button", { name: /Read surrounding transcript/ })
+    .click();
+  await expect(page.getByText("2 passages selected")).toBeVisible();
+  await page.getByRole("button", { name: "Review cost and answer" }).click();
+  await expect(page.getByText("Estimated cost unavailable.")).toBeVisible();
+  const selectedSnapshot = requests
+    .filter((r) => r.path === "snapshots")
+    .at(-1)!;
+  expect(selectedSnapshot.body.passages.map((p: any) => p.chunk_index)).toEqual(
+    [0, 1],
+  );
+  expect(requests.find((r) => r.path === "estimate")?.body).toMatchObject({
+    passage_ids: ["p1", "p2"],
+    answer_language: "ja",
   });
-  expect(requestBody).not.toHaveProperty("source_mode");
-  await expect(page.locator(".qa-ask-form").getByLabel("Evidence", { exact: true })).toHaveCount(0);
-  await expect(page.getByTestId("agentic-attempt-timeline")).toBeVisible();
-  await expect(page.locator(".agentic-attempt")).toHaveCount(3);
-  await expect(page.getByTestId("agentic-attempt-timeline").getByText("Rewritten query")).toBeVisible();
-  await expect(page.getByTestId("agentic-attempt-timeline").getByText("Semantic · E5 + FAISS")).toBeVisible();
-  await expect(page.getByTestId("agentic-attempt-timeline").getByText("Keyword · Japanese BM25")).toBeVisible();
-  await expect(
-    page.getByTestId("agentic-attempt-timeline").getByText("Raw transcript context", { exact: true }),
-  ).toBeVisible();
-  await expect(page.locator(".agentic-attempt.selected")).toContainText("Raw transcript context");
-  await expect(page.getByTestId("retrieval-stage-funnel")).toHaveCount(0);
-  await expect(page.getByTestId("result-ranking-profile")).toContainText("↑2");
-  await expect(page.getByTestId("result-ranking-profile")).toContainText("↓1");
-  await page.setViewportSize({ width: 390, height: 844 });
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page
+    .getByLabel(
+      "I understand the cost is unavailable and generation may incur charges.",
+    )
+    .check();
+  await page.getByRole("button", { name: "Generate answer" }).click();
+  await expect
+    .poll(() => requests.find((r) => r.path === "answer")?.body.answer_language)
+    .toBe("ja");
 });
 
-test("enables agentic tool search from the Search tab", async ({ page }) => {
-  let requestBody = null;
-  await page.route("**/v1/search", async (route) => {
-    requestBody = route.request().postDataJSON();
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        ok: true,
-        query: "エージェント検索",
-        k: 5,
-        agentic: true,
-        retrieval_mode: "lexical",
-        result_count: 1,
-        results: [{
-          rank: 1,
-          video_id: "vid1",
-          video_title: "Demo Video",
-          chunk_index: 1,
-          start: 30,
-          end: 60,
-          score: 0.8,
-          text: "Nearby raw transcript context.",
-          language: "ja",
-        }],
-        retrieval_details: {
-          agentic_retrieval: {
-            sufficient: true,
-            final_query: "エージェント検索",
-            final_retrieval_mode: "lexical",
-            final_tool: "read_context",
-            final_k: 5,
-            stopped_reason: "sufficient_evidence",
-            attempts: [
-              {
-                attempt: 1,
-                strategy: "initial",
-                tool: "keyword_search",
-                query: "エージェント検索",
-                retrieval_mode: "lexical",
-                k: 5,
-                result_count: 1,
-                sufficient: true,
-                reason_code: "strong_single_chunk",
-              },
-              {
-                attempt: 2,
-                strategy: "read_context",
-                tool: "read_context",
-                query: "エージェント検索",
-                retrieval_mode: "lexical",
-                k: 5,
-                result_count: 1,
-                sufficient: true,
-                reason_code: "strong_single_chunk",
-                calls: [{ video_id: "vid1", timestamp: 30, window: 30 }],
-              },
-            ],
-          },
-        },
-      }),
-    });
-  });
-
-  await prepareQAStudio(page);
-  await page.getByRole("tab", { name: "Search", exact: true }).click();
-  await page.getByPlaceholder("Search transcript evidence").fill("エージェント検索");
-  await page.getByLabel("Agentic tool search").check();
-  await expect(page.getByText("Semantic · BM25 · Context")).toBeVisible();
-  await page.getByRole("button", { name: "Run Search" }).click();
-
-  await expect.poll(() => requestBody).toMatchObject({
-    query: "エージェント検索",
-    agentic: true,
-    retrieval_mode: "hybrid",
-  });
-  await expect(page.getByTestId("agentic-attempt-timeline")).toBeVisible();
-  await expect(page.locator(".agentic-attempt.selected")).toContainText("Raw transcript context");
-});
-
-test("keeps OCR ingestion and multimodal Ask in the Local Video tool", async ({ page }) => {
+test("keeps OCR ingestion and multimodal Ask in the Local Video tool", async ({
+  page,
+}) => {
   let requestBody = null;
   let searchRequestBody = null;
   let ocrJobRequests = 0;
@@ -529,7 +295,9 @@ test("keeps OCR ingestion and multimodal Ask in the Local Video tool", async ({ 
   });
 
   await page.goto("/index.html#/local-video");
-  await expect(page.getByRole("heading", { name: "Local Video Analysis" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Local Video Analysis" }),
+  ).toBeVisible();
 
   const searchPanel = page.locator(".local-video-tool-panel").filter({
     has: page.getByRole("heading", { name: "Search Local Video Evidence" }),
@@ -538,28 +306,38 @@ test("keeps OCR ingestion and multimodal Ask in the Local Video tool", async ({ 
   await searchPanel.getByLabel("Search query").fill("scoreboard");
   await searchPanel.getByRole("button", { name: "Search Local Video" }).click();
 
-  await expect.poll(() => searchRequestBody).toMatchObject({
-    query: "scoreboard",
-    video_id: "demo_001",
-    source_mode: "ocr",
-    retrieval_mode: "hybrid",
-  });
-  await expect(page.getByTestId("local-video-search-result")).toContainText("Q4 98 96");
+  await expect
+    .poll(() => searchRequestBody)
+    .toMatchObject({
+      query: "scoreboard",
+      video_id: "demo_001",
+      source_mode: "ocr",
+      retrieval_mode: "hybrid",
+    });
+  await expect(page.getByTestId("local-video-search-result")).toContainText(
+    "Q4 98 96",
+  );
 
   const askPanel = page.locator(".local-video-ask-panel");
   await expect(askPanel.getByLabel("Video ID")).toHaveValue("demo_001");
   await askPanel.getByLabel("Question").fill("What score is visible?");
   await askPanel.getByRole("button", { name: "Ask Local Video" }).click();
 
-  await expect.poll(() => requestBody).toMatchObject({
-    question: "What score is visible?",
-    video_id: "demo_001",
-    source_mode: "ocr",
-    retrieval_mode: "hybrid",
-  });
-  await expect(page.getByTestId("local-video-answer-panel")).toContainText("98-96");
+  await expect
+    .poll(() => requestBody)
+    .toMatchObject({
+      question: "What score is visible?",
+      video_id: "demo_001",
+      source_mode: "ocr",
+      retrieval_mode: "hybrid",
+    });
+  await expect(page.getByTestId("local-video-answer-panel")).toContainText(
+    "98-96",
+  );
   await expect(page.getByTestId("local-video-evidence-card")).toHaveCount(1);
-  await expect(page.getByTestId("local-video-evidence-card")).toContainText("Q4 98 96");
+  await expect(page.getByTestId("local-video-evidence-card")).toContainText(
+    "Q4 98 96",
+  );
 
   const requestCountAfterLoad = ocrJobRequests;
   await page.waitForTimeout(3200);
@@ -580,8 +358,217 @@ test("localizes the Local Video tool in Japanese", async ({ page }) => {
 
   await page.goto("/index.html#/local-video");
 
-  await expect(page.getByRole("heading", { name: "ローカル動画分析" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "ローカル動画の根拠を検索" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "ローカル動画分析" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "ローカル動画の根拠を検索" }),
+  ).toBeVisible();
   await expect(page.getByRole("button", { name: "OCR を実行" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "ローカル動画に質問" })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "ローカル動画に質問" }),
+  ).toBeVisible();
+});
+
+for (const status of ["answered", "insufficient_evidence", "error"]) {
+  test(`shows ${status} and preserves selected canonical sources`, async ({
+    page,
+  }) => {
+    const row = {
+      id: "p1",
+      video_id: "vid1",
+      video_title: "Stephen Curry interview",
+      chunk_index: 0,
+      start: 65,
+      end: 88,
+      text: "A <b>literal</b> transcript.",
+      url: "https://www.youtube.com/watch?v=vid1&t=65s",
+    };
+    let answers = 0;
+    await page.addInitScript(() => {
+      sessionStorage.setItem("yt_rag_intro_seen", "1");
+    });
+    await page.route("**/v1/videos", (route) =>
+      route.fulfill({
+        json: { videos: [{ video_id: "vid1", title: row.video_title }] },
+      }),
+    );
+    await page.route("**/v1/search", (route) =>
+      route.fulfill({ json: { results: [row] } }),
+    );
+    await page.route("**/v1/evidence/**", (route) => {
+      const path = new URL(route.request().url()).pathname.split("/").pop();
+      if (path === "snapshots")
+        return route.fulfill({ json: { snapshot_id: "s1", passages: [row] } });
+      if (path === "estimate")
+        return route.fulfill({
+          json: { estimate_id: "e1", estimated_cost: null },
+        });
+      if (path === "answer") {
+        answers += 1;
+        return route.fulfill({
+          json: {
+            status: status === "error" && answers > 1 ? "answered" : status,
+            answer: "Answer text",
+            confidence: "low",
+            warnings:
+              status === "answered" ? [] : ["Evidence or model unavailable."],
+            citations:
+              status === "answered"
+                ? [
+                    {
+                      video_id: "vid1",
+                      video_title: row.video_title,
+                      timestamp_range_label: "1:05–1:28",
+                      text: row.text,
+                      url: row.url,
+                    },
+                  ]
+                : [],
+          },
+        });
+      }
+      return route.fulfill({ json: { passages: [] } });
+    });
+    await page.goto("/index.html#/qa");
+    await page.getByLabel("Query").fill("What was said?");
+    await page.getByRole("button", { name: "Find passages" }).click();
+    await expect(
+      page.getByText("Speaker not identified · Original transcript"),
+    ).toBeVisible();
+    await expect(page.locator(".workspace-passage b")).toHaveCount(0);
+    await page.getByRole("button", { name: "Review cost and answer" }).click();
+    await page
+      .getByLabel(
+        "I understand the cost is unavailable and generation may incur charges.",
+      )
+      .check();
+    await page.getByRole("button", { name: "Generate answer" }).click();
+    await expect(page.getByTestId("answer-status")).toContainText(
+      status === "answered"
+        ? "Answered from evidence"
+        : status === "error"
+          ? "Answer unavailable"
+          : "Insufficient evidence",
+    );
+    await expect(
+      page.locator(".workspace-passage").getByText(row.text),
+    ).toBeVisible();
+    if (status === "answered") {
+      await expect(
+        page.locator(".workspace-answer").getByRole("link"),
+      ).toHaveAttribute("href", row.url);
+      await expect(page.locator(".workspace-answer")).toContainText(
+        "1:05–1:28",
+      );
+      await expect(page.locator(".workspace-answer b")).toHaveCount(0);
+      await expect(page.locator(".workspace-answer")).toContainText(row.text);
+    } else {
+      await expect(page.locator(".workspace-answer")).toContainText(
+        "Evidence or model unavailable.",
+      );
+    }
+    if (status === "error") {
+      await page.getByRole("button", { name: "Retry generation" }).click();
+      await expect(page.getByTestId("answer-status")).toContainText(
+        "Answered from evidence",
+      );
+      expect(answers).toBe(2);
+    }
+    await page.getByRole("button", { name: "Change sources" }).click();
+    await page
+      .getByRole("checkbox", { name: "Stephen Curry interview", exact: true })
+      .check();
+    await expect(page.locator(".workspace-answer")).toHaveCount(0);
+  });
+}
+
+test("groups consecutive sources without changing ranked passage order", async ({
+  page,
+}) => {
+  const rows = [
+    {
+      id: "p1",
+      video_id: "a",
+      video_title: "A long source title for the first video",
+      chunk_index: 0,
+      start: 10,
+      end: 20,
+      text: "First exact passage.",
+      url: "https://www.youtube.com/watch?v=a&t=10s",
+    },
+    {
+      id: "p2",
+      video_id: "a",
+      video_title: "A long source title for the first video",
+      chunk_index: 1,
+      start: 20,
+      end: 30,
+      text: "Second exact passage.",
+      url: "https://www.youtube.com/watch?v=a&t=20s",
+    },
+    {
+      id: "p3",
+      video_id: "b",
+      video_title: "Second source",
+      chunk_index: 0,
+      start: 30,
+      end: 40,
+      text: "Third exact passage.",
+      url: "https://www.youtube.com/watch?v=b&t=30s",
+    },
+    {
+      id: "p4",
+      video_id: "a",
+      video_title: "A long source title for the first video",
+      chunk_index: 2,
+      start: 40,
+      end: 50,
+      text: "Fourth exact passage.",
+      url: "https://www.youtube.com/watch?v=a&t=40s",
+    },
+  ];
+  await page.addInitScript(() =>
+    sessionStorage.setItem("yt_rag_intro_seen", "1"),
+  );
+  await page.route("**/v1/videos", (route) =>
+    route.fulfill({ json: { videos: [] } }),
+  );
+  await page.route("**/v1/search", (route) =>
+    route.fulfill({ json: { results: rows } }),
+  );
+  await page.route("**/v1/evidence/**", (route) =>
+    route.fulfill({ json: { snapshot_id: "s1", passages: rows } }),
+  );
+  await page.goto("/index.html#/qa");
+  await page.getByLabel("Query").fill("Find evidence");
+  await page.getByRole("button", { name: "Find passages" }).click();
+
+  await expect(page.locator(".workspace-reading-source")).toHaveText([
+    rows[0].video_title,
+    rows[2].video_title,
+    rows[3].video_title,
+  ]);
+  await expect(page.locator(".workspace-sidebar-source")).toHaveText([
+    rows[0].video_title,
+    rows[2].video_title,
+    rows[3].video_title,
+  ]);
+  await expect(
+    page.locator(".workspace-sidebar-source").first(),
+  ).toHaveAttribute("title", rows[0].video_title);
+  await expect(page.locator(".workspace-transcript")).toHaveText(
+    rows.map((row) => row.text),
+  );
+  await expect(
+    page.getByRole("link", { name: /Passage 2, A long source title/ }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: /Open Second source at/ }),
+  ).toHaveAttribute("href", rows[2].url);
+  await page.getByRole("link", { name: /Passage 3, Second source/ }).click();
+  await expect(
+    page.locator(".workspace-reader aside a.active"),
+  ).toHaveAttribute("href", "#passage-b-0");
+  await expect(page.getByText("4 passages selected")).toBeVisible();
 });

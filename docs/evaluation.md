@@ -4,7 +4,39 @@ The lab measures retrieval in three ways: an offline benchmark that needs no
 network or keys, an interactive workspace for labeling real results, and tooling that
 turns reviewed evidence into reusable datasets.
 
-![Evaluate page scoring retrieval runs with ranking metrics](media/02-evaluation-metrics.png)
+![Saved run review with separate acceptance targets and metric stages](media/evaluation-review.jpg)
+
+This is a saved historical report, not a new evaluation. Pending grades and
+missing ranking measurements remain unavailable.
+
+## Saved run review
+
+**Evaluation** opens the local run-review dashboard at `/evaluation.html`.
+Import an explicitly selected JSON report to review immutable local snapshots;
+opening a report never launches a model or grading job. **Query sets** links to
+the existing dataset workspace, with its browser storage and saved runs intact.
+
+Supported imports include the public offline benchmark, the local subscription
+review envelope, and API held-out reports. Real reports remain in ignored runtime
+data and are not bundled with the app. The public app needs no private package.
+Only supported review fields are retained; unknown measurements remain unknown.
+
+The overview separates acceptance targets, initial/final retrieval ranking,
+answer/citation quality, and execution/cost. Precision, Recall, MRR and nDCG are
+shown only when recorded for that report and stage. ROC-AUC needs an explicit
+candidate-pool contract. Synthetic fixture metrics never fill gaps in a real run.
+Semantic passage recall and citation support require reviewed labels; exact text
+and timestamp checks alone do not establish relevance.
+
+CLI API-equivalent estimates are not subscription charges or provider invoices.
+Reasoning tokens are already included in output. Failed-attempt inclusion follows the recorded cost basis, and absent usage is not zero. Version deltas require compatible
+corpus, dataset, criteria, model/effort, stage and cutoff metadata; missing IDs
+cannot certify comparability. Two acceptance targets are separate and use the
+report's recorded denominators rather than assuming every dataset is Frozen60.
+
+Metric drilldowns expose recorded question answers, canonical citations and safe
+tool summaries. Where a report lacks metric-contribution links, the UI says so
+before navigation rather than inventing affected questions. Question views group recorded workflow attempts by question and version comparisons scope them to the selected workflow.
 
 ## Offline benchmark
 
@@ -20,13 +52,13 @@ compares dense, lexical, baseline hybrid, optimized hybrid, and agentic retrieva
 and writes a leaderboard, per-query results, and failures to the gitignored
 `evals/reports/`.
 
-| Run | Precision@5 | Recall@5 | MRR@10 | nDCG@10 |
-| --- | ---: | ---: | ---: | ---: |
-| `dense` | 0.2000 | 1.0000 | 0.4896 | 0.6193 |
-| `lexical` | 0.2000 | 1.0000 | 0.9375 | 0.9539 |
-| `hybrid_baseline` (default) | 0.2000 | 1.0000 | 0.7917 | 0.8452 |
-| `optimized_hybrid` | 0.2000 | 1.0000 | 1.0000 | 1.0000 |
-| `agentic` | 0.2000 | 1.0000 | 0.9375 | 0.9539 |
+| Run                         | Precision@5 | Recall@5 | MRR@10 | nDCG@10 |
+| --------------------------- | ----------: | -------: | -----: | ------: |
+| `dense`                     |      0.2000 |   1.0000 | 0.4896 |  0.6193 |
+| `lexical`                   |      0.2000 |   1.0000 | 0.9375 |  0.9539 |
+| `hybrid_baseline` (default) |      0.2000 |   1.0000 | 0.7917 |  0.8452 |
+| `optimized_hybrid`          |      0.2000 |   1.0000 | 1.0000 |  1.0000 |
+| `agentic`                   |      0.2000 |   1.0000 | 0.9375 |  0.9539 |
 
 These numbers come from an eight-query Japanese fixture with hand-authored dense
 scores. They catch regressions in the harness and scoring; they do not show that
@@ -52,7 +84,7 @@ query set in Evaluate so it can be re-run later.
 
 ## Evaluate page
 
-Open **Evaluate** (`http://127.0.0.1:8000/evaluation.html`) to:
+Open **Query sets** from Evaluation (`http://127.0.0.1:8000/evaluation-workbench.html`) to:
 
 - create, import, and export query sets
 - run retrieval and label results with reason codes

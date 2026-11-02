@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import "./workspace.css";
 import {
   LAB_BRAND,
   LAB_NAV_PRIMARY,
@@ -29,6 +30,7 @@ import {
 } from "./lab.jsx";
 import { LibraryPage } from "./library.jsx";
 import { SearchWorkbench } from "./workbench.jsx";
+import { SettingsPage } from "./settings.jsx";
 
 const LOCK_KEY = "yt_rag_ingest_unlocked";
 const LOCALE_STORAGE_KEY = "youtube-rag-ui-locale";
@@ -41,6 +43,7 @@ const ROUTES = {
   TLDR: "/tldr",
   STUDY: "/study",
   QA: "/qa",
+  SETTINGS: "/settings",
 };
 const FALLBACK_LLM_PROVIDER_OPTIONS = {
   chatgpt: {
@@ -306,6 +309,7 @@ function readHashRoute() {
     || raw === ROUTES.LOCAL_VIDEO
     || raw === ROUTES.TLDR
     || raw === ROUTES.STUDY
+    || raw === ROUTES.SETTINGS
     || raw === ROUTES.QA
   ) {
     return raw;
@@ -2940,6 +2944,8 @@ function App() {
       && !unlocked
       && route !== ROUTES.INGEST
       && route !== ROUTES.LOCAL_VIDEO
+      && route !== ROUTES.SETTINGS
+      && route !== ROUTES.QA
     ) {
       navigate(ROUTES.INGEST);
     }
@@ -3110,7 +3116,7 @@ function App() {
             {LAB_NAV_PRIMARY.map((item) => (
               <NavItem key={item.key} item={item} />
             ))}
-            <NavMenu menu={LAB_NAV_TOOLS_MENU} items={LAB_NAV_TOOLS} />
+
           </nav>
           <label className="locale-switch">
             <span>Language</span>
@@ -3126,7 +3132,8 @@ function App() {
         <div className="route-scene" key={`scene-${route}-${routeAnimationKey}`}>
           {route === ROUTES.INGEST ? <LibraryPage onSuccess={handleIngestSuccess} /> : null}
           {route === ROUTES.LOCAL_VIDEO ? <LocalVideoAnalysisPage locale={locale} /> : null}
-          {route === ROUTES.QA && unlocked ? <SearchWorkspace locale={locale} /> : null}
+          {route === ROUTES.QA ? <SearchWorkspace locale={locale} /> : null}
+          {route === ROUTES.SETTINGS ? <SettingsPage /> : null}
           {(route === ROUTES.STUDY || route === ROUTES.TLDR) && unlocked ? <StudyWorkspace route={route} /> : null}
         </div>
       </main>
@@ -3135,7 +3142,7 @@ function App() {
         {LAB_NAV_PRIMARY.map((item) => (
           <NavItem key={`mobile-${item.key}`} item={item} mobile />
         ))}
-        <NavMenu menu={LAB_NAV_TOOLS_MENU} items={LAB_NAV_TOOLS} mobile />
+
       </nav>
     </div>
   );

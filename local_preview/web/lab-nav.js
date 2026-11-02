@@ -8,34 +8,10 @@ export const LAB_BRAND = {
 
 // Ordered by the lab workflow: discover -> index -> retrieve -> measure.
 export const LAB_NAV_PRIMARY = [
-  {
-    key: "catalog",
-    href: "/catalog.html",
-    icon: "/icons/icon-library.svg",
-    labels: { "en-US": "Catalog", "ja-JP": "カタログ" },
-  },
-  {
-    key: "library",
-    href: "/index.html#/ingest",
-    route: "/ingest",
-    icon: "/icons/icon-upload.svg",
-    labels: { "en-US": "Library", "ja-JP": "ライブラリ" },
-  },
-  {
-    key: "search",
-    href: "/index.html#/qa",
-    route: "/qa",
-    icon: "/icons/icon-search.svg",
-    labels: { "en-US": "Search", "ja-JP": "検索" },
-    requiresUnlock: true,
-  },
-  {
-    key: "evaluate",
-    href: "/evaluation.html",
-    icon: "/icons/icon-jobs.svg",
-    labels: { "en-US": "Evaluate", "ja-JP": "評価" },
-    requiresUnlock: true,
-  },
+  { key: "library", href: "/index.html#/ingest", route: "/ingest", icon: "/icons/icon-library.svg", labels: { "en-US": "Library", "ja-JP": "ライブラリ" } },
+  { key: "search", href: "/index.html#/qa", route: "/qa", icon: "/icons/icon-search.svg", labels: { "en-US": "Search", "ja-JP": "検索" } },
+  { key: "evaluate", href: "/evaluation.html", icon: "/icons/icon-jobs.svg", labels: { "en-US": "Evaluation", "ja-JP": "評価" } },
+  { key: "settings", href: "/index.html#/settings", route: "/settings", icon: "/icons/icon-jobs.svg", labels: { "en-US": "Settings", "ja-JP": "設定" } },
 ];
 
 export const LAB_NAV_TOOLS_MENU = {
@@ -150,12 +126,12 @@ export function renderLabNav({ active, locale }) {
   if (desktop) {
     desktop.innerHTML = LAB_NAV_PRIMARY
       .map((item) => linkHtml(item, locale, item.key === active, "app-nav-link", "nav-icon", "nav-label nav-label-text"))
-      .join("") + menuHtml(locale, active, false);
+      .join("");
   }
   const mobile = document.querySelector(".bottom-tabbar");
   if (mobile) {
     mobile.innerHTML = LAB_NAV_PRIMARY
       .map((item) => linkHtml(item, locale, item.key === active, "bottom-tab-link", "bottom-tab-icon", "bottom-tab-label"))
-      .join("") + menuHtml(locale, active, true);
+      .join("");
   }
 }
