@@ -470,3 +470,30 @@ class TestVideoLibraryPersistence:
         lib = VideoLibrary(data_dir=tmp_data_dir, processor=FakeProcessor())
         lib.save()
         assert os.path.exists(os.path.join(tmp_data_dir, "library", "library.json"))
+
+
+def test_revision_change_rebuilds_same_dimension_index():
+    from multilingual.video_library import VideoLibrary
+
+    library = VideoLibrary.__new__(VideoLibrary)
+    library.processor = MagicMock()
+    library.processor.embedding_metadata.return_value = {
+        "backend": "sentence_transformers",
+        "model": "example",
+        "dim": 128,
+        "revision": "new",
+    }
+    library.index = MagicMock(ntotal=1, d=128)
+    library.chunk_map = ["one"]
+    library._rebuild_index = MagicMock()
+    library.save = MagicMock()
+    library._reconcile_index_embedding(
+        {
+            "backend": "sentence_transformers",
+            "model": "example",
+            "dim": 128,
+            "revision": "old",
+        }
+    )
+    library._rebuild_index.assert_called_once_with()
+    library.save.assert_called_once_with()
