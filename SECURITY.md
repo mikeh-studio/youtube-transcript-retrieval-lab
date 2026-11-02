@@ -14,7 +14,8 @@ sharing it. This redaction is not a general personal-information classifier.
 Internal API failures return a generic message; detailed tracebacks remain in
 local server logs, which should also be reviewed before sharing.
 
-Use a fresh virtual environment, upgrade pip, then `pip install -r requirements.txt`.
+Use a fresh virtual environment and follow the [quick start](README.md#try-it-locally),
+which upgrades pip and setuptools before installing the requirements.
 `requirements-security.txt` supplies audited version floors, and CI checks
 installed Python packages with `pip-audit` and the frontend with `npm audit`.
 An advisory scan covers known dependency issues, not every possible flaw.
