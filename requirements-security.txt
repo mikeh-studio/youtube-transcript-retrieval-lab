@@ -8,6 +8,7 @@ fsspec>=2026.9.0
 idna>=3.20
 python-dotenv>=1.2.4
 sentence-transformers>=6.2.0
+setuptools>=84.1.0
 torch>=2.15.0
 transformers>=5.22.1
 urllib3>=2.8.0

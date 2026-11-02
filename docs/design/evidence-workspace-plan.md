@@ -24,7 +24,7 @@ Secondary operator tools remain reachable without becoming primary navigation.
 
 ## Review saved evaluations
 
-Evaluation opens saved run history. Query sets retains dataset creation, labels
+Evaluation opens saved run history. Its Query sets workbench provides dataset creation, labels
 and existing browser storage. Explicit CLI, API and offline benchmark JSON imports
 become sanitized immutable local snapshots; opening a report launches no model,
 grading job or private-folder scan.
@@ -60,8 +60,8 @@ requires explicit acknowledgement instead of inventing a rate.
 
 ## Acceptance and review
 
-Terra High implemented the approved direction. Astra High reviewed the UI against
-the approved mocks, source contracts and browser evidence. Its initial four P2
+Separate AI coding agents implemented the approved direction and reviewed the UI
+against the approved mocks, source contracts and browser evidence. The initial four P2
 findings led to fixes for failure preservation, scoped drilldowns, baseline
 compatibility and keyboard focus. The follow-up found no remaining P1/P2 in the
 reviewed local workflow; [findings and limits](evidence-workspace-review.md) record
@@ -69,6 +69,6 @@ what that acceptance covers.
 
 Offline tests cover source continuity, strict citations, normalization/sanitizing,
 comparison eligibility, contributor navigation, focus, failure details and preserved
-legacy routes. No paid evaluation or frozen-result changes were needed. Screenshots
-show real local reader and saved-report states; synthetic browser fixtures stay in
-tests and never supply results to a historical report.
+legacy routes. No paid evaluation or frozen-result changes were needed. The reader screenshot
+uses the real local corpus; the Evaluation screenshot uses explicitly labeled
+synthetic aggregates. Synthetic fixtures never supply results to a historical report.

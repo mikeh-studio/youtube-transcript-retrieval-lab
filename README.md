@@ -21,7 +21,7 @@ search and the offline evaluation fixture.
 ```bash
 python3.11 -m venv .venv
 source .venv/bin/activate
-python -m pip install --upgrade pip
+python -m pip install --upgrade pip setuptools -c requirements-security.txt
 python -m pip install -r requirements.txt
 [ -f .env.local ] || cp .env.example .env.local
 python local_preview/local_api.py
@@ -39,18 +39,18 @@ features. Node.js is only needed to rebuild the frontend, not to run the app.
 
 ## What you can do
 
-| Workflow                | Purpose                                                                                                                                                         |
-| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Library → Search**    | Index transcripts, scope a question to selected videos or the whole library, and compare two retrieval setups side by side.                                     |
-| **Inspect evidence**    | Read full original passages and nearby context, follow timestamp links, and explicitly select passages for an optional answer.                                  |
-| **Search → Evaluation** | Use Compare mode for relevance labels and query sets; import saved CLI/API or offline benchmark reports to inspect rankings, grades, failures, usage and costs. |
-| **Answer**              | Review the selected evidence and token budget, then optionally generate a cited answer. Sources do not silently change; citation relevance still needs review.  |
+| Workflow | Purpose |
+| --- | --- |
+| **Library → Search** | Index transcripts and search selected videos or your whole library. |
+| **Inspect evidence** | Read passages and context, follow timestamps, and select sources for an optional answer. |
+| **Search → Evaluation** | Label results in Compare; open **+ Query sets** in Evaluation for datasets; import saved reports for review. |
+| **Answer** | Review selected sources and the token budget, then generate an optional cited answer. |
 
 The optional **Catalog** reads metadata from a separate private service. It is
 not required for the public workbench; catalog discovery does not automatically
 index videos. [Catalog boundary and setup](docs/catalog-browser.md).
 [Study, Chunking, Data quality and local-video OCR](local_preview/README.md)
-remain available under Tools.
+remain available under **Settings**.
 
 ## How retrieval works
 
@@ -79,7 +79,7 @@ retrieved. A translation is an explanation, not an original quotation. A title
 or appearance credit does not establish who spoke, and an authentic citation
 can still be irrelevant to the question.
 
-The reader screenshot uses the development question **“How does Curry describe
+The screenshot at the top uses the development question **“How does Curry describe
 his shooting motion?”**, scoped to **The Stephen Curry Interview (Part 1)** with
 LeBron James and Steve Nash. It shows full original passages from the real local
 backend, not a generated answer. Rankings can include irrelevant passages and
@@ -87,18 +87,11 @@ miss required context; this is an unjudged workflow example, not measured accura
 
 ## Evaluation status
 
-| Area                          | Current evidence                                                                                                                                                                 |
-| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Regression fixture            | A small, checked-in Japanese fixture exercises retrieval and scoring with hand-authored dense scores. [Commands, results and limitations](docs/evaluation.md#offline-benchmark). |
-| Retrieval defaults            | Baseline RRF remains the default hybrid profile. Experimental profiles and reranking are opt-in.                                                                                 |
-| Independent answer evaluation | Answer quality and cost evaluation remains incomplete. The separate 85% source-selection and underspecification-handling targets are not verified results.                       |
-
-![Evaluation demo with populated mocked acceptance, ranking, quality and cost metrics](docs/media/evaluation-review.jpg)
-
-The screenshot uses an [explicitly mocked demo report](docs/examples/evaluation-demo.json)
-to show populated metrics. These are illustrative values, not measured results;
-real reports keep missing grades pending. See the [UI review findings](docs/design/evidence-workspace-review.md)
-for the independent review and validation limits.
+| Area | Current evidence |
+| --- | --- |
+| Regression fixture | Small Japanese fixture with hand-authored dense scores. [Methods and limits](docs/evaluation.md#offline-benchmark). |
+| Retrieval defaults | Baseline RRF; experimental profiles and reranking are opt-in. |
+| Independent answer evaluation | Answer quality/cost remains incomplete. The 85% source-selection and underspecification-handling targets are unverified. |
 
 Run the offline fixture without network access, model downloads or provider keys:
 
@@ -112,6 +105,22 @@ python -m evals.runner \
 Fixture scores do not establish real-world retrieval accuracy. Mechanical
 citation checks do not establish claim support or answer completeness.
 [Evaluation methods](docs/evaluation.md) explain labels, saved runs and limits.
+
+## Reviewing saved reports
+
+**Illustrative UI demo: every metric in the screenshot below is fabricated,
+not a measured evaluation result.** Evaluation can review public benchmark and
+CLI/API reports, including reports from the optional private MCP companion.
+Importing a companion report does not install or run the companion's MCP tools.
+
+![Illustrative Evaluation dashboard with mocked acceptance, ranking, quality and cost values](docs/media/evaluation-review.jpg)
+
+Import the [synthetic demo report](docs/examples/evaluation-demo.json) to explore
+the populated dashboard. Real reports keep missing grades pending. The reader
+supports English/Japanese controls; the saved-report dashboard currently uses
+English review labels, so its header has no language picker. Both share the
+same brand and navigation. See the [UI review findings](docs/design/evidence-workspace-review.md)
+for the separate AI-agent review and validation limits.
 
 ## Experimental MCP companion
 
@@ -146,14 +155,15 @@ there is no automatic synchronization. [Companion architecture and boundaries](d
 
 The workspace now separates Find from Compare, expands original transcript
 evidence, and binds optional answers to selected canonical passages. Evaluation
-reviews explicitly imported reports; Query sets retains the dataset workbench.
+reviews explicitly imported reports. Query sets, labels and Codex-drafted
+datasets live in the **Query sets workbench**, linked from Evaluation.
 Settings keeps safe browser defaults separate from server credentials. Library
 deletions persist across restarts, and cached model revisions guard index compatibility.
 [Model configuration](docs/configuration.md#embeddings) explains the settings.
 
 - Public setup works independently of the optional private catalog and MCP service.
 - Interactive labels are single-reviewer; benchmark fixture results are not a statistically representative corpus evaluation.
-- Evaluate query sets and runs use browser storage; clearing it removes them.
+- Query sets, their labels and retrieval runs use browser storage; clearing it removes them. Imported evaluation reports are local files under `data/runtime/evaluation_reports/`.
 - Retrieval depends on transcript availability. Playlist page parsing can change.
 - The app is loopback-only and has no account system. [Security and privacy](SECURITY.md) · [Browser request boundary](BROWSER_SECURITY.md).
 - OCR accepts only local video files you own or have permission to process; the project does not download YouTube video files.

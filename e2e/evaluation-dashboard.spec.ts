@@ -76,6 +76,13 @@ test("empty installation links to query sets", async ({ page }) => {
   );
   await page.goto("/evaluation.html");
   await expect(page.getByText("No saved reports yet")).toBeVisible();
+  await expect(page.locator(".appbar .brand-sub")).toHaveText(
+    "YouTube transcripts",
+  );
+  await expect(
+    page.getByRole("link", { name: "Retrieval Lab home" }),
+  ).toHaveAttribute("href", "./index.html");
+  await expect(page.getByRole("combobox", { name: "Language" })).toHaveCount(0);
   await expect(
     page.getByRole("link", {
       name: "Open query sets and dataset management →",

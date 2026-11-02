@@ -4,25 +4,33 @@ The lab measures retrieval in three ways: an offline benchmark that needs no
 network or keys, an interactive workspace for labeling real results, and tooling that
 turns reviewed evidence into reusable datasets.
 
+**Illustrative UI demo — not measured benchmark results.**
+
 ![Mocked demo report showing populated acceptance targets, ranking metrics and quality](media/evaluation-review.jpg)
 
 This screenshot uses [mocked demonstration data](examples/evaluation-demo.json),
 not measured evaluation results. Import that JSON through **Import report** to
 reproduce the populated view. Its values, grades, tokens, costs and AUC candidate
 pool description are illustrative; no model or benchmark was run. Real reports
-continue to show missing grades and measurements as unavailable.
+continue to show missing grades and measurements as unavailable. The dashboard
+uses English review labels; the bilingual reader and Query sets workbench also
+provide a language picker. Original transcript quotations retain their language.
 
 ## Saved run review
 
 **Evaluation** opens the local run-review dashboard at `/evaluation.html`.
 Import an explicitly selected JSON report to review immutable local snapshots;
-opening a report never launches a model or grading job. **Query sets** links to
-the existing dataset workspace, with its browser storage and saved runs intact.
+opening a report never launches a model or grading job. **+ Query sets** in the
+Evaluation sidebar opens the existing dataset workspace, with its browser storage
+and saved runs intact. Imported reports are files under
+`data/runtime/evaluation_reports/`; clearing browser storage does not delete them.
 
 Supported imports include the public offline benchmark, the local subscription
 review envelope, and API held-out reports. Real reports remain in ignored runtime
 data and are not bundled with the app. The public app needs no private package.
-Only supported review fields are retained; unknown measurements remain unknown.
+Reports from the optional private MCP companion can also be reviewed without
+installing or running that companion. Only supported review fields are retained;
+unknown measurements remain unknown.
 
 The overview separates acceptance targets, initial/final retrieval ranking,
 answer/citation quality, and execution/cost. Precision, Recall, MRR and nDCG are
@@ -96,12 +104,12 @@ Open **Query sets** from Evaluation (`http://127.0.0.1:8000/evaluation-workbench
 
 Query sets, labels, and run snapshots are stored in browser `localStorage`.
 Labels given in Search are stored separately in `data/runtime/`, feed the
-server's default feedback tuning, and are listed under **Tools → Search
-feedback**. Folding that page into Evaluate is planned.
+server's default feedback tuning, and are listed under **Settings → Search
+feedback**.
 
 ## Draft a dataset with Codex CLI
 
-Evaluate can turn one to three indexed transcripts into a six-case
+The Query sets workbench can turn one to three indexed transcripts into a six-case
 retrieval draft. Install the Codex CLI and run `codex login` first.
 
 - Each proposal stays a draft until you approve, edit, or reject it.
@@ -136,7 +144,7 @@ python pipelines/curate_evidence.py \
   --limit 200
 ```
 
-Inspect the output under **Tools → Data quality** (`http://127.0.0.1:8000/evidence.html`).
+Inspect the output under **Settings → Data quality** (`http://127.0.0.1:8000/evidence.html`).
 
 ## Limits
 
