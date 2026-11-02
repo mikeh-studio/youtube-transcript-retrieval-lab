@@ -67,3 +67,13 @@ incompatible comparison paths absent from the historical reports. Slight capture
 cropping limits pixel-perfect full-viewport comparisons. The public checkout does
 not bundle the local reports shown in the screenshots; import your own supported
 report to review it.
+
+## Navigation follow-up
+
+After Astra's review, user feedback moved Library and Search beside the brand,
+with Evaluation and Settings kept as right-side utilities. Shared header rules
+keep the primary anchor, typography and active underline consistent across React
+and standalone pages. Mobile run history stays within its own scroll area.
+This follow-up passed **20** targeted shell/Evaluation/Library browser checks at
+desktop and narrow widths plus the frontend build; it was not independently
+re-reviewed by Astra. The screenshots above show the updated header.

@@ -4,31 +4,10 @@
   font-family: Roboto, "Noto Sans JP", sans-serif;
   font-size: 14px;
 }
-.evaluation-dashboard .appbar {
-  height: 48px;
-  min-height: 48px;
-  background: #101010;
-  border-bottom: 1px solid #333333;
-  padding: 0 24px;
-}
-.evaluation-dashboard .brand {
-  font-size: 20px;
-  font-weight: 700;
-}
-.evaluation-dashboard .brand img {
-  width: 34px;
-}
-.evaluation-dashboard .appbar-nav {
-  display: flex;
-  gap: 18px;
-}
-.evaluation-dashboard .appbar-nav a {
-  color: #ededed;
-}
 .eval-layout {
   display: grid;
   grid-template-columns: 230px minmax(0, 1fr);
-  min-height: calc(100vh - 48px);
+  min-height: calc(100vh - 64px);
 }
 .run-sidebar {
   border-right: 1px solid #333333;
@@ -254,7 +233,7 @@ select:focus-visible {
     padding: 8px;
   }
   .eval-layout {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
   .run-sidebar {
     border-right: 0;
@@ -282,33 +261,28 @@ select:focus-visible {
   }
 }
 
-.evaluation-dashboard .appbar-nav .app-nav-link {
-  background: transparent;
-  border: 0;
-  border-bottom: 3px solid transparent;
-  border-radius: 0;
-  box-shadow: none;
-  height: 48px;
-  padding: 0 14px;
-}
-.evaluation-dashboard .appbar-nav .app-nav-link.active {
-  background: transparent;
-  border-bottom-color: #ff1747;
-}
-.evaluation-dashboard .appbar-nav .app-nav-link[data-nav-key="evaluate"] {
-  margin-left: clamp(20px, 12vw, 180px);
-}
 .evaluation-dashboard .toolbar .history-link {
   margin-left: auto;
   color: #18d5ff;
 }
-@media (max-width: 700px) {
-  .evaluation-dashboard .appbar-nav .app-nav-link[data-nav-key="evaluate"] {
-    margin-left: 0;
+@media (max-width: 860px) {
+  .evaluation-dashboard .appbar-nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
   }
+
   .evaluation-dashboard .appbar-nav .app-nav-link {
-    height: 38px;
+    min-height: 38px;
     padding: 0 6px;
+    background: transparent;
+    border: 0;
+    border-bottom: 3px solid transparent;
+    border-radius: 0;
+  }
+
+  .evaluation-dashboard .appbar-nav .app-nav-link.active {
+    border-bottom-color: var(--brand-red);
   }
 }
 

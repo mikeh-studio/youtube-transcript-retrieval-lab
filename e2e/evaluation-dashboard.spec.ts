@@ -370,14 +370,12 @@ test("scoped contributors, evidence, failure detail and keyboard focus", async (
   await expect(page.getByText("12,655")).toBeVisible();
   await expect(page.getByText("$0.100000")).toBeVisible();
   await expect(
-    page
-      .getByRole("row")
-      .filter({
-        has: page.getByRole("button", {
-          name: "Citation relevance",
-          exact: false,
-        }),
+    page.getByRole("row").filter({
+      has: page.getByRole("button", {
+        name: "Citation relevance",
+        exact: false,
       }),
+    }),
   ).toContainText("0.2");
   const overview = page.getByRole("button", { name: "Overview", exact: true });
   await overview.focus();
@@ -484,5 +482,36 @@ test("cost threshold requires recorded semantic outcomes", async ({ page }) => {
       "within threshold (1.2× across 1 matched graded questions)",
       { exact: false },
     ),
+  ).toBeVisible();
+});
+
+test("mobile run history scrolls without pushing navigation off screen", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const reports = [1, 2, 3].map((index) => ({
+    id: `mobile-${index}`,
+    run_id: `Saved run ${index}`,
+    profiles: [{ id: "fixture", arms: { direct: {}, mcp: {} } }],
+  }));
+  await page.route("**/v1/evaluation/reports", (route) =>
+    route.fulfill({ json: { reports } }),
+  );
+  await page.goto("/evaluation.html");
+  await expect(
+    page.getByRole("heading", { name: "Saved run 1" }),
+  ).toBeVisible();
+  const dimensions = await page.evaluate(() => ({
+    page: document.documentElement.scrollWidth,
+    viewport: innerWidth,
+    history: document.getElementById("runList")!.scrollWidth,
+    historyViewport: document.getElementById("runList")!.clientWidth,
+  }));
+  expect(dimensions.page).toBeLessThanOrEqual(dimensions.viewport);
+  expect(dimensions.history).toBeGreaterThan(dimensions.historyViewport);
+  await expect(
+    page
+      .getByRole("navigation", { name: "Primary", exact: true })
+      .getByRole("link", { name: "Search", exact: true }),
   ).toBeVisible();
 });

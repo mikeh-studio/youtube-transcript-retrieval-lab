@@ -3014,7 +3014,7 @@ function App() {
 
     if (locked) {
       return (
-        <button type="button" className={`${className} locked`} disabled title={LOCKED_NAV_HINT}>
+        <button type="button" className={`${className} locked`} data-nav-key={item.key} disabled title={LOCKED_NAV_HINT}>
           {content}
         </button>
       );
@@ -3024,6 +3024,7 @@ function App() {
         <button
           type="button"
           className={className}
+          data-nav-key={item.key}
           onClick={() => navigate(item.route)}
           aria-current={active ? "page" : undefined}
         >
@@ -3032,7 +3033,7 @@ function App() {
       );
     }
     return (
-      <a className={className} href={item.href}>
+      <a className={className} data-nav-key={item.key} href={item.href} aria-current={active ? "page" : undefined}>
         {content}
       </a>
     );
