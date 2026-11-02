@@ -3,6 +3,14 @@ __pycache__/
 *.pyc
 .env
 .env*.local
+.env.*
+!.env.example
+*.pem
+*.key
+credentials*.json
+service-account*.json
+.npmrc
+.pypirc
 *.egg-info/
 dist/
 build/

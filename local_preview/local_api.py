@@ -7952,6 +7952,8 @@ class Handler(BrowserBoundary, BaseHTTPRequestHandler):
     def _set_headers(self, status=200, content_type="application/json; charset=utf-8"):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "no-referrer")
         self.send_header(
             "Cache-Control", "no-store, no-cache, must-revalidate, max-age=0"
         )
@@ -7968,6 +7970,8 @@ class Handler(BrowserBoundary, BaseHTTPRequestHandler):
     def _download(self, payload: bytes, filename: str):
         self.send_response(200)
         self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "no-referrer")
         self.send_header(
             "Content-Disposition", f'attachment; filename="{filename}"'
         )
@@ -8399,10 +8403,16 @@ class Handler(BrowserBoundary, BaseHTTPRequestHandler):
                 },
                 exc.status,
             )
-        except Exception as exc:
+        except Exception:
             traceback.print_exc()
             self._json(
-                {"ok": False, "error": {"code": "INTERNAL_ERROR", "message": str(exc)}},
+                {
+                    "ok": False,
+                    "error": {
+                        "code": "INTERNAL_ERROR",
+                        "message": "An internal error occurred. Check the local server log for details.",
+                    },
+                },
                 500,
             )
 
@@ -8456,10 +8466,16 @@ class Handler(BrowserBoundary, BaseHTTPRequestHandler):
                 },
                 404,
             )
-        except Exception as exc:
+        except Exception:
             traceback.print_exc()
             self._json(
-                {"ok": False, "error": {"code": "INTERNAL_ERROR", "message": str(exc)}},
+                {
+                    "ok": False,
+                    "error": {
+                        "code": "INTERNAL_ERROR",
+                        "message": "An internal error occurred. Check the local server log for details.",
+                    },
+                },
                 500,
             )
 
@@ -9085,10 +9101,16 @@ class Handler(BrowserBoundary, BaseHTTPRequestHandler):
                 },
                 404,
             )
-        except Exception as exc:
+        except Exception:
             traceback.print_exc()
             self._json(
-                {"ok": False, "error": {"code": "INTERNAL_ERROR", "message": str(exc)}},
+                {
+                    "ok": False,
+                    "error": {
+                        "code": "INTERNAL_ERROR",
+                        "message": "An internal error occurred. Check the local server log for details.",
+                    },
+                },
                 500,
             )
 

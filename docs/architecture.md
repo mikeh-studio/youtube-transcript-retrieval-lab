@@ -62,19 +62,18 @@ local files (data/, gitignored) and browser storage
 
 ## Frontend
 
-The navigation is defined once in `local_preview/web/lab-nav.js`: Catalog,
-Library, Search, Evaluate, and a Tools menu (Chunking, Data quality, Search
-feedback, Local video, Study). The React shell imports it, and the standalone
-pages render it with `renderLabNav()`; `e2e/shell-redesign.spec.ts` checks that
-every page shows the same navigation.
+The navigation is defined once in `local_preview/web/lab-nav.js`: Library,
+Search, Evaluation, and Settings. Search contains Find evidence and Compare
+retrieval. Catalog, chunking, data quality, feedback, local video, and Study
+remain available through Settings. The React shell imports the shared navigation;
+standalone pages use `renderLabNav()`. Browser tests check both layouts.
 
-![Shared lab navigation with the Tools menu open on the Search page](media/lab-navigation.png)
+![Current Search workspace with shared navigation and timestamped evidence](media/evidence-reader.jpg)
 
-`local_preview/react_shell/` is the React source for Library, Search, Study, and
-Local video: `library.jsx` (Library), `workbench.jsx` (Search), `lab.jsx`
-(shared helpers), and `App.jsx` (routing, the Answer flow, Study, and Local
-video). `npm run
-build:web` writes the bundle to `local_preview/web/assets/`, and CI fails if the
+`local_preview/react_shell/` contains `library.jsx` (Library), `find.jsx`
+(Find evidence), `workbench.jsx` (Compare retrieval), `settings.jsx` (Settings),
+`lab.jsx` (shared helpers), and `App.jsx` (routing and secondary tools).
+`npm run build:web` writes the bundle to `local_preview/web/assets/`, and CI fails if the
 committed bundle does not match the source. The other pages are plain HTML and
 JavaScript in `local_preview/web/`. Running the app does not require
 Node.js.

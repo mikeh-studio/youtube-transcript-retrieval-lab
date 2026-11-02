@@ -1,3 +1,5 @@
+-c requirements-security.txt
+
 youtube-transcript-api
 fugashi
 unidic-lite

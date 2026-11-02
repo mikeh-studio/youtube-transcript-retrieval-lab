@@ -14,11 +14,11 @@ python local_preview/local_api.py
 Open:
 
 - `http://127.0.0.1:8000/catalog.html` - Catalog (needs `CONTENT_LIBRARY_CATALOG_URL`)
-- `http://127.0.0.1:8000/index.html` - Library, then Search (`#/qa`), Study (`#/study`), and Local video (`#/local-video`)
-- `http://127.0.0.1:8000/evaluation.html` - Evaluate
-- `http://127.0.0.1:8000/chunking.html` - Tools → Chunking
-- `http://127.0.0.1:8000/evidence.html` - Tools → Data quality
-- `http://127.0.0.1:8000/reviews.html` - Tools → Search feedback
+- `http://127.0.0.1:8000/index.html` - Library, Search (`#/qa`), and Settings (`#/settings`)
+- `http://127.0.0.1:8000/evaluation.html` - Evaluation
+- `http://127.0.0.1:8000/chunking.html` - Settings → Chunking
+- `http://127.0.0.1:8000/evidence.html` - Settings → Data quality
+- `http://127.0.0.1:8000/reviews.html` - Settings → Search feedback
 
 Use this command for fully offline startup without loading the embedding model:
 
@@ -31,9 +31,9 @@ YT_RAG_FORCE_HASH_EMBEDDINGS=1 python local_preview/local_api.py
 - One local process for the HTTP API and static UI.
 - Catalog: a read-only view of discovered videos from the optional private catalog service.
 - Library: YouTube video and playlist transcript ingestion, and a table of indexed videos with chunk counts, chunking status, and catalog review status.
-- Search: an A/B workbench that runs two retrieval setups on the same query (single pass with `hybrid`, `dense`, or `lexical` mode, or deterministic agentic search that chooses its own tools; either with an optional reranker), with inline relevance labels, per-query metrics, and retrieval traces. The Answer tab produces citation-backed answers with grounded evidence and fallback states.
-- Evaluate: query sets, labels, run snapshots, metrics, run comparison, and Codex-drafted datasets.
-- Tools: Chunking, Data quality (evidence curation reports), Search feedback (`relevant` / `not_relevant` labels from Search), and Local video OCR for files you own or have permission to process.
+- Search: Find evidence groups timestamped passages by video, expands canonical transcript context, and generates optional citation-backed answers from a saved selection. Compare retrieval runs two setups on the same query with relevance labels, per-query metrics, optional reranking, and retrieval traces. Compare supports `hybrid`, `dense`, `lexical`, and deterministic agentic retrieval.
+- Evaluation: review explicitly imported saved CLI/API reports, ranking and answer metrics, citations, token usage, and supplied costs. Query sets, labels, retrieval runs, and Codex-drafted datasets remain in the linked Query sets workbench.
+- Settings: browser defaults, provider configuration status (no keys), and links to Catalog, Chunking, Data quality (evidence curation reports), Search feedback (`relevant` / `not_relevant` labels from Search), and Local video OCR for files you own or have permission to process.
 - Study (secondary): flashcards, topic maps, Explain Topic notes, summaries, run history, and quality checks.
 - UI language switch for English and Japanese.
 
@@ -47,7 +47,7 @@ Local preview writes generated state under `data/`:
 - `data/runtime/` - feedback, ask history, ingest logs, review batches, and curation artifacts.
 - `data/cache/summaries/` - TLDR cache files.
 
-Evaluation query sets, labels, and run snapshots are stored in browser `localStorage`.
+Imported evaluation reports are immutable local files under `data/runtime/evaluation_reports/`. Query sets, labels, and retrieval run snapshots in the Query sets workbench are stored in browser `localStorage`.
 Study Studio run history is stored in browser `sessionStorage` for the current tab session.
 
 ## Ingestion Verification

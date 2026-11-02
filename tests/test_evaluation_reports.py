@@ -3,6 +3,51 @@ import pytest
 from local_preview.evaluation_reports import EvaluationReportStore, normalize_report
 
 
+@pytest.mark.parametrize(
+    "private_text",
+    [
+        "gh" + "p_" + "A" * 36,
+        "github_" + "pat_" + "A" * 40,
+        "AK" + "IA" + "A" * 16,
+        "https://reviewer:private-password@example.test/report",
+        "https://example.test/report?api_key=private-value&view=summary",
+        "https://example.test/report?X-Amz-Signature=private-value",
+        "C:\\Users\\example\\private-report.json",
+        "-----BEGIN "
+        + "PRIVATE KEY-----\nfake key material\n-----END "
+        + "PRIVATE KEY-----",
+    ],
+)
+def test_allowed_report_fields_redact_embedded_credentials_and_paths(private_text):
+    report = normalize_report(
+        {"run_id": "privacy", "arms": {"direct": {}}, "notes": private_text}
+    )
+    assert private_text not in report["notes"]
+    assert "private-value" not in report["notes"]
+    assert "private-password" not in report["notes"]
+
+
+def test_report_redaction_preserves_exact_quotes_and_timestamp_links():
+    quote = "ヒンメルならそうした。"
+    url = "https://www.youtube.com/watch?v=abcdefghijk&t=46s"
+    report = normalize_report(
+        {
+            "run_id": "quotes",
+            "arms": {"direct": {}},
+            "citations": [{"quote": quote, "url": url}],
+        }
+    )
+    assert report["citations"] == [{"quote": quote, "url": url}]
+
+
+def test_dynamic_workflow_names_cannot_bypass_report_redaction():
+    private_name = "gh" + "p_" + "A" * 36
+    report = normalize_report(
+        {"run_id": "privacy", "arms": {private_name: {}, "direct": {}}}
+    )
+    assert report["profiles"][0]["arms"] == {"direct": {}}
+
+
 def test_import_is_immutable_sanitized_and_keeps_unknown(tmp_path):
     store = EvaluationReportStore(tmp_path)
     raw = {

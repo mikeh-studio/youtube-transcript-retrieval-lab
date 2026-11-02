@@ -3,8 +3,6 @@ import "./workspace.css";
 import {
   LAB_BRAND,
   LAB_NAV_PRIMARY,
-  LAB_NAV_TOOLS,
-  LAB_NAV_TOOLS_MENU,
   labNavLabel,
 } from "../../web/lab-nav.js";
 import {
@@ -3039,59 +3037,6 @@ function App() {
     );
   }
 
-  function NavMenu({ menu, items, mobile = false }) {
-    const menuActive = items.some(isNavItemActive);
-    const label = labNavLabel(menu, locale);
-    const links = items.map((item) => {
-      const active = isNavItemActive(item);
-      if (isNavItemLocked(item)) {
-        return (
-          <span
-            className={`${mobile ? "bottom-tools-link" : "nav-tools-link"} locked`}
-            aria-disabled="true"
-            title={LOCKED_NAV_HINT}
-            key={`${mobile ? "bottom-" : ""}tool-${item.key}`}
-          >
-            <img className={mobile ? "bottom-tab-icon" : "nav-icon"} src={item.icon} alt="" aria-hidden="true" />
-            <span>{labNavLabel(item, locale)}</span>
-          </span>
-        );
-      }
-      return (
-        <a
-          className={`${mobile ? "bottom-tools-link" : "nav-tools-link"} ${active ? "active" : ""}`}
-          href={item.href}
-          aria-current={active ? "page" : undefined}
-          key={`${mobile ? "bottom-" : ""}tool-${item.key}`}
-        >
-          <img className={mobile ? "bottom-tab-icon" : "nav-icon"} src={item.icon} alt="" aria-hidden="true" />
-          <span>{labNavLabel(item, locale)}</span>
-        </a>
-      );
-    });
-
-    if (mobile) {
-      return (
-        <details className="bottom-tools-menu" data-nav-group={menu.key}>
-          <summary className={`bottom-tab-link ${menuActive ? "active" : ""}`}>
-            <img className="bottom-tab-icon" src={menu.icon} alt="" aria-hidden="true" />
-            <span className="bottom-tab-label">{label}</span>
-          </summary>
-          <div className="bottom-tools-panel">{links}</div>
-        </details>
-      );
-    }
-
-    return (
-      <details className="nav-tools-menu" data-nav-group={menu.key}>
-        <summary className={`app-nav-link nav-btn nav-tools-summary ${menuActive ? "active" : ""}`}>
-          <img className="nav-icon" src={menu.icon} alt="" aria-hidden="true" />
-          <span className="nav-label">{label}</span>
-        </summary>
-        <div className="nav-tools-panel">{links}</div>
-      </details>
-    );
-  }
 
   return (
     <div className={`react-shell-root ${showIntro ? "intro-playing" : ""}`}>
