@@ -7,7 +7,7 @@
 YouTube transcripts locally, compare retrieval strategies, and inspect the
 original timestamped evidence before trusting an answer.
 
-![A Japanese query with ranked transcript passages and links to the original video moments](docs/media/retrieval-evidence.jpg)
+![A Stephen Curry question with ranked transcript passages and links to the original video moments](docs/media/retrieval-evidence.jpg)
 
 The public workbench combines meaning-based search (E5 embeddings and FAISS)
 with Japanese-aware keyword search (BM25). An optional deterministic agent reads
@@ -73,17 +73,24 @@ routing, fusion, context expansion, reranking and feedback behavior.
 
 ## Inspect the evidence
 
-![Original Japanese transcript excerpts with source titles, timestamp links and a nearby-context retrieval trace](docs/media/transcript-context.jpg)
+![Original Stephen Curry interview excerpts with source titles, timestamp links and a hybrid retrieval trace](docs/media/transcript-context.jpg)
 
 Original-language text and source moments let you check what was actually
 retrieved. A translation is an explanation, not an original quotation. A title
 or appearance credit does not establish who spoke, and an authentic citation
 can still be irrelevant to the question.
 
-The screenshots show the development query **ヒンメル 指輪** (Himmel, ring)
-retrieved by the real local backend. The second view pairs source excerpts with
-the nearby-context tool trace; excerpts are shortened in the UI. They illustrate
-the workflow, not measured answer accuracy.
+The screenshots revisit two development questions from **The Stephen Curry
+Interview (Part 1)** with LeBron James and Steve Nash:
+
+- How did Steve Nash and Reggie Miller influence Curry differently?
+- How did Curry change his shooting motion in high school?
+
+Both use the real local backend, scoped to that interview. The first compares
+hybrid and keyword retrieval; the second shows hybrid passages and its retrieval
+trace. Excerpts are shortened in the UI. Rankings can include irrelevant passages
+and miss required context; these are unjudged workflow examples, not complete
+answers or measured accuracy.
 
 ## Evaluation status
 
