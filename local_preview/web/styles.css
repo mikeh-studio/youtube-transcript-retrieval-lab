@@ -3226,6 +3226,101 @@ th {
   }
 }
 
+/* Keep primary workspaces next to the brand and utilities on the right.
+   Shared by the React shell and standalone pages. */
+@media (min-width: 861px) {
+  .appbar {
+    min-height: 64px;
+    gap: 24px;
+    padding: 0 24px;
+  }
+
+  .appbar > .brand {
+    flex: 0 0 180px;
+    width: 180px;
+  }
+
+  .appbar .brand > span {
+    font-size: 0.88rem;
+    font-weight: 700;
+    letter-spacing: 0.015em;
+  }
+
+  .appbar-actions {
+    flex: 1;
+    align-self: stretch;
+    gap: 12px;
+  }
+
+  .appbar .appbar-nav {
+    display: flex;
+    flex: 1;
+    align-self: stretch;
+    align-items: stretch;
+    gap: 4px;
+  }
+
+  .appbar .appbar-nav > .app-nav-link {
+    box-sizing: border-box;
+    min-height: 64px;
+    margin: 0;
+    padding: 0 16px;
+    border: 0;
+    border-bottom: 3px solid transparent;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    color: var(--text-muted);
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 20px;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+
+  .appbar .appbar-nav > [data-nav-key="evaluate"] {
+    margin-left: auto;
+  }
+
+  .appbar .appbar-nav > .app-nav-link.active,
+  .appbar .appbar-nav > .app-nav-link[aria-current="page"] {
+    color: var(--text);
+    border-bottom-color: var(--brand-red);
+  }
+
+  .appbar .appbar-nav > .app-nav-link:hover {
+    transform: none;
+    background: var(--surface-2);
+  }
+
+  .appbar .appbar-nav > .app-nav-link:focus-visible {
+    outline: 2px solid var(--brand-blue);
+    outline-offset: -4px;
+  }
+
+  .appbar .nav-icon {
+    width: 18px;
+    height: 18px;
+  }
+}
+
+@media (min-width: 861px) and (max-width: 1100px) {
+  .appbar {
+    gap: 12px;
+    padding: 0 16px;
+  }
+
+  .appbar > .brand {
+    flex-basis: 164px;
+    width: 164px;
+  }
+
+  .appbar .appbar-nav > .app-nav-link {
+    padding-inline: 10px;
+  }
+}
+
 /* ------------------------------------------------------------------
    Retrieval Lab: Library and Search workbench
    ------------------------------------------------------------------ */
