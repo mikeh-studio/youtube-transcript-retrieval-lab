@@ -51,5 +51,5 @@ jobs:
       - name: Install Playwright browser
         run: npx playwright install --with-deps chromium
 
-      - name: Run answer-mode regression
-        run: npx playwright test e2e/qa-answer-mode.spec.ts
+      - name: Run workspace and evaluation regressions
+        run: npx playwright test e2e/qa-answer-mode.spec.ts e2e/workbench.spec.ts e2e/library.spec.ts e2e/shell-redesign.spec.ts e2e/evaluation-dashboard.spec.ts

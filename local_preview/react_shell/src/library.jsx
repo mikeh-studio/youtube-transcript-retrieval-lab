@@ -271,7 +271,8 @@ export function LibraryPage({ onSuccess }) {
         </div>
       </div>
 
-      <section className="panel lab-add-panel">
+      <details className="panel lab-add-panel">
+        <summary className="section-title">Add videos</summary>
         <h2 className="section-title">
           <img src="/icons/icon-upload.svg" alt="" aria-hidden="true" />
           <span>Add to library</span>
@@ -320,7 +321,7 @@ export function LibraryPage({ onSuccess }) {
         </form>
         <p className="lab-hint">
           Local video files you own are added through{" "}
-          <a href="/index.html#/local-video">Tools → Local video</a>. Videos found in the{" "}
+          <a href="/index.html#/local-video">Local video / OCR</a>. Videos found in the{" "}
           <a href="/catalog.html">Catalog</a> are indexed here once reviewed.
         </p>
         {status ? <div className="search-summary" role="status">{status}</div> : null}
@@ -330,7 +331,7 @@ export function LibraryPage({ onSuccess }) {
             <pre className="output">{rawResponse}</pre>
           </details>
         ) : null}
-      </section>
+      </details>
 
       <section className="panel lab-videos-panel">
         <div className="section-head">

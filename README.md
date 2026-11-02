@@ -7,7 +7,7 @@
 YouTube transcripts locally, compare retrieval strategies, and inspect the
 original timestamped evidence before trusting an answer.
 
-![A Stephen Curry question with ranked transcript passages and links to the original video moments](docs/media/retrieval-evidence.jpg)
+![A Stephen Curry question with ranked transcript passages and links to the original video moments](docs/media/evidence-reader.jpg)
 
 The public workbench combines meaning-based search (E5 embeddings and FAISS)
 with Japanese-aware keyword search (BM25). An optional deterministic agent reads
@@ -38,12 +38,12 @@ features. Node.js is only needed to rebuild the frontend, not to run the app.
 
 ## What you can do
 
-| Workflow | Purpose |
-| --- | --- |
-| **Library → Search** | Index transcripts, scope a question to selected videos or the whole library, and compare two retrieval setups side by side. |
-| **Inspect evidence** | Read original passages and nearby context, follow timestamp links, and label relevance. |
-| **Search → Evaluate** | Save questions into query sets and compare rankings with Precision@K, Recall@K, MRR and nDCG@K. Search A/B runs disable feedback tuning so labels do not change the rankings being compared. |
-| **Answer** | Optionally generate a cited answer or abstain when the retrieved evidence is insufficient. Citations still need a relevance check. |
+| Workflow                | Purpose                                                                                                                                                         |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Library → Search**    | Index transcripts, scope a question to selected videos or the whole library, and compare two retrieval setups side by side.                                     |
+| **Inspect evidence**    | Read full original passages and nearby context, follow timestamp links, and explicitly select passages for an optional answer.                                  |
+| **Search → Evaluation** | Use Compare mode for relevance labels and query sets; import saved CLI/API or offline benchmark reports to inspect rankings, grades, failures, usage and costs. |
+| **Answer**              | Review the selected evidence and token budget, then optionally generate a cited answer. Sources do not silently change; citation relevance still needs review.  |
 
 The optional **Catalog** reads metadata from a separate private service. It is
 not required for the public workbench; catalog discovery does not automatically
@@ -73,32 +73,30 @@ routing, fusion, context expansion, reranking and feedback behavior.
 
 ## Inspect the evidence
 
-![Original Stephen Curry interview excerpts with source titles, timestamp links and a hybrid retrieval trace](docs/media/transcript-context.jpg)
-
 Original-language text and source moments let you check what was actually
 retrieved. A translation is an explanation, not an original quotation. A title
 or appearance credit does not establish who spoke, and an authentic citation
 can still be irrelevant to the question.
 
-The screenshots revisit two development questions from **The Stephen Curry
-Interview (Part 1)** with LeBron James and Steve Nash:
-
-- How did Steve Nash and Reggie Miller influence Curry differently?
-- How did Curry change his shooting motion in high school?
-
-Both use the real local backend, scoped to that interview. The first compares
-hybrid and keyword retrieval; the second shows hybrid passages and its retrieval
-trace. Excerpts are shortened in the UI. Rankings can include irrelevant passages
-and miss required context; these are unjudged workflow examples, not complete
-answers or measured accuracy.
+The reader screenshot uses the development question **“How does Curry describe
+his shooting motion?”**, scoped to **The Stephen Curry Interview (Part 1)** with
+LeBron James and Steve Nash. It shows full original passages from the real local
+backend, not a generated answer. Rankings can include irrelevant passages and
+miss required context; this is an unjudged workflow example, not measured accuracy.
 
 ## Evaluation status
 
-| Area | Current evidence |
-| --- | --- |
-| Regression fixture | A small, checked-in Japanese fixture exercises retrieval and scoring with hand-authored dense scores. [Commands, results and limitations](docs/evaluation.md#offline-benchmark). |
-| Retrieval defaults | Baseline RRF remains the default hybrid profile. Experimental profiles and reranking are opt-in. |
-| Independent answer evaluation | Answer quality and cost evaluation remains incomplete. The separate 85% source-selection and underspecification-handling targets are not verified results. |
+| Area                          | Current evidence                                                                                                                                                                 |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Regression fixture            | A small, checked-in Japanese fixture exercises retrieval and scoring with hand-authored dense scores. [Commands, results and limitations](docs/evaluation.md#offline-benchmark). |
+| Retrieval defaults            | Baseline RRF remains the default hybrid profile. Experimental profiles and reranking are opt-in.                                                                                 |
+| Independent answer evaluation | Answer quality and cost evaluation remains incomplete. The separate 85% source-selection and underspecification-handling targets are not verified results.                       |
+
+![Saved evaluation report with separate acceptance targets, ranking metrics, quality and cost review](docs/media/evaluation-review.jpg)
+
+The saved-report view keeps ungraded quality metrics pending; it does not claim
+the acceptance targets passed. See the [UI review findings](docs/design/evidence-workspace-review.md)
+for the independent review and validation limits.
 
 Run the offline fixture without network access, model downloads or provider keys:
 
@@ -144,9 +142,11 @@ there is no automatic synchronization. [Companion architecture and boundaries](d
 
 ## Recent improvements and limits
 
-The workbench now has a Library page, side-by-side Search runs and saved query
-handoff to Evaluate. This update also persists library deletions across restarts
-and supports cached embedding snapshots with revision-aware index compatibility.
+The workspace now separates Find from Compare, expands original transcript
+evidence, and binds optional answers to selected canonical passages. Evaluation
+reviews explicitly imported reports; Query sets retains the dataset workbench.
+Settings keeps safe browser defaults separate from server credentials. Library
+deletions persist across restarts, and cached model revisions guard index compatibility.
 [Model configuration](docs/configuration.md#embeddings) explains the settings.
 
 - Public setup works independently of the optional private catalog and MCP service.

@@ -15,3 +15,7 @@ playwright-report/
 node_modules/
 .gstack/
 evals/reports/
+
+/reports/
+
+/design-qa.md

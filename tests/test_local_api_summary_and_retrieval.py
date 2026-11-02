@@ -3149,3 +3149,78 @@ def test_llm_options_route_returns_models_and_defaults():
         claude_ids
     )
     assert {"fugu", "fugu-ultra", "fugu-ultra-20260615"} <= set(sakana_ids)
+
+
+def test_strict_evidence_rejects_unknown_model_citations_and_honors_budget():
+    service = _make_service(enabled=False)
+    calls = []
+    def reply(**kwargs):
+        calls.append(kwargs)
+        return {"model": "test", "text": json.dumps({
+            "status": "answered", "answer": "A claim [99]", "confidence": "high",
+            "citations": [{"citation_id": 99, "text": "forged"}],
+        })}
+    service._llm_text_response = reply
+    result = service.ask_with_sources(
+        "Does the app run locally and present itself as a portfolio-friendly demo?",
+        _make_answer_sources(), provider="chatgpt", max_output_tokens=117,
+        strict_evidence=True,
+    )
+    assert result["status"] == "error"
+    assert result["citations"] == []
+    assert calls[0]["max_tokens"] == 117
+    assert "Do not infer a speaker" in calls[0]["system_prompt"]
+
+
+def test_strict_evidence_citations_are_canonical_not_model_quotes():
+    service = _make_service(enabled=False)
+    calls = []
+    def reply(**kwargs):
+        calls.append(kwargs)
+        return {"model": "test", "text": json.dumps({
+            "status": "answered", "answer": "The app runs locally [1].", "confidence": "high",
+            "citations": [{"citation_id": 1, "text": "invented quote", "url": "https://evil.example"}],
+        })}
+    service._llm_text_response = reply
+    result = service.ask_with_sources("Does the app run locally?", _make_answer_sources(),
+                                      provider="chatgpt", max_output_tokens=123, strict_evidence=True)
+    assert result['status'] == 'answered'
+    assert result['citations'][0]['text'] == _make_answer_sources()[0]['text']
+    assert result['citations'][0]['url'] == _make_answer_sources()[0]['url']
+    assert calls[0]['max_tokens'] == 123
+
+
+def test_evidence_routes_enforce_estimate_and_acknowledgement(monkeypatch):
+    service = _make_service(enabled=False)
+    from types import SimpleNamespace
+    service.engine = SimpleNamespace(library=SimpleNamespace(videos={'vid1': {'title': 'Demo', 'language': 'en', 'chunks': [
+        {'raw_text': 'The app runs locally.', 'start': 5, 'end': 10}]}}))
+    calls = []
+    service._llm_text_response = lambda **kwargs: calls.append(kwargs) or {
+        'model': 'test', 'text': json.dumps({'status': 'answered', 'answer': 'Locally [1]', 'citations': [{'citation_id': 1}]})}
+    monkeypatch.setattr(local_api, 'SERVICE', service)
+
+    class Handler:
+        def __init__(self, path, body):
+            self.path, self.body, self.headers = path, body, {}
+        def _read_json_body(self):
+            return self.body
+        def _json(self, data, status=200):
+            self.data, self.status = data, status
+
+    def post(route, body):
+        handler = Handler('/v1/evidence/' + route, body)
+        local_api.Handler.do_POST(handler)
+        return handler
+
+    snap = post('snapshots', {'query': 'Where does the app run?', 'video_ids': ['vid1'],
+                              'passages': [{'video_id': 'vid1', 'chunk_index': 0}]}).data
+    body = {'snapshot_id': snap['snapshot_id'], 'passage_ids': [snap['passages'][0]['id']],
+            'provider': 'chatgpt', 'max_output_tokens': 111}
+    assert post('answer', body).status == 400
+    estimate = post('estimate', body).data
+    assert post('answer', {**body, 'estimate_id': estimate['estimate_id']}).status == 400
+    assert not calls
+    response = post('answer', {**body, 'estimate_id': estimate['estimate_id'], 'cost_acknowledged': True})
+    assert response.status == 200 and response.data['status'] == 'answered'
+    assert calls[0]['max_tokens'] == 111

@@ -81,16 +81,16 @@ Node.js.
 
 ## Data layout
 
-| Location | Contents |
-| --- | --- |
-| `data/library/` | Library manifest and per-video records, including `full_transcript` segments |
-| `data/index/` | Transcript FAISS indexes |
-| `data/index/ocr/` | OCR FAISS indexes |
-| `data/frames/`, `data/processed/` | Extracted local-video frames and OCR metadata |
-| `data/runtime/` | Search feedback, ask history, ingest logs, review batches, curation artifacts, evaluation drafts |
-| `data/cache/summaries/` | TLDR cache keyed by language, provider, model, and point count |
-| Browser `localStorage` | Evaluation query sets, labels, and run snapshots |
-| Browser `sessionStorage` | Study Studio run history for the current tab |
+| Location                          | Contents                                                                                         |
+| --------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `data/library/`                   | Library manifest and per-video records, including `full_transcript` segments                     |
+| `data/index/`                     | Transcript FAISS indexes                                                                         |
+| `data/index/ocr/`                 | OCR FAISS indexes                                                                                |
+| `data/frames/`, `data/processed/` | Extracted local-video frames and OCR metadata                                                    |
+| `data/runtime/`                   | Search feedback, ask history, ingest logs, review batches, curation artifacts, evaluation drafts |
+| `data/cache/summaries/`           | TLDR cache keyed by language, provider, model, and point count                                   |
+| Browser `localStorage`            | Evaluation query sets, labels, and run snapshots                                                 |
+| Browser `sessionStorage`          | Study Studio run history for the current tab                                                     |
 
 The canonical transcript is never replaced by derived views; chunk indexes and
 router artifacts can be rebuilt from it.
@@ -110,7 +110,6 @@ router artifacts can be rebuilt from it.
 - **Library export:** `pipelines/export_library.py` writes stored evidence
   through a [versioned contract](contracts/youtube-library-export-v1.md) without
   fetching videos or loading models.
-
 
 ## Experimental MCP companion
 
@@ -135,3 +134,27 @@ An explicit versioned export/import can transfer stored transcripts between the
 two runtimes. The export contract alone does not imply production migration,
 automatic synchronization or availability of the private implementation. The
 public app and its base test suite do not require private repository access.
+
+## Selected-evidence workspace
+
+Search defaults to Find, with explicit Compare mode for retrieval experiments.
+The reader expands original canonical passages and neighboring context. Reading
+a neighbor does not select it; collapsing it does not discard an explicit
+selection. Library handoff retains source scope.
+
+The optional answer action uses `/v1/evidence/snapshots`, `/context`, `/estimate`
+and `/answer`. Server snapshots bind the question, source fingerprints and exact
+passages; answers use that selection without a fresh retrieval or fallback video.
+Deleted/reindexed sources and changed provider/model/language/budget invalidate
+the selection or estimate. Issued citations are resolved to canonical text and
+timestamp URLs. These are integrity checks, not semantic quality certification.
+
+Snapshots and estimates are bounded, process-local records. Restarting the
+server requires a fresh selection/estimate. Token estimates use an explicit
+character heuristic; USD estimates currently remain unavailable, and generation
+requires acknowledgement. No generation happens merely by opening a report or
+reviewing an estimate.
+
+`evaluation_reports.py` imports supported report envelopes into a sanitized,
+content-addressed runtime store. Report adapters do not run frozen evaluations
+or import private service code. Previous snapshots are not overwritten.

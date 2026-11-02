@@ -8,27 +8,27 @@ Both are gitignored, and `.env.example` is the checked-in template.
 Search, evaluation, and the offline benchmark need no provider key. Q&A, TLDR,
 and Study Studio use the provider selected in the UI.
 
-| Variable | Purpose |
-| --- | --- |
-| `OPENAI_API_KEY` | ChatGPT provider |
-| `OPENAI_MODEL` | Default ChatGPT model (`gpt-5.4-mini` if unset) |
-| `ANTHROPIC_API_KEY` | Claude provider |
-| `SAKANA_API_KEY` | Sakana AI provider |
-| `SAKANA_MODEL`, `SAKANA_BASE_URL` | Sakana model (`fugu`) and endpoint (`https://api.sakana.ai/v1`) |
-| `YOUTUBE_API_KEY` | Optional YouTube Data API metadata; without it, ingestion uses best-effort oEmbed metadata |
+| Variable                          | Purpose                                                                                    |
+| --------------------------------- | ------------------------------------------------------------------------------------------ |
+| `OPENAI_API_KEY`                  | ChatGPT provider                                                                           |
+| `OPENAI_MODEL`                    | Default ChatGPT model (`gpt-5.4-mini` if unset)                                            |
+| `ANTHROPIC_API_KEY`               | Claude provider                                                                            |
+| `SAKANA_API_KEY`                  | Sakana AI provider                                                                         |
+| `SAKANA_MODEL`, `SAKANA_BASE_URL` | Sakana model (`fugu`) and endpoint (`https://api.sakana.ai/v1`)                            |
+| `YOUTUBE_API_KEY`                 | Optional YouTube Data API metadata; without it, ingestion uses best-effort oEmbed metadata |
 
 The UI lists selectable models per provider; Study Studio maps its Economy,
 Balanced, and Quality profiles to models for each provider.
 
 ## Embeddings
 
-| Variable | Purpose |
-| --- | --- |
-| `YT_RAG_EMBED_MODEL` | Embedding model (default `intfloat/multilingual-e5-large`, about 2.2 GB) |
-| `YT_RAG_FORCE_HASH_EMBEDDINGS=1` | Skip the model and use local hashing embeddings |
-| `YT_RAG_EMBED_LOCAL_PATH` | Optional path to a previously cached model snapshot; keep `YT_RAG_EMBED_MODEL` set to its logical model ID |
-| `YT_RAG_EMBED_REVISION` | Optional model revision recorded in index metadata; a changed revision makes the saved index incompatible |
-| `HF_HUB_OFFLINE=1` | Load model files locally without a Hugging Face download |
+| Variable                         | Purpose                                                                                                    |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `YT_RAG_EMBED_MODEL`             | Embedding model (default `intfloat/multilingual-e5-large`, about 2.2 GB)                                   |
+| `YT_RAG_FORCE_HASH_EMBEDDINGS=1` | Skip the model and use local hashing embeddings                                                            |
+| `YT_RAG_EMBED_LOCAL_PATH`        | Optional path to a previously cached model snapshot; keep `YT_RAG_EMBED_MODEL` set to its logical model ID |
+| `YT_RAG_EMBED_REVISION`          | Optional model revision recorded in index metadata; a changed revision makes the saved index incompatible  |
+| `HF_HUB_OFFLINE=1`               | Load model files locally without a Hugging Face download                                                   |
 
 E5-family models get `query:` and `passage:` prefixes automatically; other
 models, such as `BAAI/bge-m3`, are embedded without prefixes. Changing the model
@@ -57,20 +57,20 @@ need network access.
 
 ## Retrieval switches
 
-| Variable | Purpose |
-| --- | --- |
-| `YT_RAG_HYBRID_PROFILE` | `baseline_rrf` (default) or `optimized_v1` |
-| `YT_RAG_RERANKER=1` | Enable cross-encoder reranking for every request |
-| `YT_RAG_RERANKER_MODEL` | Cross-encoder model override |
-| `YT_RAG_AGENTIC_RETRIEVAL=1` | Enable agentic search for every request |
-| `YT_RAG_FEEDBACK_TUNING=0` | Disable feedback-based score adjustment by default (Search always disables it per request) |
+| Variable                     | Purpose                                                                                    |
+| ---------------------------- | ------------------------------------------------------------------------------------------ |
+| `YT_RAG_HYBRID_PROFILE`      | `baseline_rrf` (default) or `optimized_v1`                                                 |
+| `YT_RAG_RERANKER=1`          | Enable cross-encoder reranking for every request                                           |
+| `YT_RAG_RERANKER_MODEL`      | Cross-encoder model override                                                               |
+| `YT_RAG_AGENTIC_RETRIEVAL=1` | Enable agentic search for every request                                                    |
+| `YT_RAG_FEEDBACK_TUNING=0`   | Disable feedback-based score adjustment by default (Search always disables it per request) |
 
 Each switch can also be set per request; see the [retrieval guide](retrieval.md).
 
 ## Catalog
 
-| Variable | Purpose |
-| --- | --- |
+| Variable                      | Purpose                                                                                            |
+| ----------------------------- | -------------------------------------------------------------------------------------------------- |
 | `CONTENT_LIBRARY_CATALOG_URL` | Numeric loopback URL with port of the private catalog service, for example `http://127.0.0.1:8100` |
 
 Without it, the Catalog page shows an unavailable state; the rest of the lab
@@ -78,9 +78,9 @@ works normally. See the [catalog browser](catalog-browser.md) for its limits.
 
 ## Evaluation dataset generator
 
-| Variable | Purpose |
-| --- | --- |
-| `YT_RAG_CODEX_BIN` | Codex CLI executable |
+| Variable             | Purpose              |
+| -------------------- | -------------------- |
+| `YT_RAG_CODEX_BIN`   | Codex CLI executable |
 | `YT_RAG_CODEX_MODEL` | Codex model override |
 
 Codex authentication uses `codex login`; provider keys are not forwarded.
@@ -117,3 +117,15 @@ npx playwright test e2e/qa-answer-mode.spec.ts
 Unit tests and browser fixtures do not establish live ingestion or answer
 quality. For real-backend checks, see
 [ingestion verification](../local_preview/README.md#ingestion-verification).
+
+## Browser defaults
+
+Settings stores provider/model, answer language and response length defaults in
+this browser. Save and Cancel are explicit; no API key value is exposed or saved
+in browser preferences. Credentials still come from local server configuration.
+Defaults affect future answers only; saved report snapshots remain unchanged.
+
+Search itself remains provider-free. The selected-passage answer flow displays a
+token-budget estimate before generation. Pricing is not configured in this
+initial workspace implementation: USD cost is shown as unavailable and requires
+explicit acknowledgement, rather than inventing a price.

@@ -99,9 +99,9 @@ test("opens Search scoped to the chosen video", async ({ page }) => {
 
   await page.locator('tr[data-video-id="TWbQXYQMCxg"]').getByRole("button", { name: "Search" }).click();
   await expect(page).toHaveURL(/#\/qa$/);
-  await expect(page.getByLabel("Scope")).toHaveValue("videos");
+  await expect(page.locator(".workspace-chip")).toContainText("Frieren Radio Episode 3");
   await page.getByLabel("Query").fill("作画監督");
-  await page.getByRole("button", { name: "Run A and B" }).click();
+  await page.getByRole("button", { name: "Find passages" }).click();
   await expect.poll(() => body?.video_ids).toEqual(["TWbQXYQMCxg"]);
 });
 
@@ -117,6 +117,7 @@ test("indexes a video URL from the Add to library form", async ({ page }) => {
   });
   await page.goto("/index.html#/ingest");
 
+  await page.getByText("Add videos", { exact: true }).click();
   await page.getByRole("radio", { name: "Playlist" }).click();
   await page.getByLabel("YouTube playlist URL").fill("https://www.youtube.com/playlist?list=PL123");
   await page.getByRole("button", { name: "Index", exact: true }).click();
