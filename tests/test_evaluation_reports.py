@@ -595,3 +595,19 @@ def test_quality_distribution_survives_normalization_and_unknown_fields_do_not()
     assert arms["mcp"]["grades"]["answer_quality"] == {
         "distribution": {"Good": 3, "Partial": 0, "Poor": 1}
     }
+
+
+def test_public_demo_preserves_explicit_mock_identity_and_metrics():
+    import json
+    from pathlib import Path
+
+    fixture = Path(__file__).resolve().parents[1] / "docs/examples/evaluation-demo.json"
+    report = normalize_report(json.loads(fixture.read_text()))
+    assert report["source_type"] == "demo"
+    assert "mocked" in report["title"]
+    assert report["profiles"][0]["cases"] == []
+    for arm in report["profiles"][0]["arms"].values():
+        assert arm["ranking"]["initial_retrieval"]["auc_contract"]
+        assert isinstance(arm["ranking"]["initial_retrieval"]["auc"], float)
+        quality = arm["grades"]["answer_quality"]
+        assert quality["good"] + quality["partial"] + quality["poor"] == arm["total"]

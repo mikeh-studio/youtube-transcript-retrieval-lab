@@ -37,14 +37,16 @@ The real local backend retrieves the Curry development question. Full original
 text, unknown-speaker labels, source links and passage selection remain visible.
 This is a workflow example, not a judged answer.
 
-### Evaluation: saved report review
+### Evaluation: populated demo metrics
 
-![Historical saved report showing separate acceptance targets and pending quality metrics](../media/evaluation-review.jpg)
+![Demo report with explicitly mocked ranking, answer, citation and cost metrics](../media/evaluation-review.jpg)
 
-The separately labeled repaired import is a presentation-only re-normalization
-of saved results. Existing snapshots and frozen results were preserved. It is not
-a rerun or a changed grade. The screenshot contains aggregate report state;
-frozen questions, answers, labels and raw report files are not included.
+At the user's request, the current screenshot uses a [synthetic demo report](../examples/evaluation-demo.json)
+so key metrics are populated. A prominent banner identifies all values as mocked.
+The screenshot is UI documentation, not evidence that either acceptance target
+or an accuracy/cost result was achieved. The earlier independent review inspected
+real saved-report states; existing snapshots and frozen results remain unchanged.
+No transcripts, frozen questions, answers or labels are included in the demo.
 
 ## Validation and limits
 
@@ -64,9 +66,8 @@ It did not independently verify every mobile or Settings state, live answer
 generation/ingestion, complete assistive-technology behavior or a compatible
 historical-baseline success path. Synthetic offline fixtures cover compatible and
 incompatible comparison paths absent from the historical reports. Slight capture
-cropping limits pixel-perfect full-viewport comparisons. The public checkout does
-not bundle the local reports shown in the screenshots; import your own supported
-report to review it.
+cropping limits pixel-perfect full-viewport comparisons. The public checkout includes the synthetic demo fixture; real local evaluation
+reports remain excluded. Import your own supported report for actual results.
 
 ## Navigation follow-up
 
@@ -77,3 +78,12 @@ and standalone pages. Mobile run history stays within its own scroll area.
 This follow-up passed **20** targeted shell/Evaluation/Library browser checks at
 desktop and narrow widths plus the frontend build; it was not independently
 re-reviewed by Astra. The screenshots above show the updated header.
+
+## Populated metrics screenshot
+
+The demo fixture and persistent `source_type: demo` disclosure were added after
+the independent review. The aggregate-only fixture has no question-level evidence
+and cannot establish the matched-case cost gate. Its mocked AUC includes an
+explicit illustrative candidate-pool description. **15 report tests and 9 dashboard
+tests passed**, including demo-label persistence and populated ranking metrics.
+This documentation-only data was not independently re-reviewed by Astra.

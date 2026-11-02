@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { test, expect } from "@playwright/test";
 
 test("saved report profiles, metrics and question drilldown", async ({
@@ -513,5 +515,35 @@ test("mobile run history scrolls without pushing navigation off screen", async (
     page
       .getByRole("navigation", { name: "Primary", exact: true })
       .getByRole("link", { name: "Search", exact: true }),
+  ).toBeVisible();
+});
+
+test("mock metrics stay visibly labeled as demo data", async ({ page }) => {
+  const report = JSON.parse(
+    readFileSync(path.resolve("docs/examples/evaluation-demo.json"), "utf8"),
+  );
+  await page.route("**/v1/evaluation/reports", (route) =>
+    route.fulfill({ json: { reports: [{ ...report, id: "demo-fixture" }] } }),
+  );
+  await page.goto("/evaluation.html");
+  await expect(
+    page.getByRole("heading", { name: "Evaluation demo · mocked metrics" }),
+  ).toBeVisible();
+  await expect(page.getByRole("note")).toContainText(
+    "Demo data — not measured results.",
+  );
+  await expect(
+    page.getByRole("row", { name: "› nDCG@10 0.81 0.9 0.09", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("row", { name: "› ROC-AUC 0.84 0.92 0.08", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Good 48 / Partial 9 / Poor 3", { exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Questions", exact: true }).click();
+  await expect(page.getByRole("note")).toBeVisible();
+  await expect(
+    page.getByText("No recorded questions in this view."),
   ).toBeVisible();
 });

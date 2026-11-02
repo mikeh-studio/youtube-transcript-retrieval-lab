@@ -490,9 +490,12 @@ function render() {
       : failureCount == null
         ? "Inspect failures"
         : `Inspect ${failureCount} ${failureCount === 1 ? "failure" : "failures"}${validationCount == null ? "" : ` (${validationCount} validation)`}${state.mode === "versions" ? ` · ${state.versionArm.toUpperCase()} workflow` : ""}`;
-  const status = benchmark
-    ? `<div class="status-bar">Mechanical retrieval benchmark · ${esc(r.description || "Query count not recorded")} · Semantic grades not applicable</div>`
-    : `<div class="status-bar">${esc(overall)} · ${esc(profileStatus)} · ${hasGrades ? "Semantic grades recorded" : "Semantic grades unavailable"} · Direct: ${show(d.accepted, "Unknown")}/${show(d.total, "?")} contract-accepted · MCP: ${show(m.accepted, "Unknown")}/${show(m.total, "?")} contract-accepted · <button class="inline-button" data-tab="failures">${failureLabel}</button></div>`;
+  const status =
+    r.source_type === "demo"
+      ? '<div class="status-bar" role="note"><strong>Demo data — not measured results.</strong> All metrics, grades, tokens and costs below are mocked. No model calls or evaluation runs occurred.</div>'
+      : benchmark
+        ? `<div class="status-bar">Mechanical retrieval benchmark · ${esc(r.description || "Query count not recorded")} · Semantic grades not applicable</div>`
+        : `<div class="status-bar">${esc(overall)} · ${esc(profileStatus)} · ${hasGrades ? "Semantic grades recorded" : "Semantic grades unavailable"} · Direct: ${show(d.accepted, "Unknown")}/${show(d.total, "?")} contract-accepted · MCP: ${show(m.accepted, "Unknown")}/${show(m.total, "?")} contract-accepted · <button class="inline-button" data-tab="failures">${failureLabel}</button></div>`;
   const candidates = state.reports.filter(
     (x) => x.id !== r.id && compatible(r, x),
   );
