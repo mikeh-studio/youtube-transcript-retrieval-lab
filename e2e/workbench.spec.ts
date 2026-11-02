@@ -88,6 +88,7 @@ async function mockWorkbench(page, { existingReviews = [], catalogItems = null }
 
 async function runQuery(page, text = "作画監督") {
   await page.goto("/index.html#/qa");
+  await page.getByRole("tab", { name: "Compare", exact: true }).click();
   await page.getByLabel("Query").fill(text);
   await page.getByRole("button", { name: "Run A and B" }).click();
 }
@@ -167,6 +168,7 @@ test("scopes the search to indexed videos that match a catalog filter", async ({
     catalogItems: [catalogItem("animeVideo1", "anime", "Anime"), catalogItem("notIndexed1", "anime", "Anime")],
   });
   await page.goto("/index.html#/qa");
+  await page.getByRole("tab", { name: "Compare", exact: true }).click();
   await page.getByLabel("Scope").selectOption("catalog");
   await page.getByLabel("Catalog topic").selectOption("anime");
   await page.getByLabel("Query").fill("作画監督");
@@ -180,6 +182,7 @@ test("scopes the search to indexed videos that match a catalog filter", async ({
 test("explains when the catalog filter is unavailable", async ({ page }) => {
   const calls = await mockWorkbench(page);
   await page.goto("/index.html#/qa");
+  await page.getByRole("tab", { name: "Compare", exact: true }).click();
   await page.getByLabel("Scope").selectOption("catalog");
   await expect(page.getByText("The catalog service is not connected, so catalog filters cannot be applied.")).toBeVisible();
   await page.getByLabel("Query").fill("作画監督");
@@ -202,17 +205,10 @@ test("saves the query to Evaluate's Saved from Search query set once", async ({ 
   expect(querySet.queries.map((row) => row.text)).toEqual(["作画監督"]);
 });
 
-test("keeps the answer flow in the Answer tab with the current query", async ({ page }) => {
-  await mockWorkbench(page);
-  await runQuery(page);
-  await page.getByRole("tab", { name: "Answer" }).click();
-  await expect(page.getByLabel("Question")).toHaveValue("作画監督");
-  await expect(page.getByRole("button", { name: "Generate Answer" })).toBeVisible();
-});
-
 test("agentic setup exposes automatic tools and saves the actual retrieval mode", async ({ page }) => {
   const calls = await mockWorkbench(page);
   await page.goto("/index.html#/qa");
+  await page.getByRole("tab", { name: "Compare", exact: true }).click();
   await expect(page.getByLabel("Run B mode", { exact: true })).toHaveCount(0);
   await expect(page.getByLabel("Run B hybrid profile")).toHaveCount(0);
   await expect(page.locator('.lab-run[data-run="B"]')).toContainText("Tools are chosen automatically");

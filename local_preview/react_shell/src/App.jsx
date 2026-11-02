@@ -1,9 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import "./workspace.css";
 import {
   LAB_BRAND,
   LAB_NAV_PRIMARY,
-  LAB_NAV_TOOLS,
-  LAB_NAV_TOOLS_MENU,
   labNavLabel,
 } from "../../web/lab-nav.js";
 import {
@@ -29,6 +28,7 @@ import {
 } from "./lab.jsx";
 import { LibraryPage } from "./library.jsx";
 import { SearchWorkbench } from "./workbench.jsx";
+import { SettingsPage } from "./settings.jsx";
 
 const LOCK_KEY = "yt_rag_ingest_unlocked";
 const LOCALE_STORAGE_KEY = "youtube-rag-ui-locale";
@@ -41,6 +41,7 @@ const ROUTES = {
   TLDR: "/tldr",
   STUDY: "/study",
   QA: "/qa",
+  SETTINGS: "/settings",
 };
 const FALLBACK_LLM_PROVIDER_OPTIONS = {
   chatgpt: {
@@ -306,6 +307,7 @@ function readHashRoute() {
     || raw === ROUTES.LOCAL_VIDEO
     || raw === ROUTES.TLDR
     || raw === ROUTES.STUDY
+    || raw === ROUTES.SETTINGS
     || raw === ROUTES.QA
   ) {
     return raw;
@@ -2940,6 +2942,8 @@ function App() {
       && !unlocked
       && route !== ROUTES.INGEST
       && route !== ROUTES.LOCAL_VIDEO
+      && route !== ROUTES.SETTINGS
+      && route !== ROUTES.QA
     ) {
       navigate(ROUTES.INGEST);
     }
@@ -3008,7 +3012,7 @@ function App() {
 
     if (locked) {
       return (
-        <button type="button" className={`${className} locked`} disabled title={LOCKED_NAV_HINT}>
+        <button type="button" className={`${className} locked`} data-nav-key={item.key} disabled title={LOCKED_NAV_HINT}>
           {content}
         </button>
       );
@@ -3018,6 +3022,7 @@ function App() {
         <button
           type="button"
           className={className}
+          data-nav-key={item.key}
           onClick={() => navigate(item.route)}
           aria-current={active ? "page" : undefined}
         >
@@ -3026,65 +3031,12 @@ function App() {
       );
     }
     return (
-      <a className={className} href={item.href}>
+      <a className={className} data-nav-key={item.key} href={item.href} aria-current={active ? "page" : undefined}>
         {content}
       </a>
     );
   }
 
-  function NavMenu({ menu, items, mobile = false }) {
-    const menuActive = items.some(isNavItemActive);
-    const label = labNavLabel(menu, locale);
-    const links = items.map((item) => {
-      const active = isNavItemActive(item);
-      if (isNavItemLocked(item)) {
-        return (
-          <span
-            className={`${mobile ? "bottom-tools-link" : "nav-tools-link"} locked`}
-            aria-disabled="true"
-            title={LOCKED_NAV_HINT}
-            key={`${mobile ? "bottom-" : ""}tool-${item.key}`}
-          >
-            <img className={mobile ? "bottom-tab-icon" : "nav-icon"} src={item.icon} alt="" aria-hidden="true" />
-            <span>{labNavLabel(item, locale)}</span>
-          </span>
-        );
-      }
-      return (
-        <a
-          className={`${mobile ? "bottom-tools-link" : "nav-tools-link"} ${active ? "active" : ""}`}
-          href={item.href}
-          aria-current={active ? "page" : undefined}
-          key={`${mobile ? "bottom-" : ""}tool-${item.key}`}
-        >
-          <img className={mobile ? "bottom-tab-icon" : "nav-icon"} src={item.icon} alt="" aria-hidden="true" />
-          <span>{labNavLabel(item, locale)}</span>
-        </a>
-      );
-    });
-
-    if (mobile) {
-      return (
-        <details className="bottom-tools-menu" data-nav-group={menu.key}>
-          <summary className={`bottom-tab-link ${menuActive ? "active" : ""}`}>
-            <img className="bottom-tab-icon" src={menu.icon} alt="" aria-hidden="true" />
-            <span className="bottom-tab-label">{label}</span>
-          </summary>
-          <div className="bottom-tools-panel">{links}</div>
-        </details>
-      );
-    }
-
-    return (
-      <details className="nav-tools-menu" data-nav-group={menu.key}>
-        <summary className={`app-nav-link nav-btn nav-tools-summary ${menuActive ? "active" : ""}`}>
-          <img className="nav-icon" src={menu.icon} alt="" aria-hidden="true" />
-          <span className="nav-label">{label}</span>
-        </summary>
-        <div className="nav-tools-panel">{links}</div>
-      </details>
-    );
-  }
 
   return (
     <div className={`react-shell-root ${showIntro ? "intro-playing" : ""}`}>
@@ -3110,7 +3062,7 @@ function App() {
             {LAB_NAV_PRIMARY.map((item) => (
               <NavItem key={item.key} item={item} />
             ))}
-            <NavMenu menu={LAB_NAV_TOOLS_MENU} items={LAB_NAV_TOOLS} />
+
           </nav>
           <label className="locale-switch">
             <span>Language</span>
@@ -3126,7 +3078,8 @@ function App() {
         <div className="route-scene" key={`scene-${route}-${routeAnimationKey}`}>
           {route === ROUTES.INGEST ? <LibraryPage onSuccess={handleIngestSuccess} /> : null}
           {route === ROUTES.LOCAL_VIDEO ? <LocalVideoAnalysisPage locale={locale} /> : null}
-          {route === ROUTES.QA && unlocked ? <SearchWorkspace locale={locale} /> : null}
+          {route === ROUTES.QA ? <SearchWorkspace locale={locale} /> : null}
+          {route === ROUTES.SETTINGS ? <SettingsPage /> : null}
           {(route === ROUTES.STUDY || route === ROUTES.TLDR) && unlocked ? <StudyWorkspace route={route} /> : null}
         </div>
       </main>
@@ -3135,7 +3088,7 @@ function App() {
         {LAB_NAV_PRIMARY.map((item) => (
           <NavItem key={`mobile-${item.key}`} item={item} mobile />
         ))}
-        <NavMenu menu={LAB_NAV_TOOLS_MENU} items={LAB_NAV_TOOLS} mobile />
+
       </nav>
     </div>
   );

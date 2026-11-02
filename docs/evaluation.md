@@ -4,7 +4,50 @@ The lab measures retrieval in three ways: an offline benchmark that needs no
 network or keys, an interactive workspace for labeling real results, and tooling that
 turns reviewed evidence into reusable datasets.
 
-![Evaluate page scoring retrieval runs with ranking metrics](media/02-evaluation-metrics.png)
+**Illustrative UI demo — not measured benchmark results.**
+
+![Mocked demo report showing populated acceptance targets, ranking metrics and quality](media/evaluation-review.jpg)
+
+This screenshot uses [mocked demonstration data](examples/evaluation-demo.json),
+not measured evaluation results. Import that JSON through **Import report** to
+reproduce the populated view. Its values, grades, tokens, costs and AUC candidate
+pool description are illustrative; no model or benchmark was run. Real reports
+continue to show missing grades and measurements as unavailable. The dashboard
+uses English review labels; the bilingual reader and Query sets workbench also
+provide a language picker. Original transcript quotations retain their language.
+
+## Saved run review
+
+**Evaluation** opens the local run-review dashboard at `/evaluation.html`.
+Import an explicitly selected JSON report to review immutable local snapshots;
+opening a report never launches a model or grading job. **+ Query sets** in the
+Evaluation sidebar opens the existing dataset workspace, with its browser storage
+and saved runs intact. Imported reports are files under
+`data/runtime/evaluation_reports/`; clearing browser storage does not delete them.
+
+Supported imports include the public offline benchmark, the local subscription
+review envelope, and API held-out reports. Real reports remain in ignored runtime
+data and are not bundled with the app. The public app needs no private package.
+Reports from the optional private MCP companion can also be reviewed without
+installing or running that companion. Only supported review fields are retained;
+unknown measurements remain unknown.
+
+The overview separates acceptance targets, initial/final retrieval ranking,
+answer/citation quality, and execution/cost. Precision, Recall, MRR and nDCG are
+shown only when recorded for that report and stage. ROC-AUC needs an explicit
+candidate-pool contract. Synthetic fixture metrics never fill gaps in a real run.
+Semantic passage recall and citation support require reviewed labels; exact text
+and timestamp checks alone do not establish relevance.
+
+CLI API-equivalent estimates are not subscription charges or provider invoices.
+Reasoning tokens are already included in output. Failed-attempt inclusion follows the recorded cost basis, and absent usage is not zero. Version deltas require compatible
+corpus, dataset, criteria, model/effort, stage and cutoff metadata; missing IDs
+cannot certify comparability. Two acceptance targets are separate and use the
+report's recorded denominators rather than assuming every dataset is Frozen60.
+
+Metric drilldowns expose recorded question answers, canonical citations and safe
+tool summaries. Where a report lacks metric-contribution links, the UI says so
+before navigation rather than inventing affected questions. Question views group recorded workflow attempts by question and version comparisons scope them to the selected workflow.
 
 ## Offline benchmark
 
@@ -20,13 +63,13 @@ compares dense, lexical, baseline hybrid, optimized hybrid, and agentic retrieva
 and writes a leaderboard, per-query results, and failures to the gitignored
 `evals/reports/`.
 
-| Run | Precision@5 | Recall@5 | MRR@10 | nDCG@10 |
-| --- | ---: | ---: | ---: | ---: |
-| `dense` | 0.2000 | 1.0000 | 0.4896 | 0.6193 |
-| `lexical` | 0.2000 | 1.0000 | 0.9375 | 0.9539 |
-| `hybrid_baseline` (default) | 0.2000 | 1.0000 | 0.7917 | 0.8452 |
-| `optimized_hybrid` | 0.2000 | 1.0000 | 1.0000 | 1.0000 |
-| `agentic` | 0.2000 | 1.0000 | 0.9375 | 0.9539 |
+| Run                         | Precision@5 | Recall@5 | MRR@10 | nDCG@10 |
+| --------------------------- | ----------: | -------: | -----: | ------: |
+| `dense`                     |      0.2000 |   1.0000 | 0.4896 |  0.6193 |
+| `lexical`                   |      0.2000 |   1.0000 | 0.9375 |  0.9539 |
+| `hybrid_baseline` (default) |      0.2000 |   1.0000 | 0.7917 |  0.8452 |
+| `optimized_hybrid`          |      0.2000 |   1.0000 | 1.0000 |  1.0000 |
+| `agentic`                   |      0.2000 |   1.0000 | 0.9375 |  0.9539 |
 
 These numbers come from an eight-query Japanese fixture with hand-authored dense
 scores. They catch regressions in the harness and scoring; they do not show that
@@ -52,7 +95,7 @@ query set in Evaluate so it can be re-run later.
 
 ## Evaluate page
 
-Open **Evaluate** (`http://127.0.0.1:8000/evaluation.html`) to:
+Open **Query sets** from Evaluation (`http://127.0.0.1:8000/evaluation-workbench.html`) to:
 
 - create, import, and export query sets
 - run retrieval and label results with reason codes
@@ -61,12 +104,12 @@ Open **Evaluate** (`http://127.0.0.1:8000/evaluation.html`) to:
 
 Query sets, labels, and run snapshots are stored in browser `localStorage`.
 Labels given in Search are stored separately in `data/runtime/`, feed the
-server's default feedback tuning, and are listed under **Tools → Search
-feedback**. Folding that page into Evaluate is planned.
+server's default feedback tuning, and are listed under **Settings → Search
+feedback**.
 
 ## Draft a dataset with Codex CLI
 
-Evaluate can turn one to three indexed transcripts into a six-case
+The Query sets workbench can turn one to three indexed transcripts into a six-case
 retrieval draft. Install the Codex CLI and run `codex login` first.
 
 - Each proposal stays a draft until you approve, edit, or reject it.
@@ -101,7 +144,7 @@ python pipelines/curate_evidence.py \
   --limit 200
 ```
 
-Inspect the output under **Tools → Data quality** (`http://127.0.0.1:8000/evidence.html`).
+Inspect the output under **Settings → Data quality** (`http://127.0.0.1:8000/evidence.html`).
 
 ## Limits
 
