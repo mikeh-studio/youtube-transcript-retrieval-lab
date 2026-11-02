@@ -11,3 +11,10 @@ Where recorded, validation failures appear in `validation_failure` (also exposed
 Explicit `contributors`, `contributor_ids`, `case_ids`, or `question_ids` can be retained at report, profile, arm, or metric-object level. They are not inferred from aggregate counts; a metric without usable recorded contributor IDs has no supported question drilldown. Supplied model, effort, stage, cutoff, and identity hashes are retained at their recorded scope. Cases may retain recorded usage and cost, or API requests with usage and uncached cost, alongside their recorded grades. A cost comparison requires an appropriate matched population and complete cost basis; aggregate totals alone do not establish a matched-case ratio or eligibility.
 
 Recorded answer-quality distributions may place `good`, `partial`, and `poor` counts directly in the `answer_quality` object or under its `distribution` object; the corresponding capitalized keys are also retained. Missing counts are not inferred.
+
+An explicitly illustrative report can set `source_type: demo`. The dashboard then
+shows a persistent “Demo data — not measured results” disclosure across views.
+This flag does not fill missing fields or qualify the report for cost assessment;
+it identifies supplied values as mock presentation data. The public example in
+`docs/examples/evaluation-demo.json` contains fabricated aggregates only and is
+never automatically imported into a user's library.

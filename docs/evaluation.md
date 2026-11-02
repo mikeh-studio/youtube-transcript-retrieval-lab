@@ -4,10 +4,13 @@ The lab measures retrieval in three ways: an offline benchmark that needs no
 network or keys, an interactive workspace for labeling real results, and tooling that
 turns reviewed evidence into reusable datasets.
 
-![Saved run review with separate acceptance targets and metric stages](media/evaluation-review.jpg)
+![Mocked demo report showing populated acceptance targets, ranking metrics and quality](media/evaluation-review.jpg)
 
-This is a saved historical report, not a new evaluation. Pending grades and
-missing ranking measurements remain unavailable.
+This screenshot uses [mocked demonstration data](examples/evaluation-demo.json),
+not measured evaluation results. Import that JSON through **Import report** to
+reproduce the populated view. Its values, grades, tokens, costs and AUC candidate
+pool description are illustrative; no model or benchmark was run. Real reports
+continue to show missing grades and measurements as unavailable.
 
 ## Saved run review
 

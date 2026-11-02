@@ -92,10 +92,11 @@ miss required context; this is an unjudged workflow example, not measured accura
 | Retrieval defaults            | Baseline RRF remains the default hybrid profile. Experimental profiles and reranking are opt-in.                                                                                 |
 | Independent answer evaluation | Answer quality and cost evaluation remains incomplete. The separate 85% source-selection and underspecification-handling targets are not verified results.                       |
 
-![Saved evaluation report with separate acceptance targets, ranking metrics, quality and cost review](docs/media/evaluation-review.jpg)
+![Evaluation demo with populated mocked acceptance, ranking, quality and cost metrics](docs/media/evaluation-review.jpg)
 
-The saved-report view keeps ungraded quality metrics pending; it does not claim
-the acceptance targets passed. See the [UI review findings](docs/design/evidence-workspace-review.md)
+The screenshot uses an [explicitly mocked demo report](docs/examples/evaluation-demo.json)
+to show populated metrics. These are illustrative values, not measured results;
+real reports keep missing grades pending. See the [UI review findings](docs/design/evidence-workspace-review.md)
 for the independent review and validation limits.
 
 Run the offline fixture without network access, model downloads or provider keys:

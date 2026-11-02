@@ -1,0 +1,239 @@
+{
+  "schema_version": "evaluation-run-report/v1",
+  "run_id": "ui-demo-mock-metrics",
+  "title": "Evaluation demo \u00b7 mocked metrics",
+  "source_type": "demo",
+  "source": "Synthetic UI fixture",
+  "status": "demo",
+  "description": "Illustrative values only \u00b7 no model calls or benchmark execution",
+  "grading_note": "All metrics and grades in this demo are fabricated for interface presentation. They are not product performance results.",
+  "cost_note": "Token and dollar values are mocked; no provider usage or charges occurred.",
+  "workflow_note": "Aggregate-only demo: no video transcripts, frozen questions, answers or labels. Contributor drilldowns are intentionally unavailable.",
+  "gates": {
+    "source_selection": {
+      "target": 0.85,
+      "denominator": 40,
+      "minimum_passes": 34
+    },
+    "underspecification": {
+      "target": 0.85,
+      "denominator": 20,
+      "minimum_passes": 17
+    }
+  },
+  "profiles": [
+    {
+      "id": "Illustrative Direct vs MCP",
+      "model": "No model invoked",
+      "effort": "not applicable",
+      "status": "demo",
+      "arms": {
+        "direct": {
+          "total": 60,
+          "attempted": 60,
+          "accepted": 60,
+          "failed": 0,
+          "unattempted": 0,
+          "validation_rejections": 0,
+          "grades": {
+            "video_selection": {
+              "numerator": 35,
+              "denominator": 40,
+              "graded": 40
+            },
+            "assumption_first_handling": {
+              "numerator": 17,
+              "denominator": 20,
+              "graded": 20
+            },
+            "answer_quality": {
+              "good": 48,
+              "partial": 9,
+              "poor": 3
+            },
+            "supporting_passage_recall": {
+              "value": 0.86,
+              "graded": 60,
+              "total": 60
+            },
+            "citation_relevance": {
+              "value": 0.9,
+              "graded": 60,
+              "total": 60
+            },
+            "citation_completeness": {
+              "value": 0.88,
+              "graded": 60,
+              "total": 60
+            },
+            "exact_quote_fidelity": {
+              "numerator": 59,
+              "denominator": 60,
+              "graded": 60
+            },
+            "timestamp_authenticity": {
+              "numerator": 60,
+              "denominator": 60,
+              "graded": 60
+            },
+            "unnecessary_clarification": {
+              "numerator": 3,
+              "denominator": 20,
+              "graded": 20
+            },
+            "attribution_errors": {
+              "numerator": 3,
+              "denominator": 60,
+              "graded": 60
+            }
+          },
+          "ranking": {
+            "initial_retrieval": {
+              "precision_at_1": 0.8,
+              "precision_at_5": 0.68,
+              "precision_at_10": 0.52,
+              "recall_at_1": 0.6,
+              "recall_at_5": 0.82,
+              "recall_at_10": 0.89,
+              "mrr_at_10": 0.85,
+              "ndcg_at_10": 0.81,
+              "auc": 0.84,
+              "auc_contract": {
+                "description": "Illustrative binary-relevance candidate pool: 60 synthetic queries, 10 fixed candidates per query, both positive and negative labels. Values are mocked, not calculated."
+              }
+            },
+            "final_evidence": {
+              "precision_at_1": 0.84,
+              "precision_at_5": 0.7200000000000001,
+              "precision_at_10": 0.56,
+              "recall_at_1": 0.63,
+              "recall_at_5": 0.85,
+              "recall_at_10": 0.92,
+              "mrr_at_10": 0.87,
+              "ndcg_at_10": 0.8400000000000001,
+              "auc": 0.86,
+              "auc_contract": {
+                "description": "Illustrative binary-relevance candidate pool: 60 synthetic queries, 10 fixed candidates per query, both positive and negative labels. Values are mocked, not calculated."
+              }
+            }
+          },
+          "usage": {
+            "input_tokens": 72000,
+            "output_tokens": 7200,
+            "reasoning_output_tokens": 1800,
+            "cached_input_tokens": 0
+          },
+          "cost": {
+            "api_equivalent_usd": 0.12,
+            "cost_basis": "Mock cost illustration only; no provider or pricing calculation",
+            "includes_failed": true,
+            "usage_complete": true
+          }
+        },
+        "mcp": {
+          "total": 60,
+          "attempted": 60,
+          "accepted": 60,
+          "failed": 0,
+          "unattempted": 0,
+          "validation_rejections": 0,
+          "grades": {
+            "video_selection": {
+              "numerator": 37,
+              "denominator": 40,
+              "graded": 40
+            },
+            "assumption_first_handling": {
+              "numerator": 19,
+              "denominator": 20,
+              "graded": 20
+            },
+            "answer_quality": {
+              "good": 52,
+              "partial": 7,
+              "poor": 1
+            },
+            "supporting_passage_recall": {
+              "value": 0.94,
+              "graded": 60,
+              "total": 60
+            },
+            "citation_relevance": {
+              "value": 0.96,
+              "graded": 60,
+              "total": 60
+            },
+            "citation_completeness": {
+              "value": 0.95,
+              "graded": 60,
+              "total": 60
+            },
+            "exact_quote_fidelity": {
+              "numerator": 60,
+              "denominator": 60,
+              "graded": 60
+            },
+            "timestamp_authenticity": {
+              "numerator": 60,
+              "denominator": 60,
+              "graded": 60
+            },
+            "unnecessary_clarification": {
+              "numerator": 1,
+              "denominator": 20,
+              "graded": 20
+            },
+            "attribution_errors": {
+              "numerator": 1,
+              "denominator": 60,
+              "graded": 60
+            }
+          },
+          "ranking": {
+            "initial_retrieval": {
+              "precision_at_1": 0.91,
+              "precision_at_5": 0.79,
+              "precision_at_10": 0.63,
+              "recall_at_1": 0.69,
+              "recall_at_5": 0.91,
+              "recall_at_10": 0.98,
+              "mrr_at_10": 0.93,
+              "ndcg_at_10": 0.9,
+              "auc": 0.92,
+              "auc_contract": {
+                "description": "Illustrative binary-relevance candidate pool: 60 synthetic queries, 10 fixed candidates per query, both positive and negative labels. Values are mocked, not calculated."
+              }
+            },
+            "final_evidence": {
+              "precision_at_1": 0.95,
+              "precision_at_5": 0.8300000000000001,
+              "precision_at_10": 0.67,
+              "recall_at_1": 0.72,
+              "recall_at_5": 0.9400000000000001,
+              "recall_at_10": 1,
+              "mrr_at_10": 0.9500000000000001,
+              "ndcg_at_10": 0.93,
+              "auc": 0.9400000000000001,
+              "auc_contract": {
+                "description": "Illustrative binary-relevance candidate pool: 60 synthetic queries, 10 fixed candidates per query, both positive and negative labels. Values are mocked, not calculated."
+              }
+            }
+          },
+          "usage": {
+            "input_tokens": 84000,
+            "output_tokens": 8100,
+            "reasoning_output_tokens": 2100,
+            "cached_input_tokens": 0
+          },
+          "cost": {
+            "api_equivalent_usd": 0.15,
+            "cost_basis": "Mock cost illustration only; no provider or pricing calculation",
+            "includes_failed": true,
+            "usage_complete": true
+          }
+        }
+      },
+      "cases": []
+    }
+  ]
+}
