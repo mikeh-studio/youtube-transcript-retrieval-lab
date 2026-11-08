@@ -350,6 +350,12 @@ def run_one_config(
                         reranker=reranker,
                     )
                 iteration_latencies.append((time.perf_counter() - started) * 1000.0)
+                details = response.get("details") or {}
+                if details.get("status") in {"error", "degraded"}:
+                    raise RuntimeError(
+                        "Retrieval reported a failed search stage "
+                        f"(status={details['status']}); inspect retrieval_details."
+                    )
             latency_ms = float(median(iteration_latencies))
             rows = response.get("results") or []
             scores = score_query_results(query_case, rows)
@@ -406,7 +412,11 @@ def run_one_config(
     reranker_applied = None
     if reranker:
         applied_flags = [
-            bool(((row.get("retrieval_details") or {}).get("reranker") or {}).get("applied"))
+            bool(
+                ((row.get("retrieval_details") or {}).get("reranker") or {}).get(
+                    "applied"
+                )
+            )
             for row in per_query
             if not row.get("error")
         ]

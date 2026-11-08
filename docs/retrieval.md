@@ -94,3 +94,32 @@ response status is `answered`, `insufficient_evidence`, or `error`, with a
 
 The sufficiency thresholds are hand-tuned and not yet measured by answer-level
 evaluation.
+
+## Caching and failure diagnostics
+
+Lexical search reuses bounded document-token and scope-statistics caches. Keys
+include ordered original text, language and tokenizer version, so edits, deletion,
+rechunking and scope changes invalidate the relevant statistics. Citation metadata
+is always taken from the current library rows. BM25 scoring and tie order remain
+unchanged.
+
+Scoped dense search on `IndexFlatIP` selects only the requested videos' vectors,
+then ranks the entire selection before truncation to preserve full-search tie
+order. Other index types retain the existing full-search path.
+
+Retrieval `details` includes `status`, total `duration_ms`, and per-stage `dense`
+and `lexical` status/timing. A failed stage reports its exception type without its
+message; hybrid search can return surviving results with status `degraded`. An
+empty successful search reports `no_matches`. The evaluation runner counts
+`error` and `degraded` responses as failed queries while retaining their diagnostics.
+These stage fields describe dense/lexical retrieval, not provider-answer success.
+
+Synthetic parity/timing checks can be run with:
+
+```sh
+python -m evals.benchmark_lexical --help
+python -m evals.benchmark_scoped_vectors --help
+```
+
+The benchmarks check ranking parity on synthetic data. Timing depends on the local
+environment and does not establish real-corpus relevance or answer quality.

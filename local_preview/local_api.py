@@ -58,7 +58,10 @@ if load_dotenv is not None:
     load_dotenv(ROOT_DIR / ".env")
     load_dotenv(ROOT_DIR / ".env.local", override=True)
 
-from browser_boundary import BrowserBoundary
+from browser_boundary import BrowserBoundary  # noqa: E402
+from local_preview.lexical_index import LexicalIndex  # noqa: E402
+
+_LEXICAL_INDEX_LOCK = threading.Lock()
 
 from multilingual.rag_engine import RAGEngine  # noqa: E402
 from multilingual.reranker import (  # noqa: E402
@@ -2687,25 +2690,22 @@ class LocalRAGService:
         video_id: Optional[str] = None,
         video_ids: Optional[List[str]] = None,
     ) -> List[dict]:
-        try:
-            if video_ids is not None:
-                dense_rows = self.engine.library.search(
-                    query,
-                    k=k,
-                    language=language,
-                    video_ids=video_ids,
-                )
-            elif video_id is None:
-                dense_rows = self.engine.search(query, k=k, language=language)
-            else:
-                dense_rows = self.engine.search(
-                    query,
-                    k=k,
-                    language=language,
-                    video_id=video_id,
-                )
-        except Exception:
-            return []
+        if video_ids is not None:
+            dense_rows = self.engine.library.search(
+                query,
+                k=k,
+                language=language,
+                video_ids=video_ids,
+            )
+        elif video_id is None:
+            dense_rows = self.engine.search(query, k=k, language=language)
+        else:
+            dense_rows = self.engine.search(
+                query,
+                k=k,
+                language=language,
+                video_id=video_id,
+            )
         results: List[dict] = []
         for rank, row in enumerate(dense_rows, start=1):
             item = dict(row)
@@ -2734,58 +2734,16 @@ class LocalRAGService:
         if not query_tokens:
             return []
 
-        doc_tokens: List[List[str]] = []
-        doc_lens: List[int] = []
-        doc_freq: Counter = Counter()
-        for candidate in candidates:
-            tokens = self._tokenize_for_lexical(
-                candidate["text"], language=candidate.get("language")
-            )
-            doc_tokens.append(tokens)
-            doc_len = len(tokens)
-            doc_lens.append(doc_len)
-            for token in set(tokens):
-                doc_freq[token] += 1
-
-        total_docs = len(candidates)
-        avg_doc_len = (sum(doc_lens) / total_docs) if total_docs else 1.0
-        query_tf = Counter(query_tokens)
-
-        k1 = 1.5
-        b = 0.75
-        scored = []
-
-        for idx, candidate in enumerate(candidates):
-            tokens = doc_tokens[idx]
-            if not tokens:
-                continue
-            tf = Counter(tokens)
-            score = 0.0
-            doc_len = max(1, doc_lens[idx])
-
-            for term, q_weight in query_tf.items():
-                if term not in tf:
-                    continue
-                n_qi = doc_freq.get(term, 0)
-                idf = math.log(1.0 + (total_docs - n_qi + 0.5) / (n_qi + 0.5))
-                freq = tf[term]
-                denom = freq + k1 * (1.0 - b + b * (doc_len / max(avg_doc_len, 1e-9)))
-                score += (
-                    idf * ((freq * (k1 + 1.0)) / denom) * (1.0 + 0.2 * (q_weight - 1))
-                )
-
-            if score <= 0.0:
-                continue
-
-            item = dict(candidate)
-            item["lexical_score"] = float(score)
-            item["score"] = float(score)
-            scored.append(item)
-
-        scored.sort(key=lambda row: row["lexical_score"], reverse=True)
-        for rank, row in enumerate(scored, start=1):
-            row["rank"] = rank
-        return scored[:k]
+        # Cache statistics only; current candidate rows retain fresh metadata.
+        tokenizer = self._tokenize_for_lexical
+        with _LEXICAL_INDEX_LOCK:
+            cached = getattr(self, "_lexical_index_state", None)
+            if cached is None or cached[0] != tokenizer:
+                cached = (tokenizer, LexicalIndex(tokenizer))
+                self._lexical_index_state = cached
+        return cached[1].search(
+            candidates, query_tokens, k=k, token_version="lexical-v1"
+        )
 
     def _rrf_fuse(
         self,
@@ -3094,7 +3052,28 @@ class LocalRAGService:
         reranker: Optional[str] = None,
         feedback_tuning: Optional[bool] = None,
     ) -> dict:
-        """Retrieve ranked chunks; feedback_tuning=None uses the server default."""
+        """Retrieve ranked chunks with per-stage diagnostics and optional feedback tuning."""
+        started = time.perf_counter()
+        stages = {
+            name: {"status": "skipped", "duration_ms": 0.0, "error_type": None}
+            for name in ("dense", "lexical")
+        }
+
+        def run_stage(name, search, **kwargs):
+            stage_started = time.perf_counter()
+            try:
+                rows = search(query, **kwargs)
+                stages[name]["status"] = "ok" if rows else "no_matches"
+                return rows
+            except Exception as exc:
+                # Return exception types only: messages may expose configuration.
+                stages[name].update(status="error", error_type=type(exc).__name__)
+                return []
+            finally:
+                stages[name]["duration_ms"] = (
+                    time.perf_counter() - stage_started
+                ) * 1000
+
         mode = (retrieval_mode or "hybrid").strip().lower()
         if mode not in RETRIEVAL_MODES:
             raise ValueError(
@@ -3130,15 +3109,16 @@ class LocalRAGService:
                         "video_id_filter": None,
                         "video_ids_filter": [],
                         "fallback": "empty_video_scope",
+                        "status": "no_matches",
+                        "duration_ms": (time.perf_counter() - started) * 1000,
+                        "stages": stages,
                     },
                     "results": [],
                 }
         if scoped_video_id and scoped_video_id not in self.engine.library.videos:
             raise KeyError(f"video_id not found: {scoped_video_id}")
         if scoped_video_ids:
-            missing = sorted(
-                set(scoped_video_ids) - set(self.engine.library.videos)
-            )
+            missing = sorted(set(scoped_video_ids) - set(self.engine.library.videos))
             if missing:
                 raise KeyError(f"video_id not found: {', '.join(missing)}")
 
@@ -3155,48 +3135,17 @@ class LocalRAGService:
         lexical_results: List[dict] = []
         candidate_rows: List[dict] = []
 
+        search_kwargs = {"k": candidate_k, "language": language}
+        if scoped_video_id:
+            search_kwargs["video_id"] = scoped_video_id
+        elif scoped_video_ids is not None:
+            search_kwargs["video_ids"] = scoped_video_ids
         if mode in {"dense", "hybrid"}:
-            if scoped_video_id:
-                dense_results = self._dense_search(
-                    query,
-                    k=candidate_k,
-                    language=language,
-                    video_id=scoped_video_id,
-                )
-            elif scoped_video_ids is not None:
-                dense_results = self._dense_search(
-                    query,
-                    k=candidate_k,
-                    language=language,
-                    video_ids=scoped_video_ids,
-                )
-            else:
-                dense_results = self._dense_search(
-                    query,
-                    k=candidate_k,
-                    language=language,
-                )
+            dense_results = run_stage("dense", self._dense_search, **search_kwargs)
         if mode in {"lexical", "hybrid"}:
-            if scoped_video_id:
-                lexical_results = self._lexical_bm25_search(
-                    query,
-                    k=candidate_k,
-                    language=language,
-                    video_id=scoped_video_id,
-                )
-            elif scoped_video_ids is not None:
-                lexical_results = self._lexical_bm25_search(
-                    query,
-                    k=candidate_k,
-                    language=language,
-                    video_ids=scoped_video_ids,
-                )
-            else:
-                lexical_results = self._lexical_bm25_search(
-                    query,
-                    k=candidate_k,
-                    language=language,
-                )
+            lexical_results = run_stage(
+                "lexical", self._lexical_bm25_search, **search_kwargs
+            )
 
         if mode == "dense":
             candidate_rows = dense_results
@@ -3263,7 +3212,13 @@ class LocalRAGService:
                 else "weighted_normalized"
             )
 
+        failed = any(stage["status"] == "error" for stage in stages.values())
         details = {
+            "status": ("degraded" if results else "error")
+            if failed
+            else ("ok" if results else "no_matches"),
+            "duration_ms": (time.perf_counter() - started) * 1000,
+            "stages": stages,
             "fusion": fusion_name,
             "fusion_profile": hybrid_profile if mode == "hybrid" else None,
             "fusion_weights": (
