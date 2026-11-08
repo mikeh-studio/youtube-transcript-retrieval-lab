@@ -36,6 +36,7 @@ from evals.scoring import (  # noqa: E402
     select_optimized_run,
 )
 from local_preview.local_api import LocalRAGService, normalize_language  # noqa: E402
+from local_preview.retrieval_diagnostics import has_retrieval_failure  # noqa: E402
 
 
 def _read_json(path: Path) -> Any:
@@ -351,10 +352,10 @@ def run_one_config(
                     )
                 iteration_latencies.append((time.perf_counter() - started) * 1000.0)
                 details = response.get("details") or {}
-                if details.get("status") in {"error", "degraded"}:
+                if has_retrieval_failure(details):
                     raise RuntimeError(
                         "Retrieval reported a failed search stage "
-                        f"(status={details['status']}); inspect retrieval_details."
+                        f"(status={details.get('status')}); inspect retrieval_details."
                     )
             latency_ms = float(median(iteration_latencies))
             rows = response.get("results") or []

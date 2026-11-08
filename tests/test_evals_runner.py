@@ -60,3 +60,60 @@ def test_runner_counts_stage_failures_even_when_retrieval_returns(status):
     )
     assert result["metrics"]["failed_query_count"] == 1
     assert result["per_query"][0]["retrieval_details"]["status"] == status
+
+
+@pytest.mark.parametrize(
+    "failed_attempt",
+    [
+        {"status": "error"},
+        {"status": "degraded"},
+        {"status": "ok", "stages": {"dense": {"status": "error"}}},
+    ],
+)
+def test_agentic_runner_counts_failed_attempt_even_when_final_search_succeeds(
+    failed_attempt,
+):
+    retrieval = {
+        "results": [{"video_id": "fixture", "chunk_index": 0}],
+        "details": {
+            "status": "ok",
+            "agentic_retrieval": {
+                "attempts": [failed_attempt, {"status": "ok"}],
+            },
+        },
+    }
+    service = SimpleNamespace(
+        retrieve_agentic=lambda *args, **kwargs: {"retrieval": retrieval}
+    )
+    result = run_one_config(
+        service,
+        [{"id": "failed-then-recovered", "query": "test"}],
+        {"strategy": "agentic"},
+        default_top_k=5,
+    )
+    assert result["metrics"]["failed_query_count"] == 1
+    assert result["per_query"][0]["retrieval_details"] == retrieval["details"]
+
+
+@pytest.mark.parametrize("status", ["skipped", "no_matches"])
+def test_agentic_runner_does_not_count_empty_or_skipped_attempt_as_failure(status):
+    service = SimpleNamespace(
+        retrieve_agentic=lambda *args, **kwargs: {
+            "retrieval": {
+                "results": [],
+                "details": {
+                    "status": "no_matches",
+                    "agentic_retrieval": {
+                        "attempts": [{"status": status}],
+                    },
+                },
+            }
+        }
+    )
+    result = run_one_config(
+        service,
+        [{"id": "empty", "query": "test"}],
+        {"strategy": "agentic"},
+        default_top_k=5,
+    )
+    assert result["metrics"]["failed_query_count"] == 0

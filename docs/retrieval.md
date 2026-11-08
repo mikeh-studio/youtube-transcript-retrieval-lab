@@ -123,3 +123,11 @@ python -m evals.benchmark_scoped_vectors --help
 
 The benchmarks check ranking parity on synthetic data. Timing depends on the local
 environment and does not establish real-corpus relevance or answer quality.
+
+Agentic traces retain status, stage details and timing for every search attempt.
+A successful fallback keeps an earlier failure visible as `degraded`; evaluations
+inspect the complete attempt trace rather than only the selected result. Multi-language
+retrieval preserves each language's diagnostics under
+`multilingual_retrieval.language_details` and combines stage statuses and durations.
+The cache uses the active morphological/bigram tokenizer version, including backend
+changes within the same service process.
