@@ -55,15 +55,16 @@ def test_english_tokenization_unchanged():
 
 def test_token_version_reports_morph_when_available():
     assert local_api._ja_lexical_tokenizer() is not None
-    assert local_api.lexical_token_version() == local_api.LEXICAL_TOKENIZER_MORPH_VERSION
+    assert (
+        local_api.lexical_token_version() == local_api.LEXICAL_TOKENIZER_MORPH_VERSION
+    )
 
 
 def test_bigram_fallback_matches_legacy_behavior(bigram_fallback):
     tokens = local_api.tokenize_for_lexical("機械学習", "ja")
     assert tokens == ["機械", "械学", "学習", "機械学習"]
     assert (
-        local_api.lexical_token_version()
-        == local_api.LEXICAL_TOKENIZER_BIGRAM_VERSION
+        local_api.lexical_token_version() == local_api.LEXICAL_TOKENIZER_BIGRAM_VERSION
     )
 
 
@@ -78,3 +79,28 @@ def test_staticmethod_delegates_to_module_function():
 def test_empty_and_whitespace_input():
     assert local_api.tokenize_for_lexical("", "ja") == []
     assert local_api.tokenize_for_lexical("   ", None) == []
+
+
+def test_service_cache_invalidates_when_japanese_tokenizer_backend_changes(monkeypatch):
+    class MorphTokenizer:
+        def tokenize(self, text):
+            return text.replace("機械学習", "機械 学習")
+
+    rows = [{"text": "機械学習", "language": "ja", "video_id": "fixture"}]
+
+    def service():
+        instance = local_api.LocalRAGService.__new__(local_api.LocalRAGService)
+        instance._all_chunks = lambda **kwargs: rows
+        return instance
+
+    cached = service()
+    monkeypatch.setattr(local_api, "_ja_lexical_tokenizer", lambda: MorphTokenizer())
+    assert cached._lexical_bm25_search("機械", k=5, language="ja")
+    assert cached._lexical_bm25_search("械学", k=5, language="ja") == []
+    monkeypatch.setattr(local_api, "_ja_lexical_tokenizer", lambda: None)
+    warmed = cached._lexical_bm25_search("械学", k=5, language="ja")
+    assert warmed and warmed == service()._lexical_bm25_search(
+        "械学", k=5, language="ja"
+    )
+    monkeypatch.setattr(local_api, "_ja_lexical_tokenizer", lambda: MorphTokenizer())
+    assert cached._lexical_bm25_search("械学", k=5, language="ja") == []

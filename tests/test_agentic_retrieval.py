@@ -62,7 +62,9 @@ def _assessment(sufficient, reason_code="thin_support", confidence_cap="low"):
 
 
 def test_heuristic_query_rewrite_strips_english_question_phrasing():
-    assert heuristic_query_rewrite("What is Jetson Orin used for?") == "jetson orin used"
+    assert (
+        heuristic_query_rewrite("What is Jetson Orin used for?") == "jetson orin used"
+    )
 
 
 def test_heuristic_query_rewrite_strips_japanese_question_phrasing():
@@ -78,7 +80,10 @@ def test_heuristic_query_rewrite_returns_none_when_unchanged_or_empty():
 def test_agentic_tool_policy_prefers_keyword_for_japanese_and_exact_queries():
     assert choose_initial_search_tool("代理店施策の勝ち筋") == TOOL_KEYWORD_SEARCH
     assert choose_initial_search_tool('find "Jetson Orin"') == TOOL_KEYWORD_SEARCH
-    assert choose_initial_search_tool("What supports robot inference?") == TOOL_SEMANTIC_SEARCH
+    assert (
+        choose_initial_search_tool("What supports robot inference?")
+        == TOOL_SEMANTIC_SEARCH
+    )
 
 
 def test_agentic_tool_search_reads_raw_context_around_strong_anchor():
@@ -93,7 +98,9 @@ def test_agentic_tool_search_reads_raw_context_around_strong_anchor():
         }
 
     def keyword_search(*, query, k):
-        raise AssertionError("sufficient semantic evidence should not switch search tools")
+        raise AssertionError(
+            "sufficient semantic evidence should not switch search tools"
+        )
 
     def read_context(*, video_id, timestamp, window):
         calls.append(("read_context", video_id))
@@ -121,7 +128,10 @@ def test_agentic_tool_search_reads_raw_context_around_strong_anchor():
         k=3,
     )
 
-    assert calls == [(TOOL_SEMANTIC_SEARCH, "What supports robot inference?"), ("read_context", "vid1")]
+    assert calls == [
+        (TOOL_SEMANTIC_SEARCH, "What supports robot inference?"),
+        ("read_context", "vid1"),
+    ]
     assert outcome["final_tool"] == "read_context"
     assert outcome["rows"][0]["chunk_index"] == 2
     assert outcome["rows"][0]["text"].startswith("before")
@@ -303,7 +313,9 @@ def test_sufficient_first_attempt_stops_immediately():
     outcome = run_agentic_retrieval(
         question="strong question",
         retrieve_fn=retrieve_fn,
-        assess_fn=lambda *, rows, retrieval_mode: _assessment(True, "multi_chunk_support", "high"),
+        assess_fn=lambda *, rows, retrieval_mode: _assessment(
+            True, "multi_chunk_support", "high"
+        ),
         rewrite_fn=lambda *, query, attempted_queries: "should not be called",
     )
 
@@ -484,7 +496,11 @@ def test_retrieve_agentic_uses_deterministic_rewrite_without_llm_call():
     def fake_retrieve(query, **kwargs):
         retrieve_calls.append(query)
         rows = strong_rows if query == "jetson orin used" else []
-        return {"retrieval_mode": kwargs.get("retrieval_mode", "hybrid"), "details": {}, "results": rows}
+        return {
+            "retrieval_mode": kwargs.get("retrieval_mode", "hybrid"),
+            "details": {},
+            "results": rows,
+        }
 
     def fail_llm(**kwargs):
         raise AssertionError("deterministic retrieval rewriting must not call an LLM")
@@ -599,7 +615,9 @@ def test_ask_route_uses_agentic_retrieval_when_flag_set(monkeypatch):
     monkeypatch.delenv(local_api.AGENTIC_RETRIEVAL_ENV, raising=False)
     monkeypatch.setattr(local_api, "SERVICE", StubService())
 
-    handler = _FakeHandler("/v1/ask", {"question": "q?", "agentic": True, "provider": "chatgpt"})
+    handler = _FakeHandler(
+        "/v1/ask", {"question": "q?", "agentic": True, "provider": "chatgpt"}
+    )
     local_api.Handler.do_POST(handler)
     assert handler.response_status == 200
     assert calls == {"agentic": 1, "plain": 0}
@@ -666,10 +684,44 @@ def test_never_sufficient_prefers_attempt_with_most_evidence():
     outcome = run_agentic_retrieval(
         question="question",
         retrieve_fn=retrieve_fn,
-        assess_fn=lambda *, rows, retrieval_mode: _assessment(False, "no_results" if not rows else "thin_support"),
+        assess_fn=lambda *, rows, retrieval_mode: _assessment(
+            False, "no_results" if not rows else "thin_support"
+        ),
         rewrite_fn=lambda *, query, attempted_queries: next(rewrites),
     )
 
     assert outcome["sufficient"] is False
     assert len(outcome["rows"]) == 2
     assert outcome["final_query"] == "second query"
+
+
+def test_tool_search_preserves_failed_attempt_after_successful_fallback():
+    failure = {
+        "retrieval_mode": "dense",
+        "results": [],
+        "details": {
+            "status": "error",
+            "duration_ms": 2.0,
+            "stages": {"dense": {"status": "error", "error_type": "RuntimeError"}},
+        },
+    }
+    success = _retrieval([_row(0)])
+    success["details"] = {"status": "ok", "stages": {"lexical": {"status": "ok"}}}
+    outcome = run_agentic_tool_search(
+        question="explain fermentation",
+        language="en",
+        semantic_search_fn=lambda **kwargs: failure,
+        keyword_search_fn=lambda **kwargs: success,
+        read_context_fn=lambda **kwargs: {},
+        assess_fn=lambda *, rows, retrieval_mode: _assessment(bool(rows)),
+    )
+    assert outcome["rows"] == success["results"]
+    assert outcome["sufficient"] is True
+    assert outcome["retrieval"]["details"]["status"] == "degraded"
+    assert [attempt["status"] for attempt in outcome["attempts"]] == ["error", "ok"]
+    first = outcome["attempts"][0]
+    assert first["stages"]["dense"]["error_type"] == "RuntimeError"
+    assert first["duration_ms"] == 2.0
+    failure["details"]["stages"]["dense"]["error_type"] = "changed"
+    assert first["stages"]["dense"]["error_type"] == "RuntimeError"
+    assert success["details"]["status"] == "ok"

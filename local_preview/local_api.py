@@ -60,6 +60,7 @@ if load_dotenv is not None:
 
 from browser_boundary import BrowserBoundary  # noqa: E402
 from local_preview.lexical_index import LexicalIndex  # noqa: E402
+from local_preview.retrieval_diagnostics import has_retrieval_failure  # noqa: E402
 
 _LEXICAL_INDEX_LOCK = threading.Lock()
 
@@ -2742,7 +2743,7 @@ class LocalRAGService:
                 cached = (tokenizer, LexicalIndex(tokenizer))
                 self._lexical_index_state = cached
         return cached[1].search(
-            candidates, query_tokens, k=k, token_version="lexical-v1"
+            candidates, query_tokens, k=k, token_version=lexical_token_version()
         )
 
     def _rrf_fuse(
@@ -3446,18 +3447,60 @@ class LocalRAGService:
             for rank, row in enumerate(rows, start=1):
                 row["rank"] = rank
                 row["score"] = float(row.get("multilingual_score", 0.0))
+            language_details = [
+                {
+                    "language": retrieval.get("_query_language"),
+                    **deepcopy(retrieval.get("details") or {}),
+                }
+                for retrieval in retrievals
+            ]
+            failed = any(has_retrieval_failure(details) for details in language_details)
+            stages = {}
+            for name in ("dense", "lexical"):
+                parts = [
+                    (details.get("stages") or {}).get(name, {})
+                    for details in language_details
+                ]
+                statuses = {part.get("status", "skipped") for part in parts}
+                status = next(
+                    (
+                        value
+                        for value in ("error", "degraded", "ok", "no_matches")
+                        if value in statuses
+                    ),
+                    "skipped",
+                )
+                stages[name] = {
+                    "status": status,
+                    "duration_ms": sum(part.get("duration_ms", 0.0) for part in parts),
+                    "error_type": next(
+                        (
+                            part["error_type"]
+                            for part in parts
+                            if part.get("error_type")
+                        ),
+                        None,
+                    ),
+                }
             return {
                 "retrieval_mode": retrieval_mode,
                 "details": {
+                    "status": ("degraded" if rows else "error")
+                    if failed
+                    else ("ok" if rows else "no_matches"),
+                    "duration_ms": sum(
+                        details.get("duration_ms", 0.0) for details in language_details
+                    ),
+                    "stages": stages,
                     "multilingual_retrieval": {
+                        "language_details": language_details,
                         "enabled": True,
                         "languages": [
-                            retrieval.get("_query_language")
-                            for retrieval in retrievals
+                            retrieval.get("_query_language") for retrieval in retrievals
                         ],
                         "result_sets": len(retrievals),
                         "fusion": "rrf",
-                    }
+                    },
                 },
                 "results": rows,
             }
@@ -3565,8 +3608,7 @@ class LocalRAGService:
             retrieval.pop("_query_language", None)
             if agentic:
                 sufficient = any(
-                    bool(outcome.get("sufficient"))
-                    for outcome in agentic_outcomes
+                    bool(outcome.get("sufficient")) for outcome in agentic_outcomes
                 )
                 if len(agentic_outcomes) == 1:
                     final_outcome = agentic_outcomes[0]
