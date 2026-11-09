@@ -11,9 +11,12 @@ insufficient-evidence handling still applies.
 
 from __future__ import annotations
 
+from copy import deepcopy
 import math
 import re
 from typing import Callable, List, Optional
+
+from local_preview.retrieval_diagnostics import has_retrieval_failure
 
 AGENTIC_MAX_ATTEMPTS = 3
 AGENTIC_MAX_TOP_K = 12
@@ -138,7 +141,11 @@ def _agentic_tool_attempt(
     k: int,
 ) -> dict:
     rows = list(response.get("results") or [])
+    details = response.get("details") or {}
     return {
+        "status": details.get("status") or ("ok" if rows else "no_matches"),
+        "stages": deepcopy(details.get("stages") or {}),
+        "duration_ms": details.get("duration_ms", 0.0),
         "attempt": attempt_no,
         "strategy": strategy,
         "tool": tool,
@@ -369,6 +376,8 @@ def run_agentic_tool_search(
     retrieval = dict(best["retrieval"])
     retrieval["results"] = final_rows
     retrieval["details"] = dict(retrieval.get("details") or {})
+    if any(has_retrieval_failure(attempt) for attempt in attempts):
+        retrieval["details"]["status"] = "degraded" if final_rows else "error"
     stopped_reason = (
         STOPPED_SUFFICIENT
         if final_assessment.get("sufficient")

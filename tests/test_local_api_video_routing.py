@@ -5,6 +5,8 @@ import os
 import sys
 from pathlib import Path
 
+import pytest
+
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 LOCAL_PREVIEW_DIR = ROOT_DIR / "local_preview"
@@ -105,7 +107,7 @@ def test_video_first_agentic_expands_shortlist_before_global_fallback():
     assert details["used_fallback"] is False
 
 
-def test_video_first_agentic_preserves_multilingual_tool_traces():
+def _multilingual_service():
     service = local_api.LocalRAGService.__new__(local_api.LocalRAGService)
     service.engine = type(
         "Engine",
@@ -155,6 +157,12 @@ def test_video_first_agentic_preserves_multilingual_tool_traces():
         "latency_ms": 1.0,
         "route_attempts": [],
     }
+
+    return service
+
+
+def test_video_first_agentic_preserves_multilingual_tool_traces():
+    service = _multilingual_service()
 
     def retrieve_agentic(query, **kwargs):
         language = kwargs["language"]
@@ -694,3 +702,91 @@ def test_citations_keep_youtube_source_separate_from_source_type():
     assert citation["source"]["channel"]["id"] == "UC-source"
     assert chunk["source"]["channel"]["name"] == "Source Channel"
     assert "YouTube channel: Source Channel" in prompt
+
+
+@pytest.mark.parametrize("agentic", [False, True])
+@pytest.mark.parametrize(
+    "english_status,english_rows,japanese_rows,expected",
+    [
+        ("error", False, True, "degraded"),
+        ("error", False, False, "error"),
+        ("ok", True, True, "ok"),
+        ("no_matches", False, False, "no_matches"),
+        ("degraded", True, True, "degraded"),
+    ],
+)
+def test_multilingual_merge_preserves_stage_diagnostics(
+    monkeypatch, agentic, english_status, english_rows, japanese_rows, expected
+):
+    service = _multilingual_service()
+    monkeypatch.setattr(
+        local_api,
+        "assess_grounded_answer_evidence",
+        lambda **kwargs: {
+            "sufficient": bool(kwargs["rows"]),
+            "reason_code": "fixture",
+        },
+    )
+    original_details = {}
+
+    def retrieve(query, **kwargs):
+        english = kwargs["language"] == "en"
+        has_rows = english_rows if english else japanese_rows
+        failed = english_status in {"error", "degraded"} and english
+        status = english_status if english else ("ok" if has_rows else "no_matches")
+        rows = (
+            [
+                {
+                    "video_id": kwargs["video_ids"][0],
+                    "chunk_index": 0,
+                    "text": query,
+                    "language": kwargs["language"],
+                }
+            ]
+            if has_rows
+            else []
+        )
+        details = {
+            "status": status,
+            "duration_ms": 3.0 if english else 5.0,
+            "stages": {
+                "dense": {
+                    "status": "error"
+                    if failed
+                    else ("ok" if has_rows else "no_matches"),
+                    "duration_ms": 2.0 if english else 4.0,
+                    "error_type": "RuntimeError" if failed else None,
+                },
+                "lexical": {
+                    "status": "skipped",
+                    "duration_ms": 0.0,
+                    "error_type": None,
+                },
+            },
+        }
+        original_details[kwargs["language"]] = details
+        return {"results": rows, "details": details, "retrieval_mode": "dense"}
+
+    service.retrieve = retrieve
+
+    def retrieve_agentic(query, **kwargs):
+        response = retrieve(query, **kwargs)
+        return {"retrieval": response, "sufficient": bool(response["results"])}
+
+    service.retrieve_agentic = retrieve_agentic
+    result = service.retrieve_video_first(
+        "starter timing", video_top_k=2, agentic=agentic
+    )
+    details = result["retrieval"]["details"]
+    assert details["status"] == expected
+    assert details["duration_ms"] == 8.0
+    assert details["stages"]["dense"]["duration_ms"] == 6.0
+    assert details["stages"]["lexical"]["status"] == "skipped"
+    per_language = details["multilingual_retrieval"]["language_details"]
+    assert [part["language"] for part in per_language] == ["en", "ja"]
+    assert per_language[0]["status"] == english_status
+    if english_status in {"error", "degraded"}:
+        assert details["stages"]["dense"]["status"] == "error"
+        assert details["stages"]["dense"]["error_type"] == "RuntimeError"
+        original_details["en"]["stages"]["dense"]["error_type"] = "changed"
+        assert per_language[0]["stages"]["dense"]["error_type"] == "RuntimeError"

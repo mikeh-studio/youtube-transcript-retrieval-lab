@@ -76,9 +76,7 @@ class VideoLibrary:
         self.metadata_client = metadata_client or YouTubeMetadataClient()
 
         # Video storage: video_id -> video metadata and chunks
-        self.videos = (
-            {}
-        )  # {video_id: {"url": str, "title": str, "language": str, "chunks": list, "summary_cache": dict}}
+        self.videos = {}  # {video_id: {"url": str, "title": str, "language": str, "chunks": list, "summary_cache": dict}}
 
         # Unified index state
         self.index = None  # FAISS index
@@ -551,6 +549,42 @@ class VideoLibrary:
         langs = [data.get("language", "ja") for data in self.videos.values()]
         return max(set(langs), key=langs.count)
 
+    def _search_scoped_index(self, query_embedding, video_ids):
+        """Rank only selected flat-IP vectors, preserving full-search tie order.
+
+        Request every selected vector before truncation: FAISS top-k selection
+        can retain different members of a tie than a full ranking. An array
+        selector lets IndexFlatIP address the selected vectors directly without
+        copying embeddings or building another index. Other index types retain
+        the original full-search path.
+        """
+        if (
+            not isinstance(self.index, faiss.IndexFlatIP)
+            or self.videos.keys() <= video_ids
+        ):
+            return self.index.search(query_embedding, int(self.index.ntotal))
+
+        selected = np.fromiter(
+            (
+                position
+                for position, (video_id, _) in enumerate(self.chunk_map)
+                if video_id in video_ids
+            ),
+            dtype=np.int64,
+        )
+        if not len(selected):
+            return (
+                np.empty((1, 0), dtype=np.float32),
+                np.empty((1, 0), dtype=np.int64),
+            )
+        if len(selected) == int(self.index.ntotal):
+            return self.index.search(query_embedding, int(self.index.ntotal))
+
+        # Keep the ID buffer and selector alive through the synchronous call.
+        selector = faiss.IDSelectorArray(selected)
+        parameters = faiss.SearchParameters(sel=selector)
+        return self.index.search(query_embedding, len(selected), params=parameters)
+
     def search(
         self,
         query,
@@ -614,8 +648,10 @@ class VideoLibrary:
             else:
                 language = self._dominant_language()
         query_emb = self.processor.encode_query(query, language=language)
-        search_k = int(self.index.ntotal) if scoped_video_ids else k
-        scores, indices = self.index.search(query_emb, search_k)
+        if scoped_video_ids:
+            scores, indices = self._search_scoped_index(query_emb, scoped_video_ids)
+        else:
+            scores, indices = self.index.search(query_emb, k)
 
         results = []
         for rank, (score, idx) in enumerate(zip(scores[0], indices[0])):
