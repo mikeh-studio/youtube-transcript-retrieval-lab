@@ -135,17 +135,16 @@ class TranscriptRetrievalTools:
 
         transcript_start = min(row["start"] for row in normalized_segments)
         transcript_end = max(row["end"] for row in normalized_segments)
-        if requested_timestamp < transcript_start or requested_timestamp > transcript_end:
+        if (
+            requested_timestamp < transcript_start
+            or requested_timestamp > transcript_end
+        ):
             raise ValueError(
                 "timestamp must fall within the raw transcript bounds "
                 f"({transcript_start:g}-{transcript_end:g})"
             )
-        requested_start = max(
-            transcript_start, requested_timestamp - requested_window
-        )
-        requested_end = min(
-            transcript_end, requested_timestamp + requested_window
-        )
+        requested_start = max(transcript_start, requested_timestamp - requested_window)
+        requested_end = min(transcript_end, requested_timestamp + requested_window)
         selected = [
             row
             for row in normalized_segments
@@ -154,13 +153,10 @@ class TranscriptRetrievalTools:
         context_start = (
             min(row["start"] for row in selected) if selected else requested_start
         )
-        context_end = (
-            max(row["end"] for row in selected) if selected else requested_end
-        )
+        context_end = max(row["end"] for row in selected) if selected else requested_end
         text = "\n".join(row["text"] for row in selected)
         video_url = str(
-            video.get("url")
-            or f"https://www.youtube.com/watch?v={scoped_video_id}"
+            video.get("url") or f"https://www.youtube.com/watch?v={scoped_video_id}"
         )
         separator = "&" if "?" in video_url else "?"
 
