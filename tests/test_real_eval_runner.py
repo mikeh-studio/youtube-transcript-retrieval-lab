@@ -43,7 +43,19 @@ class SyntheticService:
             }
         return {
             "results": [{"video_id": "synthetic", "chunk_index": 0}],
-            "details": {"status": "ok", "reranker": {"applied": False}},
+            "details": {
+                "status": "ok",
+                "reranker": {"applied": False},
+                "stages": {
+                    name: {
+                        "status": "ok"
+                        if kwargs["retrieval_mode"] in {name, "hybrid"}
+                        else "skipped",
+                        "duration_ms": 1.0,
+                    }
+                    for name in ("dense", "lexical")
+                },
+            },
         }
 
 
@@ -73,6 +85,58 @@ def test_degraded_successful_fallback_is_still_failed():
         {"top_k": 10, "latency_repetitions": 1},
     )
     assert result["failed_query_count"] == 1
+    assert result["metrics"]["ndcg@10"] == 0
+
+
+@pytest.mark.parametrize(
+    "details",
+    [
+        {},
+        {"status": "unknown"},
+        {"status": "ok"},
+        {"status": "ok", "stages": {"dense": {"status": "skipped"}}},
+        {"status": "ok", "stages": {"dense": {"status": "unknown"}}},
+        {"status": "ok", "stages": {"dense": {"status": "error"}}},
+    ],
+)
+def test_missing_or_invalid_success_diagnostics_fail_closed(details):
+    class InvalidDiagnostics(SyntheticService):
+        def retrieve(self, query, **kwargs):
+            response = super().retrieve(query, **kwargs)
+            response["details"] = details
+            return response
+
+    result = run_queries(
+        InvalidDiagnostics(),
+        [query()],
+        {"name": "unit", "retrieval_mode": "dense", "reranker": "none"},
+        {"top_k": 10, "latency_repetitions": 1},
+    )
+    assert result["failed_query_count"] == 1
+    assert result["metrics"]["ndcg@10"] == 0
+
+
+def test_successful_empty_retrieval_is_a_scored_miss():
+    class EmptyService:
+        def retrieve(self, query, **kwargs):
+            return {
+                "results": [],
+                "details": {
+                    "status": "no_matches",
+                    "stages": {
+                        "dense": {"status": "no_matches", "duration_ms": 1.0},
+                        "lexical": {"status": "skipped", "duration_ms": 0.0},
+                    },
+                },
+            }
+
+    result = run_queries(
+        EmptyService(),
+        [query()],
+        {"name": "unit", "retrieval_mode": "dense", "reranker": "none"},
+        {"top_k": 10, "latency_repetitions": 1},
+    )
+    assert result["failed_query_count"] == 0
     assert result["metrics"]["ndcg@10"] == 0
 
 

@@ -1118,7 +1118,13 @@ function recomputeRunMetrics(run) {
     const labels = items.map((item) => queryRun.labels?.[getChunkKey(item)]?.label || null);
     const judgedCount = labels.filter((label) => label === "relevant" || label === "not_relevant").length;
     const unsureCount = labels.filter((label) => label === "unsure").length;
-    const complete = !queryRun.error && items.length > 0 && judgedCount === items.length;
+    const details = queryRun.retrieval_details || {};
+    const retrievalFailed = Boolean(queryRun.error)
+      || ["error", "degraded"].includes(details.status)
+      || Object.values(details.stages || {}).some((stage) => stage?.status === "error")
+      || Boolean(details.reranker?.error)
+      || (details.reranker?.requested === "cross_encoder" && items.length > 0 && !details.reranker.applied);
+    const complete = !retrievalFailed && items.length > 0 && judgedCount === items.length;
     const relevances = labels.slice(0, run.k).map((label) => label === "relevant" ? 1 : 0);
     const relevantInTopK = relevances.reduce((acc, value) => acc + value, 0);
     const totalRelevant = labels.filter((label) => label === "relevant").length;
@@ -1134,7 +1140,7 @@ function recomputeRunMetrics(run) {
       labeled_count: judgedCount,
       unsure_count: unsureCount,
       annotation_total: items.length,
-      annotation_status: complete ? "complete" : (queryRun.error ? "error" : "incomplete"),
+      annotation_status: complete ? "complete" : (retrievalFailed ? "error" : "incomplete"),
       result_count: queryRun.result_count,
     };
   });

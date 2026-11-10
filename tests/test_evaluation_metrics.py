@@ -32,6 +32,19 @@ assert.equal(run.metrics.annotation_status, "complete");
 assert.equal(run.metrics.aggregate.precision_at_k, 1);
 assert.equal(run.metrics.aggregate.recall_at_k, 0.5);
 assert.match(run.metrics.metric_semantics.recall_at_k, /not corpus recall/);
+// Search returns HTTP 200 with fallback rows when a retrieval stage fails.
+for (const details of [
+  {status: "degraded"},
+  {status: "error"},
+  {status: "ok", stages: {dense: {status: "error"}}},
+  {status: "ok", reranker: {requested: "cross_encoder", applied: false, error: "unavailable"}},
+]) {
+  run.results[0].retrieval_details = details;
+  recomputeRunMetrics(run);
+  assert.equal(run.metrics.per_query[0].annotation_status, "error");
+  assert.equal(run.metrics.aggregate.precision_at_k, null);
+}
+run.results[0].retrieval_details = {status: "ok"};
 run.results.push({ query_id: "q2", query_text: "failed", items: [], labels: {}, error: "failed" });
 recomputeRunMetrics(run);
 assert.equal(run.metrics.aggregate.precision_at_k, null);

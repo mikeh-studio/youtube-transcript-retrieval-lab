@@ -177,3 +177,10 @@ Returned chunks for an unanswerable query are diagnostic only: the runner does
 not test answer generation or abstention. Any degraded retrieval or failed
 requested reranking makes the report fail. A completed execution is evidence
 that this configured pilot ran; it makes no promotion or deployment decision.
+Missing or unknown retrieval diagnostics also fail: every requested dense or
+lexical stage must explicitly report success or no matches. A skipped requested
+stage cannot establish that the configured retrieval ran. The annotation
+workbench similarly withholds metrics for degraded fallback results and failed
+reranking, even after every returned item has been labeled.
+[Synthetic degraded-result example](../docs/media/evaluation-degraded-metrics.png)
+shows the unavailable metrics and query error status.

@@ -348,12 +348,19 @@ def run_queries(service, dataset: list[dict], run: dict, config: dict) -> dict:
                         "status": stage.get("status", "not_reported"),
                         "duration_ms": stage.get("duration_ms"),
                     }
-                if details.get("status") in {"error", "degraded"} or any(
-                    stage.get("status") == "error"
-                    for stage in details.get("stages", {}).values()
+                stages = details.get("stages", {})
+                if details.get("status") not in {"ok", "no_matches"} or any(
+                    stages.get(name, {}).get("status")
+                    not in (
+                        {"ok", "no_matches"}
+                        if run["retrieval_mode"] in {name, "hybrid"}
+                        else {"skipped"}
+                    )
+                    or stages.get(name, {}).get("error_type")
+                    for name in ("dense", "lexical")
                 ):
                     raise ContractError(
-                        "application retrieval stage failed or degraded"
+                        "application retrieval success diagnostics missing, invalid, failed or degraded"
                     )
                 results = response["results"]
                 reranker = details.get("reranker") or {}

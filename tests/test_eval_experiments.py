@@ -179,7 +179,16 @@ def test_comparison_accepts_runner_generated_shape():
 
     class StubService:
         def retrieve(self, *args, **kwargs):
-            return {"results": [{"video_id": "v", "chunk_index": 0}], "details": {}}
+            return {
+                "results": [{"video_id": "v", "chunk_index": 0}],
+                "details": {
+                    "status": "ok",
+                    "stages": {
+                        "dense": {"status": "ok", "duration_ms": 1.0},
+                        "lexical": {"status": "skipped", "duration_ms": 0.0},
+                    },
+                },
+            }
 
     dataset = [
         {
