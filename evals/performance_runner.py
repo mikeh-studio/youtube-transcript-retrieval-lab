@@ -427,19 +427,32 @@ def _write_private_json(path: Path, value: object) -> None:
     path.chmod(0o400)
 
 
+def validate_model_snapshot_path(
+    model_path: Path, expected_revision: str | None
+) -> str:
+    """Require the cached E5-large owner, name, and pinned snapshot revision."""
+    revision = model_path.name
+    if (
+        model_path.parent.name != "snapshots"
+        or model_path.parent.parent.name != "models--intfloat--multilingual-e5-large"
+        or len(revision) != 40
+        or any(char not in "0123456789abcdef" for char in revision)
+    ):
+        raise ValueError(
+            "model path must be a pinned intfloat/multilingual-e5-large snapshot"
+        )
+    if expected_revision and revision != expected_revision:
+        raise ValueError("model revision does not match snapshot path")
+    if not (model_path / "modules.json").is_file():
+        raise ValueError("cached SentenceTransformer snapshot is incomplete")
+    return revision
+
+
 def run(args: argparse.Namespace) -> dict:
     snapshot = args.snapshot_data.resolve(strict=True)
     source = args.source_data.resolve(strict=True) if args.source_data else None
     model_path = args.model_path.resolve(strict=True)
-    revision = model_path.name
-    if len(revision) != 40 or any(char not in "0123456789abcdef" for char in revision):
-        raise ValueError(
-            "model path must be a pinned 40-character Hugging Face snapshot"
-        )
-    if args.model_revision and revision != args.model_revision:
-        raise ValueError("model revision does not match snapshot path")
-    if not (model_path / "modules.json").is_file():
-        raise ValueError("cached SentenceTransformer snapshot is incomplete")
+    revision = validate_model_snapshot_path(model_path, args.model_revision)
     original_hashes = record_hashes(source) if source else None
     snapshot_hashes = record_hashes(snapshot)
     original_manifest_hash = _manifest_hash(source) if source else None

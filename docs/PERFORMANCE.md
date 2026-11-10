@@ -18,7 +18,7 @@ must name exactly the available video records. The original is only read.
 The source and snapshot arguments name their `data/` directories.
 
 A complete cached `intfloat/multilingual-e5-large` Hugging Face snapshot is
-required. Pass its local `snapshots/<40-character-revision>` path. The runner
+required. Pass its local `models--intfloat--multilingual-e5-large/snapshots/<40-character-revision>` path. The runner
 sets offline environment flags and a socket guard before importing production
 modules, disables dotenv loading and global service creation, clears provider
 keys from its process environment, and rejects a hashing/model fallback. It
@@ -31,7 +31,7 @@ a `failure.json` with the exception type if setup or execution fails.
 python -m evals.performance_runner \
   --source-data /private/original/data \
   --snapshot-data /private/snapshot/data \
-  --model-path /private/model-cache/snapshots/REVISION_SHA \
+  --model-path /private/model-cache/models--intfloat--multilingual-e5-large/snapshots/REVISION_SHA \
   --model-revision REVISION_SHA \
   --output /private/results/run-001
 ```

@@ -13,6 +13,7 @@ from evals.performance_runner import (
     nearest_rank,
     record_hashes,
     summarize_samples,
+    validate_model_snapshot_path,
     validate_workload,
 )
 
@@ -92,6 +93,20 @@ def test_output_must_be_new_and_outside_inputs(tmp_path):
     _prepare_output(destination, [forbidden])
     with pytest.raises(FileExistsError):
         _prepare_output(destination, [forbidden])
+
+
+def test_cached_model_path_requires_e5_large_owner_and_revision(tmp_path):
+    revision = "a" * 40
+    good = tmp_path / "models--intfloat--multilingual-e5-large" / "snapshots" / revision
+    wrong = tmp_path / "models--other--model" / "snapshots" / revision
+    for path in (good, wrong):
+        path.mkdir(parents=True)
+        (path / "modules.json").write_text("[]")
+    assert validate_model_snapshot_path(good, revision) == revision
+    with pytest.raises(ValueError, match="intfloat/multilingual-e5-large"):
+        validate_model_snapshot_path(wrong, revision)
+    with pytest.raises(ValueError, match="revision does not match"):
+        validate_model_snapshot_path(good, "b" * 40)
 
 
 class _Service:
