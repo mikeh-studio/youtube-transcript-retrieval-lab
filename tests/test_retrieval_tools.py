@@ -103,3 +103,65 @@ def test_read_context_requires_genuine_raw_segments():
 
     with pytest.raises(KeyError, match="missing"):
         tools.read_context("missing", timestamp=5, window=5)
+
+
+def test_legacy_imports_share_the_core_class():
+    import importlib
+    import sys
+    from pathlib import Path
+
+    from local_preview.retrieval_tools import (
+        DEFAULT_CONTEXT_WINDOW_SECONDS as legacy_window,
+    )
+    from retrieval.transcript_tools import DEFAULT_CONTEXT_WINDOW_SECONDS
+    from retrieval.transcript_tools import TranscriptRetrievalTools as CoreTools
+
+    assert legacy_window == DEFAULT_CONTEXT_WINDOW_SECONDS
+    assert TranscriptRetrievalTools is CoreTools
+    # local_api.py also imports this module directly from the preview directory.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "local_preview"))
+    try:
+        legacy = importlib.import_module("retrieval_tools")
+        assert legacy.TranscriptRetrievalTools is CoreTools
+    finally:
+        sys.path.pop(0)
+
+
+def test_core_import_does_not_depend_on_local_preview():
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    script = """
+import builtins
+import sys
+original_import = builtins.__import__
+def guarded_import(name, *args, **kwargs):
+    if name in ('local_preview', 'local_api') or name.startswith('local_preview.'):
+        raise AssertionError('core imported local_preview')
+    return original_import(name, *args, **kwargs)
+builtins.__import__ = guarded_import
+from retrieval.transcript_tools import TranscriptRetrievalTools
+assert TranscriptRetrievalTools.__name__ == 'TranscriptRetrievalTools'
+assert 'local_preview.local_api' not in sys.modules
+assert 'local_api' not in sys.modules
+"""
+    subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=Path(__file__).resolve().parents[1],
+        check=True,
+    )
+
+
+def test_search_tools_forward_additional_retrieval_options():
+    calls = []
+
+    def retrieve(query, **kwargs):
+        calls.append(kwargs)
+        return {}
+
+    tools = TranscriptRetrievalTools(library=None, retrieve_fn=retrieve)
+    tools.semantic_search("query", candidate_limit=25)
+    tools.keyword_search("query", candidate_limit=10)
+
+    assert [call["candidate_limit"] for call in calls] == [25, 10]
