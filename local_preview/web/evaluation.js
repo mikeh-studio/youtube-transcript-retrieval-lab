@@ -88,6 +88,8 @@ const els = {
   metricsHeading: document.getElementById("metricsHeading"),
   metricPrecision: document.getElementById("metricPrecision"),
   metricRecall: document.getElementById("metricRecall"),
+  metricRecallHeading: document.getElementById("metricRecallHeading"),
+  metricsStatus: document.getElementById("metricsStatus"),
   metricMRR: document.getElementById("metricMRR"),
   metricNDCG: document.getElementById("metricNDCG"),
   thMetricQuery: document.getElementById("thMetricQuery"),
@@ -202,10 +204,11 @@ const I18N = {
     metricsHeading: "Metrics",
     thMetricQuery: "query",
     thMetricPAtK: "P@K",
-    thMetricRecall: "Recall@K",
+    thMetricRecall: "Labeled-pool coverage",
     thMetricMRR: "MRR",
     thMetricNDCG: "nDCG@K",
-    thMetricLabeled: "labeled",
+    thMetricLabeled: "judged",
+    metricsStatus: "Annotation status: {status} ({judged}/{total} definitive judgments; {unsure} unsure). Metrics require every retrieved item to be judged; errors or empty results are unavailable. Coverage is limited to this retrieved pool, not corpus recall.",
     reviewHeading: "Review Run Results",
     runQuerySelectLabel: "Query",
     resultReasonLabel: "Reason Codes",
@@ -326,10 +329,11 @@ const I18N = {
     metricsHeading: "指標",
     thMetricQuery: "query",
     thMetricPAtK: "P@K",
-    thMetricRecall: "Recall@K",
+    thMetricRecall: "ラベル済みプールのカバレッジ",
     thMetricMRR: "MRR",
     thMetricNDCG: "nDCG@K",
-    thMetricLabeled: "labeled",
+    thMetricLabeled: "判定済み",
+    metricsStatus: "注釈状況: {status}（判定済み {judged}/{total}、保留 {unsure}）。取得した全項目の判定が終わるまで指標は利用できません。カバレッジは取得済みプール内に限られ、コーパス全体の再現率ではありません。",
     reviewHeading: "ラン結果レビュー",
     runQuerySelectLabel: "クエリ",
     resultReasonLabel: "理由コード",
@@ -1110,65 +1114,51 @@ function computeNdcgAtK(binaryRelevances, k) {
 
 function recomputeRunMetrics(run) {
   const perQuery = run.results.map((queryRun) => {
-    const topItems = queryRun.items.slice(0, run.k);
-    const relevances = topItems.map((item) => {
-      const key = getChunkKey(item);
-      const entry = queryRun.labels?.[key];
-      return entry?.label === "relevant" ? 1 : 0;
-    });
+    const items = queryRun.items;
+    const labels = items.map((item) => queryRun.labels?.[getChunkKey(item)]?.label || null);
+    const judgedCount = labels.filter((label) => label === "relevant" || label === "not_relevant").length;
+    const unsureCount = labels.filter((label) => label === "unsure").length;
+    const complete = !queryRun.error && items.length > 0 && judgedCount === items.length;
+    const relevances = labels.slice(0, run.k).map((label) => label === "relevant" ? 1 : 0);
     const relevantInTopK = relevances.reduce((acc, value) => acc + value, 0);
-    const precisionAtK = run.k > 0 ? (relevantInTopK / run.k) : 0;
-
-    const totalRelevantLabeled = Object.values(queryRun.labels || {})
-      .filter((entry) => entry?.label === "relevant")
-      .length;
-    const recallAtK = totalRelevantLabeled > 0
-      ? (relevantInTopK / totalRelevantLabeled)
-      : null;
-
-    let mrr = 0;
-    for (let idx = 0; idx < relevances.length; idx += 1) {
-      if (relevances[idx] > 0) {
-        mrr = 1 / (idx + 1);
-        break;
-      }
-    }
-
-    const ndcgAtK = computeNdcgAtK(relevances, run.k);
-    const labeledCount = topItems
-      .map((item) => queryRun.labels?.[getChunkKey(item)]?.label || null)
-      .filter((label) => Boolean(label))
-      .length;
-
+    const totalRelevant = labels.filter((label) => label === "relevant").length;
+    const firstRelevant = relevances.indexOf(1);
     return {
       query_id: queryRun.query_id,
       query_text: queryRun.query_text,
-      precision_at_k: precisionAtK,
-      recall_at_k: recallAtK,
-      mrr,
-      ndcg_at_k: ndcgAtK,
-      labeled_count: labeledCount,
+      precision_at_k: complete ? relevantInTopK / run.k : null,
+      // Kept for existing exports; this is coverage of the retrieved labeled pool.
+      recall_at_k: complete && totalRelevant ? relevantInTopK / totalRelevant : null,
+      mrr: complete ? (firstRelevant < 0 ? 0 : 1 / (firstRelevant + 1)) : null,
+      ndcg_at_k: complete ? computeNdcgAtK(relevances, run.k) : null,
+      labeled_count: judgedCount,
+      unsure_count: unsureCount,
+      annotation_total: items.length,
+      annotation_status: complete ? "complete" : (queryRun.error ? "error" : "incomplete"),
       result_count: queryRun.result_count,
     };
   });
-
-  const avg = (rows, key, includeNull = false) => {
-    const values = rows
-      .map((row) => row[key])
-      .filter((value) => (includeNull ? true : value != null));
-    if (!values.length) {
-      return null;
-    }
-    return values.reduce((acc, value) => acc + Number(value || 0), 0) / values.length;
+  const complete = perQuery.length > 0 && perQuery.every((row) => row.annotation_status === "complete");
+  const avg = (key) => {
+    const values = perQuery.map((row) => row[key]).filter((value) => value != null);
+    return complete && values.length ? values.reduce((acc, value) => acc + value, 0) / values.length : null;
   };
-
   run.metrics = {
+    metric_semantics: {
+      recall_at_k: "labeled_pool_coverage_at_k; not corpus recall",
+      ndcg_at_k: "binary relevance; ideal ranking limited to retrieved top-k",
+      availability: "requires definitive relevant or not_relevant judgments for every retrieved item in each query",
+    },
+    annotation_status: complete ? "complete" : "incomplete",
     aggregate: {
-      precision_at_k: avg(perQuery, "precision_at_k", true),
-      recall_at_k: avg(perQuery, "recall_at_k", false),
-      mrr: avg(perQuery, "mrr", true),
-      ndcg_at_k: avg(perQuery, "ndcg_at_k", true),
+      precision_at_k: avg("precision_at_k"),
+      recall_at_k: avg("recall_at_k"),
+      mrr: avg("mrr"),
+      ndcg_at_k: avg("ndcg_at_k"),
       total_queries: perQuery.length,
+      judged_count: perQuery.reduce((n, row) => n + row.labeled_count, 0),
+      unsure_count: perQuery.reduce((n, row) => n + row.unsure_count, 0),
+      annotation_total: perQuery.reduce((n, row) => n + row.annotation_total, 0),
     },
     per_query: perQuery,
   };
@@ -1177,6 +1167,12 @@ function recomputeRunMetrics(run) {
 function renderMetrics() {
   const run = selectedRun();
   const metrics = run?.metrics?.aggregate;
+  els.metricsStatus.textContent = metrics ? t("metricsStatus", {
+    status: run.metrics.annotation_status,
+    judged: metrics.judged_count,
+    total: metrics.annotation_total,
+    unsure: metrics.unsure_count,
+  }) : "";
   els.metricPrecision.textContent = metrics ? formatMetric(metrics.precision_at_k) : "-";
   els.metricRecall.textContent = metrics ? formatMetric(metrics.recall_at_k) : "-";
   els.metricMRR.textContent = metrics ? formatMetric(metrics.mrr) : "-";
@@ -1195,7 +1191,7 @@ function renderMetrics() {
       <td>${escapeHtml(formatMetric(row.recall_at_k))}</td>
       <td>${escapeHtml(formatMetric(row.mrr))}</td>
       <td>${escapeHtml(formatMetric(row.ndcg_at_k))}</td>
-      <td>${escapeHtml(`${row.labeled_count}/${Math.min(run.k, row.result_count || run.k)}`)}</td>
+      <td>${escapeHtml(`${row.labeled_count}/${row.annotation_total} (${row.annotation_status})`)}</td>
     </tr>
   `).join("");
 }
@@ -1298,6 +1294,7 @@ function renderCompareOutput(text) {
 }
 
 function rerender() {
+  state.runs.forEach(recomputeRunMetrics);
   renderQuerySetSelector();
   renderQuerySetEditor();
   renderRunSelectors();
@@ -1664,7 +1661,9 @@ function compareRuns() {
   });
 
   const output = {
+    metric_semantics: runA.metrics.metric_semantics,
     run_a: {
+      annotation_status: runA.metrics.annotation_status,
       id: runA.id,
       strategy: runA.strategy,
       mode: runA.retrieval_mode,
@@ -1673,6 +1672,7 @@ function compareRuns() {
       metrics: runA.metrics.aggregate,
     },
     run_b: {
+      annotation_status: runB.metrics.annotation_status,
       id: runB.id,
       strategy: runB.strategy,
       mode: runB.retrieval_mode,
@@ -1761,6 +1761,7 @@ function applyLocale(locale) {
   els.thMetricQuery.textContent = t("thMetricQuery");
   els.thMetricPAtK.textContent = t("thMetricPAtK");
   els.thMetricRecall.textContent = t("thMetricRecall");
+  els.metricRecallHeading.textContent = t("thMetricRecall");
   els.thMetricMRR.textContent = t("thMetricMRR");
   els.thMetricNDCG.textContent = t("thMetricNDCG");
   els.thMetricLabeled.textContent = t("thMetricLabeled");

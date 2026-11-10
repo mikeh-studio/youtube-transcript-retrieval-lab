@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "top_k": 10,
+  "latency_repetitions": 3,
+  "runs": [
+    {"name": "dense", "retrieval_mode": "dense", "reranker": "none"},
+    {"name": "lexical", "retrieval_mode": "lexical", "reranker": "none"},
+    {"name": "hybrid", "retrieval_mode": "hybrid", "retrieval_profile": "baseline_rrf", "reranker": "none"}
+  ]
+}

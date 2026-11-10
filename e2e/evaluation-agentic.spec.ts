@@ -102,4 +102,14 @@ test("runs an Evaluation query set with the agentic tool strategy", async ({ pag
     "Keyword · Japanese BM25",
     "Raw transcript context",
   ]);
+  await expect(page.locator("#metricsStatus")).toContainText("incomplete");
+  await expect(page.locator("#metricRecall")).toHaveText("-");
+  await page.locator('[data-label="unsure"]').click();
+  await expect(page.locator("#metricsStatus")).toContainText("incomplete");
+  await page.locator('[data-label="relevant"]').click();
+  await expect(page.locator("#metricsStatus")).toContainText("complete");
+  await expect(page.locator("#metricRecall")).toHaveText("1.000");
+  if (process.env.EVAL_SCREENSHOT_PATH) {
+    await page.screenshot({ path: process.env.EVAL_SCREENSHOT_PATH, fullPage: true });
+  }
 });
