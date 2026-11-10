@@ -205,6 +205,47 @@ def test_failed_warmup_is_a_scored_failure_without_timed_samples():
     assert result["latency_ms"]["samples"] == 0
 
 
+def test_failed_warmup_preserves_stage_type_without_untimed_duration():
+    class StageFails(SyntheticService):
+        def retrieve(self, query, **kwargs):
+            return {
+                "results": [{"video_id": "synthetic", "chunk_index": 0}],
+                "details": {
+                    "status": "degraded",
+                    "duration_ms": 999.0,
+                    "stages": {
+                        "dense": {
+                            "status": "error",
+                            "duration_ms": 998.0,
+                            "error_type": "RuntimeError",
+                        },
+                        "lexical": {"status": "skipped", "duration_ms": 0.0},
+                    },
+                },
+            }
+
+    result = run_queries(
+        StageFails(),
+        [query()],
+        {"name": "unit", "retrieval_mode": "dense", "reranker": "none"},
+        {"top_k": 10, "latency_repetitions": 2},
+    )
+    row = result["per_query"][0]
+    assert row["retrieval_status"] == "degraded"
+    assert row["warmup_status"] == "failed"
+    assert row["warmup_diagnostics"]["status"] == "degraded"
+    assert row["warmup_diagnostics"]["stages"]["dense"] == {
+        "status": "error",
+        "error_type": "RuntimeError",
+    }
+    assert "duration_ms" not in str(row["warmup_diagnostics"])
+    assert row["error"] is not None
+    assert row["metrics"]["ndcg@10"] == 0
+    assert result["failed_query_count"] == 1
+    assert result["latency_ms"]["samples"] == 0
+    assert result["stage_latency_ms"]["dense"]["samples"] == 0
+
+
 def test_requested_reranker_cannot_silently_fall_back():
     result = run_queries(
         SyntheticService(),
@@ -215,6 +256,34 @@ def test_requested_reranker_cannot_silently_fall_back():
     assert result["failed_query_count"] == 1
     assert result["metrics"]["mrr@10"] == 0
     assert "cross-encoder" in result["per_query"][0]["error"]
+
+
+def test_warmup_reranker_error_is_visible_without_private_message():
+    class RerankerFails(SyntheticService):
+        def retrieve(self, query, **kwargs):
+            response = super().retrieve(query, **kwargs)
+            response["details"]["reranker"] = {
+                "requested": "cross_encoder",
+                "applied": False,
+                "error": "private model path must stay local",
+            }
+            return response
+
+    result = run_queries(
+        RerankerFails(),
+        [query()],
+        {"name": "unit", "retrieval_mode": "dense", "reranker": "cross_encoder"},
+        {"top_k": 10, "latency_repetitions": 1},
+    )
+    diagnostics = result["per_query"][0]["warmup_diagnostics"]
+    assert diagnostics["reranker"] == {
+        "requested": "cross_encoder",
+        "applied": False,
+        "error": True,
+    }
+    assert "private model path" not in str(diagnostics)
+    assert result["failed_query_count"] == 1
+    assert result["latency_ms"]["samples"] == 0
 
 
 def test_snapshot_must_exist_without_download(tmp_path, monkeypatch):

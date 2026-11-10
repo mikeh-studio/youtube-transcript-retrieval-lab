@@ -353,6 +353,27 @@ def _check_response(response: dict, run: dict) -> None:
         raise ContractError("requested cross-encoder was not applied successfully")
 
 
+def _warmup_diagnostics(details: dict) -> dict:
+    """Keep failure types and statuses without untimed durations or error text."""
+    stages = details.get("stages") or {}
+    reranker = details.get("reranker") or {}
+    return {
+        "status": details.get("status"),
+        "stages": {
+            name: {
+                "status": (stages.get(name) or {}).get("status"),
+                "error_type": (stages.get(name) or {}).get("error_type"),
+            }
+            for name in ("dense", "lexical")
+        },
+        "reranker": {
+            "requested": reranker.get("requested"),
+            "applied": reranker.get("applied"),
+            "error": bool(reranker.get("error")),
+        },
+    }
+
+
 def run_queries(service, dataset: list[dict], run: dict, config: dict) -> dict:
     """Score every case, retaining failed answerable queries in denominators."""
     rows = []
@@ -361,12 +382,16 @@ def run_queries(service, dataset: list[dict], run: dict, config: dict) -> dict:
         stage_timings = []
         details = {}
         warmup_status = "not_attempted"
+        warmup_diagnostics = None
         try:
             # A run-level warmup misses lazy state keyed by query or video scope.
             # Failure is a failed query, never an omitted latency sample in a
             # report that could pass an experiment gate.
             warmup_status = "failed"
-            _check_response(_retrieve(service, query, run, config), run)
+            warmup_response = _retrieve(service, query, run, config)
+            details = warmup_response.get("details") or {}
+            warmup_diagnostics = _warmup_diagnostics(details)
+            _check_response(warmup_response, run)
             warmup_status = "completed"
             for repetition in range(config["latency_repetitions"]):
                 stage_timings.append(
@@ -425,6 +450,7 @@ def run_queries(service, dataset: list[dict], run: dict, config: dict) -> dict:
                 "ranked_ids": ranked_ids,
                 "error": error,
                 "warmup_status": warmup_status,
+                "warmup_diagnostics": warmup_diagnostics,
                 "latency_ms": latencies,
                 "stage_timings_ms": stage_timings,
                 "judged_fraction": sum(
