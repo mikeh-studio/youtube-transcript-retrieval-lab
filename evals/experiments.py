@@ -60,6 +60,14 @@ def _report(report, run_name=None):
     policy = provenance.get("timing_policy")
     if not isinstance(policy, dict) or not policy:
         raise ValueError("missing timing policy")
+    if (
+        policy.get("warmup") != "one_untimed_checked_call_per_query"
+        or policy.get("warmup_excluded") is not True
+        or policy.get("setup_excluded") is not True
+        or policy.get("scope") != "application_retrieval"
+        or policy.get("p95") != "nearest_rank"
+    ):
+        raise ValueError("unsupported timing policy: latency comparison requires checked per-query warmup")
     runs = report.get("runs")
     if (
         not isinstance(runs, list)

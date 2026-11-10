@@ -304,6 +304,8 @@ def _summary(rows: list[dict]) -> dict:
         "answerable_query_count": sum(not row["unanswerable"] for row in rows),
         "unanswerable_query_count": sum(row["unanswerable"] for row in rows),
         "failed_query_count": sum(row["error"] is not None for row in rows),
+        "warmup_attempted_count": sum(row["warmup_status"] != "not_attempted" for row in rows),
+        "warmup_failed_count": sum(row["warmup_status"] == "failed" for row in rows),
         "metrics": metrics,
         "metrics_ci95": intervals,
         "latency_ms": _latencies(
@@ -313,6 +315,44 @@ def _summary(rows: list[dict]) -> dict:
     }
 
 
+def _retrieve(service, query: dict, run: dict, config: dict) -> dict:
+    """Use identical retrieval arguments for warm and timed calls."""
+    return service.retrieve(
+        query["query"],
+        k=config["top_k"],
+        language=query["language"],
+        retrieval_mode=run["retrieval_mode"],
+        retrieval_profile=run.get("retrieval_profile"),
+        reranker=run["reranker"],
+        video_ids=query.get("video_ids"),
+    )
+
+
+def _check_response(response: dict, run: dict) -> None:
+    """Reject failed or degraded retrieval on warm and timed calls alike."""
+    details = response.get("details") or {}
+    stages = details.get("stages", {})
+    if details.get("status") not in {"ok", "no_matches"} or any(
+        stages.get(name, {}).get("status")
+        not in (
+            {"ok", "no_matches"}
+            if run["retrieval_mode"] in {name, "hybrid"}
+            else {"skipped"}
+        )
+        or stages.get(name, {}).get("error_type")
+        for name in ("dense", "lexical")
+    ):
+        raise ContractError(
+            "application retrieval success diagnostics missing, invalid, failed or degraded"
+        )
+    results = response["results"]
+    reranker = details.get("reranker") or {}
+    if run["reranker"] == "cross_encoder" and (
+        reranker.get("error") or (results and not reranker.get("applied"))
+    ):
+        raise ContractError("requested cross-encoder was not applied successfully")
+
+
 def run_queries(service, dataset: list[dict], run: dict, config: dict) -> dict:
     """Score every case, retaining failed answerable queries in denominators."""
     rows = []
@@ -320,7 +360,14 @@ def run_queries(service, dataset: list[dict], run: dict, config: dict) -> dict:
         ranked_ids, latencies, error = [], [], None
         stage_timings = []
         details = {}
+        warmup_status = "not_attempted"
         try:
+            # A run-level warmup misses lazy state keyed by query or video scope.
+            # Failure is a failed query, never an omitted latency sample in a
+            # report that could pass an experiment gate.
+            warmup_status = "failed"
+            _check_response(_retrieve(service, query, run, config), run)
+            warmup_status = "completed"
             for repetition in range(config["latency_repetitions"]):
                 stage_timings.append(
                     {
@@ -330,15 +377,7 @@ def run_queries(service, dataset: list[dict], run: dict, config: dict) -> dict:
                 )
                 started = time.perf_counter()
                 try:
-                    response = service.retrieve(
-                        query["query"],
-                        k=config["top_k"],
-                        language=query["language"],
-                        retrieval_mode=run["retrieval_mode"],
-                        retrieval_profile=run.get("retrieval_profile"),
-                        reranker=run["reranker"],
-                        video_ids=query.get("video_ids"),
-                    )
+                    response = _retrieve(service, query, run, config)
                 finally:
                     latencies.append((time.perf_counter() - started) * 1000)
                 details = response.get("details") or {}
@@ -348,28 +387,8 @@ def run_queries(service, dataset: list[dict], run: dict, config: dict) -> dict:
                         "status": stage.get("status", "not_reported"),
                         "duration_ms": stage.get("duration_ms"),
                     }
-                stages = details.get("stages", {})
-                if details.get("status") not in {"ok", "no_matches"} or any(
-                    stages.get(name, {}).get("status")
-                    not in (
-                        {"ok", "no_matches"}
-                        if run["retrieval_mode"] in {name, "hybrid"}
-                        else {"skipped"}
-                    )
-                    or stages.get(name, {}).get("error_type")
-                    for name in ("dense", "lexical")
-                ):
-                    raise ContractError(
-                        "application retrieval success diagnostics missing, invalid, failed or degraded"
-                    )
+                _check_response(response, run)
                 results = response["results"]
-                reranker = details.get("reranker") or {}
-                if run["reranker"] == "cross_encoder" and (
-                    reranker.get("error") or (results and not reranker.get("applied"))
-                ):
-                    raise ContractError(
-                        "requested cross-encoder was not applied successfully"
-                    )
                 current_ids = [
                     f"{row['video_id']}:{int(row['chunk_index'])}" for row in results
                 ]
@@ -405,6 +424,7 @@ def run_queries(service, dataset: list[dict], run: dict, config: dict) -> dict:
                 "metrics": metrics,
                 "ranked_ids": ranked_ids,
                 "error": error,
+                "warmup_status": warmup_status,
                 "latency_ms": latencies,
                 "stage_timings_ms": stage_timings,
                 "judged_fraction": sum(
@@ -517,7 +537,7 @@ def _run_benchmark(
             "Retrieval only: no generated-answer, abstention, acquisition or provider evaluation.",
             "Recall and nDCG are relative to supplied judgments; unjudged chunks count as nonrelevant.",
             "Unanswerable cases have null ranking metrics; returned results do not measure answer abstention.",
-            "Latency includes application retrieval, excludes model loading/index building, and uses a shared warm process.",
+            "Latency includes application retrieval after one untimed, checked call per query; model loading and index building are excluded, including lazy first-use work for that query and scope.",
             "No promotion decision is produced by this pilot runner.",
         ],
         "provenance": {
@@ -573,7 +593,8 @@ def _run_benchmark(
                 "scope": "application_retrieval",
                 "setup_excluded": True,
                 "repetitions": config["latency_repetitions"],
-                "warmup": "none",
+                "warmup": "one_untimed_checked_call_per_query",
+                "warmup_excluded": True,
                 "process": "shared_across_queries_and_runs",
                 "p95": "nearest_rank",
             },

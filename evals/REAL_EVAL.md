@@ -164,10 +164,16 @@ The local `results.json` contains:
   failure counts, and seeded query-bootstrap 95% intervals (10,000 resamples).
   Failed answerable queries receive zero scores and remain in denominators.
   Unanswerable queries are retained with null ranking metrics.
-- p50 and p95 retrieval timings, with nearest-rank p95. They include application
-  retrieval and exclude startup/index construction. The shared process has no
-  explicit warmup; later requests benefit from caches. Setup time is separate. Per-stage dense/lexical durations and statuses are
-  retained for every repetition; skipped and unavailable stage timings are explicit.
+- p50 and p95 retrieval timings, with nearest-rank p95. Each query gets one
+  untimed, checked retrieval immediately before its timed repetitions, using
+  the same query, video scope, retrieval mode, profile, and reranker. This
+  excludes model startup, index construction, and first-use work that occurs
+  during that warmup from latency samples. Warmup failures fail the query and
+  the report; they are counted separately, never silently omitted. The shared
+  process and its caches still affect later calls, so these are warm-process
+  pilot timings, not cold-start or production latency estimates. Setup time
+  is separate. Per-stage dense/lexical durations and statuses are retained
+  for every timed repetition; skipped and unavailable stage timings are explicit.
 
 Recall and nDCG are relative to the supplied positive judgments. Unjudged
 chunks count as nonrelevant, so incomplete judgments can distort comparisons;

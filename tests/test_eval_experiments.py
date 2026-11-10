@@ -18,7 +18,14 @@ def report(score=0.5, p95=20, ranking=None):
             "corpus_sha256": "corpus",
             "scoring_version": "graded_v1",
             "evidence_level": "user_asserted_reviewed",
-            "timing_policy": {"clock": "perf_counter", "p95": "nearest_rank"},
+            "timing_policy": {
+                "clock": "perf_counter",
+                "scope": "application_retrieval",
+                "setup_excluded": True,
+                "warmup": "one_untimed_checked_call_per_query",
+                "warmup_excluded": True,
+                "p95": "nearest_rank",
+            },
             "embedding": {
                 "backend": "sentence_transformers",
                 "model": "e5",
@@ -86,6 +93,22 @@ def test_performance_requires_quality_noninferiority_and_latency():
     )["passed"]
     with pytest.raises(ValueError):
         compare(report(), report(), "performance")
+
+
+def test_latency_comparison_rejects_legacy_or_unchecked_warmup_policy():
+    for change in (
+        lambda policy: policy.pop("warmup"),
+        lambda policy: policy.update(warmup="none"),
+        lambda policy: policy.update(warmup_excluded=False),
+    ):
+        candidate = report(0.49, 10)
+        change(candidate["provenance"]["timing_policy"])
+        with pytest.raises(ValueError, match="timing policy"):
+            compare(report(), candidate, "performance", noninferiority_margin=0.02)
+    legacy = report(0.49, 10)
+    legacy["provenance"]["timing_policy"] = {"clock": "perf_counter", "p95": "nearest_rank"}
+    with pytest.raises(ValueError, match="timing policy"):
+        compare(legacy, copy.deepcopy(legacy), "performance", noninferiority_margin=0.02)
 
 
 def test_refactor_requires_fixed_rankings():

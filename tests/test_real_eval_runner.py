@@ -74,7 +74,9 @@ def test_mixed_unanswerable_and_failed_queries_keep_denominators():
     assert result["metrics_ci95"]["recall@5"]["n"] == 2
     assert all(value is None for value in result["per_query"][2]["metrics"].values())
     assert result["per_query"][1]["error"] == "RuntimeError"
-    assert result["latency_ms"]["samples"] == 3
+    assert result["latency_ms"]["samples"] == 2
+    assert result["warmup_attempted_count"] == 3
+    assert result["warmup_failed_count"] == 1
 
 
 def test_degraded_successful_fallback_is_still_failed():
@@ -138,6 +140,69 @@ def test_successful_empty_retrieval_is_a_scored_miss():
     )
     assert result["failed_query_count"] == 0
     assert result["metrics"]["ndcg@10"] == 0
+
+
+def test_per_query_warmup_excludes_first_use_and_preserves_scope(monkeypatch):
+    from evals import real_runner
+
+    clock = [0.0]
+    calls = []
+
+    class LazyService(SyntheticService):
+        def retrieve(self, query, **kwargs):
+            calls.append((query, kwargs["video_ids"]))
+            clock[0] += 1.0 if sum(name == query for name, _ in calls) == 1 else 0.001
+            return super().retrieve(query, **kwargs)
+
+    monkeypatch.setattr(real_runner.time, "perf_counter", lambda: clock[0])
+    dataset = [query("first"), query("second")]
+    dataset[0]["video_ids"] = ["first-video"]
+    dataset[1]["video_ids"] = ["second-video"]
+    result = run_queries(
+        LazyService(),
+        dataset,
+        {"name": "unit", "retrieval_mode": "dense", "reranker": "none"},
+        {"top_k": 10, "latency_repetitions": 2},
+    )
+    assert calls == [
+        ("first", ["first-video"]),
+        ("first", ["first-video"]),
+        ("first", ["first-video"]),
+        ("second", ["second-video"]),
+        ("second", ["second-video"]),
+        ("second", ["second-video"]),
+    ]
+    assert result["warmup_attempted_count"] == 2
+    assert result["warmup_failed_count"] == 0
+    assert result["latency_ms"]["samples"] == 4
+    assert result["latency_ms"]["p95"] == pytest.approx(1.0)
+
+
+def test_failed_warmup_is_a_scored_failure_without_timed_samples():
+    class WarmupFailsOnce(SyntheticService):
+        def __init__(self):
+            self.calls = 0
+
+        def retrieve(self, query, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("private failure detail")
+            return super().retrieve(query, **kwargs)
+
+    service = WarmupFailsOnce()
+    result = run_queries(
+        service,
+        [query()],
+        {"name": "unit", "retrieval_mode": "dense", "reranker": "none"},
+        {"top_k": 10, "latency_repetitions": 2},
+    )
+    assert service.calls == 1
+    assert result["failed_query_count"] == 1
+    assert result["warmup_failed_count"] == 1
+    assert result["per_query"][0]["warmup_status"] == "failed"
+    assert result["per_query"][0]["error"] == "RuntimeError"
+    assert result["per_query"][0]["metrics"]["ndcg@10"] == 0
+    assert result["latency_ms"]["samples"] == 0
 
 
 def test_requested_reranker_cannot_silently_fall_back():
