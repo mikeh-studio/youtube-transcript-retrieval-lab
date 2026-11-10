@@ -196,13 +196,14 @@
           <img src="./icons/icon-chat.svg" alt="" aria-hidden="true" />
           <span id="metricsHeading">Metrics</span>
         </h2>
+        <p id="metricsStatus" aria-live="polite"></p>
         <div class="split eval-metric-cards">
           <article class="chart-panel">
             <h3 class="chart-heading">Precision@K</h3>
             <p id="metricPrecision" class="metric-value">-</p>
           </article>
           <article class="chart-panel">
-            <h3 class="chart-heading">Recall@K</h3>
+            <h3 id="metricRecallHeading" class="chart-heading">Labeled-pool coverage</h3>
             <p id="metricRecall" class="metric-value">-</p>
           </article>
           <article class="chart-panel">
@@ -220,7 +221,7 @@
               <tr>
                 <th id="thMetricQuery">query</th>
                 <th id="thMetricPAtK">P@K</th>
-                <th id="thMetricRecall">Recall@K</th>
+                <th id="thMetricRecall">Labeled-pool coverage</th>
                 <th id="thMetricMRR">MRR</th>
                 <th id="thMetricNDCG">nDCG@K</th>
                 <th id="thMetricLabeled">labeled</th>

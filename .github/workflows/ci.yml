@@ -30,6 +30,11 @@ jobs:
       - name: Run repository test suite
         run: pytest tests/ -q
 
+      - name: Check offline evaluation entry points
+        run: |
+          python -m evals.real_runner --help
+          python -m evals.experiments compare --help
+
       - name: Run chunking regression suite
         run: HF_HUB_OFFLINE=1 pytest multilingual/tests/test_chunking_strategies.py -q
 

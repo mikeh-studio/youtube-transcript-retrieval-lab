@@ -1,7 +1,8 @@
 import { expect, test } from "./fixtures";
 
 
-test("runs an Evaluation query set with the agentic tool strategy", async ({ page }) => {
+for (const retrievalStatus of ["ok", "degraded"]) {
+test(`runs an Evaluation query set with ${retrievalStatus} agentic retrieval`, async ({ page }) => {
   const requestBodies = [];
   await page.addInitScript(() => {
     localStorage.setItem("yt_rag_ingest_unlocked", "1");
@@ -63,6 +64,11 @@ test("runs an Evaluation query set with the agentic tool strategy", async ({ pag
           url: "https://www.youtube.com/watch?v=vid1&t=30s",
         }],
         retrieval_details: {
+          status: retrievalStatus,
+          stages: {
+            dense: { status: retrievalStatus === "degraded" ? "error" : "skipped" },
+            lexical: { status: "ok" },
+          },
           agentic_retrieval: {
             final_tool: "read_context",
             attempts: [
@@ -102,4 +108,25 @@ test("runs an Evaluation query set with the agentic tool strategy", async ({ pag
     "Keyword · Japanese BM25",
     "Raw transcript context",
   ]);
+  await expect(page.locator("#metricsStatus")).toContainText("incomplete");
+  await expect(page.locator("#metricRecall")).toHaveText("-");
+  await page.locator('[data-label="unsure"]').click();
+  await expect(page.locator("#metricsStatus")).toContainText("incomplete");
+  await page.locator('[data-label="relevant"]').click();
+  if (retrievalStatus === "degraded") {
+    await expect(page.locator("#metricsStatus")).toContainText("incomplete (1/1");
+    await expect(page.locator("#metricRecall")).toHaveText("-");
+    await expect(page.locator("#metricPrecision")).toHaveText("-");
+    await expect(page.locator("#metricsTableBody")).toContainText("(error)");
+  } else {
+    await expect(page.locator("#metricsStatus")).toContainText("status: complete");
+    await expect(page.locator("#metricRecall")).toHaveText("1.000");
+  }
+  const screenshotPath = retrievalStatus === "degraded"
+    ? process.env.EVAL_ERROR_SCREENSHOT_PATH
+    : process.env.EVAL_SCREENSHOT_PATH;
+  if (screenshotPath) {
+    await page.screenshot({ path: screenshotPath, fullPage: true });
+  }
 });
+}

@@ -1,0 +1,413 @@
+"""Synthetic unit tests of failure accounting; these are not benchmark results."""
+
+import json
+import socket
+from types import SimpleNamespace
+
+import pytest
+
+from evals.contracts import ContractError
+from evals.real_runner import (
+    _latencies,
+    _reserve_output,
+    offline_runtime,
+    resolve_snapshot,
+    run_benchmark,
+    run_queries,
+    verify_index,
+)
+from tests.test_real_eval_contracts import private_inputs  # noqa: F401
+
+
+def query(query_id="ok", *, unanswerable=False):
+    return {
+        "id": query_id,
+        "query": query_id,
+        "language": "en",
+        "group": "synthetic",
+        "query_type": "factual",
+        "difficulty": "easy",
+        "unanswerable": unanswerable,
+        "judgments": {"synthetic:0": 0 if unanswerable else 2},
+    }
+
+
+class SyntheticService:
+    def retrieve(self, query, **kwargs):
+        if query == "broken":
+            raise RuntimeError("message is deliberately not copied to reports")
+        if query == "degraded":
+            return {
+                "results": [{"video_id": "synthetic", "chunk_index": 0}],
+                "details": {"status": "degraded"},
+            }
+        return {
+            "results": [{"video_id": "synthetic", "chunk_index": 0}],
+            "details": {
+                "status": "ok",
+                "reranker": {"applied": False},
+                "stages": {
+                    name: {
+                        "status": "ok"
+                        if kwargs["retrieval_mode"] in {name, "hybrid"}
+                        else "skipped",
+                        "duration_ms": 1.0,
+                    }
+                    for name in ("dense", "lexical")
+                },
+            },
+        }
+
+
+def test_mixed_unanswerable_and_failed_queries_keep_denominators():
+    run = {"name": "unit", "retrieval_mode": "dense", "reranker": "none"}
+    result = run_queries(
+        SyntheticService(),
+        [query(), query("broken"), query("unanswerable", unanswerable=True)],
+        run,
+        {"top_k": 10, "latency_repetitions": 1},
+    )
+    assert result["query_count"] == 3
+    assert result["answerable_query_count"] == 2
+    assert result["failed_query_count"] == 1
+    assert result["metrics"]["recall@5"] == 0.5
+    assert result["metrics_ci95"]["recall@5"]["n"] == 2
+    assert all(value is None for value in result["per_query"][2]["metrics"].values())
+    assert result["per_query"][1]["error"] == "RuntimeError"
+    assert result["latency_ms"]["samples"] == 2
+    assert result["warmup_attempted_count"] == 3
+    assert result["warmup_failed_count"] == 1
+
+
+def test_degraded_successful_fallback_is_still_failed():
+    result = run_queries(
+        SyntheticService(),
+        [query("degraded")],
+        {"name": "unit", "retrieval_mode": "hybrid", "reranker": "none"},
+        {"top_k": 10, "latency_repetitions": 1},
+    )
+    assert result["failed_query_count"] == 1
+    assert result["metrics"]["ndcg@10"] == 0
+
+
+@pytest.mark.parametrize(
+    "details",
+    [
+        {},
+        {"status": "unknown"},
+        {"status": "ok"},
+        {"status": "ok", "stages": {"dense": {"status": "skipped"}}},
+        {"status": "ok", "stages": {"dense": {"status": "unknown"}}},
+        {"status": "ok", "stages": {"dense": {"status": "error"}}},
+    ],
+)
+def test_missing_or_invalid_success_diagnostics_fail_closed(details):
+    class InvalidDiagnostics(SyntheticService):
+        def retrieve(self, query, **kwargs):
+            response = super().retrieve(query, **kwargs)
+            response["details"] = details
+            return response
+
+    result = run_queries(
+        InvalidDiagnostics(),
+        [query()],
+        {"name": "unit", "retrieval_mode": "dense", "reranker": "none"},
+        {"top_k": 10, "latency_repetitions": 1},
+    )
+    assert result["failed_query_count"] == 1
+    assert result["metrics"]["ndcg@10"] == 0
+
+
+def test_successful_empty_retrieval_is_a_scored_miss():
+    class EmptyService:
+        def retrieve(self, query, **kwargs):
+            return {
+                "results": [],
+                "details": {
+                    "status": "no_matches",
+                    "stages": {
+                        "dense": {"status": "no_matches", "duration_ms": 1.0},
+                        "lexical": {"status": "skipped", "duration_ms": 0.0},
+                    },
+                },
+            }
+
+    result = run_queries(
+        EmptyService(),
+        [query()],
+        {"name": "unit", "retrieval_mode": "dense", "reranker": "none"},
+        {"top_k": 10, "latency_repetitions": 1},
+    )
+    assert result["failed_query_count"] == 0
+    assert result["metrics"]["ndcg@10"] == 0
+
+
+def test_per_query_warmup_excludes_first_use_and_preserves_scope(monkeypatch):
+    from evals import real_runner
+
+    clock = [0.0]
+    calls = []
+
+    class LazyService(SyntheticService):
+        def retrieve(self, query, **kwargs):
+            calls.append((query, kwargs["video_ids"]))
+            clock[0] += 1.0 if sum(name == query for name, _ in calls) == 1 else 0.001
+            return super().retrieve(query, **kwargs)
+
+    monkeypatch.setattr(real_runner.time, "perf_counter", lambda: clock[0])
+    dataset = [query("first"), query("second")]
+    dataset[0]["video_ids"] = ["first-video"]
+    dataset[1]["video_ids"] = ["second-video"]
+    result = run_queries(
+        LazyService(),
+        dataset,
+        {"name": "unit", "retrieval_mode": "dense", "reranker": "none"},
+        {"top_k": 10, "latency_repetitions": 2},
+    )
+    assert calls == [
+        ("first", ["first-video"]),
+        ("first", ["first-video"]),
+        ("first", ["first-video"]),
+        ("second", ["second-video"]),
+        ("second", ["second-video"]),
+        ("second", ["second-video"]),
+    ]
+    assert result["warmup_attempted_count"] == 2
+    assert result["warmup_failed_count"] == 0
+    assert result["latency_ms"]["samples"] == 4
+    assert result["latency_ms"]["p95"] == pytest.approx(1.0)
+
+
+def test_failed_warmup_is_a_scored_failure_without_timed_samples():
+    class WarmupFailsOnce(SyntheticService):
+        def __init__(self):
+            self.calls = 0
+
+        def retrieve(self, query, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("private failure detail")
+            return super().retrieve(query, **kwargs)
+
+    service = WarmupFailsOnce()
+    result = run_queries(
+        service,
+        [query()],
+        {"name": "unit", "retrieval_mode": "dense", "reranker": "none"},
+        {"top_k": 10, "latency_repetitions": 2},
+    )
+    assert service.calls == 1
+    assert result["failed_query_count"] == 1
+    assert result["warmup_failed_count"] == 1
+    assert result["per_query"][0]["warmup_status"] == "failed"
+    assert result["per_query"][0]["error"] == "RuntimeError"
+    assert result["per_query"][0]["metrics"]["ndcg@10"] == 0
+    assert result["latency_ms"]["samples"] == 0
+
+
+def test_failed_warmup_preserves_stage_type_without_untimed_duration():
+    class StageFails(SyntheticService):
+        def retrieve(self, query, **kwargs):
+            return {
+                "results": [{"video_id": "synthetic", "chunk_index": 0}],
+                "details": {
+                    "status": "degraded",
+                    "duration_ms": 999.0,
+                    "stages": {
+                        "dense": {
+                            "status": "error",
+                            "duration_ms": 998.0,
+                            "error_type": "RuntimeError",
+                        },
+                        "lexical": {"status": "skipped", "duration_ms": 0.0},
+                    },
+                },
+            }
+
+    result = run_queries(
+        StageFails(),
+        [query()],
+        {"name": "unit", "retrieval_mode": "dense", "reranker": "none"},
+        {"top_k": 10, "latency_repetitions": 2},
+    )
+    row = result["per_query"][0]
+    assert row["retrieval_status"] == "degraded"
+    assert row["warmup_status"] == "failed"
+    assert row["warmup_diagnostics"]["status"] == "degraded"
+    assert row["warmup_diagnostics"]["stages"]["dense"] == {
+        "status": "error",
+        "error_type": "RuntimeError",
+    }
+    assert "duration_ms" not in str(row["warmup_diagnostics"])
+    assert row["error"] is not None
+    assert row["metrics"]["ndcg@10"] == 0
+    assert result["failed_query_count"] == 1
+    assert result["latency_ms"]["samples"] == 0
+    assert result["stage_latency_ms"]["dense"]["samples"] == 0
+
+
+def test_requested_reranker_cannot_silently_fall_back():
+    result = run_queries(
+        SyntheticService(),
+        [query()],
+        {"name": "unit", "retrieval_mode": "dense", "reranker": "cross_encoder"},
+        {"top_k": 10, "latency_repetitions": 1},
+    )
+    assert result["failed_query_count"] == 1
+    assert result["metrics"]["mrr@10"] == 0
+    assert "cross-encoder" in result["per_query"][0]["error"]
+
+
+def test_warmup_reranker_error_is_visible_without_private_message():
+    class RerankerFails(SyntheticService):
+        def retrieve(self, query, **kwargs):
+            response = super().retrieve(query, **kwargs)
+            response["details"]["reranker"] = {
+                "requested": "cross_encoder",
+                "applied": False,
+                "error": "private model path must stay local",
+            }
+            return response
+
+    result = run_queries(
+        RerankerFails(),
+        [query()],
+        {"name": "unit", "retrieval_mode": "dense", "reranker": "cross_encoder"},
+        {"top_k": 10, "latency_repetitions": 1},
+    )
+    diagnostics = result["per_query"][0]["warmup_diagnostics"]
+    assert diagnostics["reranker"] == {
+        "requested": "cross_encoder",
+        "applied": False,
+        "error": True,
+    }
+    assert "private model path" not in str(diagnostics)
+    assert result["failed_query_count"] == 1
+    assert result["latency_ms"]["samples"] == 0
+
+
+def test_snapshot_must_exist_without_download(tmp_path, monkeypatch):
+    monkeypatch.setenv("HF_HUB_CACHE", str(tmp_path))
+    with pytest.raises(ContractError, match="not cached locally"):
+        resolve_snapshot("intfloat/multilingual-e5-base", "a" * 40)
+    with pytest.raises(ContractError, match="exact Hugging Face"):
+        resolve_snapshot("intfloat/multilingual-e5-base", "a" * 40, str(tmp_path))
+
+
+def test_index_mismatch_fails():
+    metadata = {"backend": "sentence_transformers", "model": "e5", "dim": 4}
+    library = SimpleNamespace(
+        index_embedding_metadata=dict(metadata),
+        _preserve_saved_index=False,
+        videos={"video": {"chunks": [{}]}},
+        chunk_map=[("video", 0)],
+        index=SimpleNamespace(ntotal=1, d=4),
+    )
+    verify_index(library, metadata)
+    library.index_embedding_metadata = {"backend": "hashing"}
+    with pytest.raises(ContractError, match="provenance"):
+        verify_index(library, metadata)
+    library.index_embedding_metadata = metadata
+    library.index.d = 5
+    with pytest.raises(ContractError, match="dimension"):
+        verify_index(library, metadata)
+
+
+def test_offline_runtime_blocks_network_and_restores_environment(tmp_path, monkeypatch):
+    monkeypatch.setenv("HF_HUB_OFFLINE", "original")
+    with offline_runtime(
+        {"model": "intfloat/multilingual-e5-base", "revision": "a" * 40}, tmp_path
+    ):
+        with (
+            socket.socket() as connection,
+            pytest.raises(RuntimeError, match="network access disabled"),
+        ):
+            connection.connect(("127.0.0.1", 443))
+        import os
+
+        assert os.environ["HF_HUB_OFFLINE"] == "1"
+    assert os.environ["HF_HUB_OFFLINE"] == "original"
+
+
+def test_model_failure_writes_honest_private_report(
+    private_inputs,  # noqa: F811 - pytest fixture import
+    tmp_path,
+    monkeypatch,
+):
+    manifest, _, _, _, _ = private_inputs
+    config = tmp_path / "config.json"
+    config.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "runs": [{"name": "dense", "retrieval_mode": "dense"}],
+            }
+        )
+    )
+    monkeypatch.setenv("HF_HUB_CACHE", str(tmp_path / "empty-cache"))
+    result = run_benchmark(manifest, config, tmp_path / "report")
+    assert result["status"] == "failed"
+    assert result["runs"] == []
+    assert "not cached locally" in result["errors"][0]
+    assert result["provenance"]["embedding"]["backend"] == "not_loaded"
+    report = tmp_path / "report" / "results.json"
+    assert report.stat().st_mode & 0o777 == 0o600
+    assert result["provenance"]["corpus_sha256"]
+    assert result["provenance"]["git"]["source_tree_sha256"]
+
+
+def test_latency_quantiles_are_explicit():
+    assert _latencies(list(range(1, 21)))["p95"] == 19
+    assert _latencies([1, 3])["p50"] == 2
+    assert _latencies([])["samples"] == 0
+
+
+def test_reports_are_immutable_and_concurrent_runs_are_refused(
+    private_inputs,  # noqa: F811 - pytest fixture import
+    tmp_path,
+    monkeypatch,
+):
+    manifest, _, _, _, _ = private_inputs
+    config = tmp_path / "config.json"
+    config.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "runs": [{"name": "dense", "retrieval_mode": "dense"}],
+            }
+        )
+    )
+    monkeypatch.setenv("HF_HUB_CACHE", str(tmp_path / "empty-cache"))
+    out = tmp_path / "report"
+    run_benchmark(manifest, config, out)
+    original = (out / "results.json").read_bytes()
+    with pytest.raises(ContractError, match="overwrite"):
+        run_benchmark(manifest, config, out)
+    assert (out / "results.json").read_bytes() == original
+    other = tmp_path / "concurrent"
+    with _reserve_output(other), pytest.raises(ContractError, match="another run"):
+        run_benchmark(manifest, config, other)
+    assert not (other / ".real-eval.lock").exists()
+
+
+def test_per_stage_timing_preserves_skipped_and_unavailable_statuses():
+    class TimedService(SyntheticService):
+        def retrieve(self, query, **kwargs):
+            response = super().retrieve(query, **kwargs)
+            response["details"]["stages"] = {
+                "dense": {"status": "ok", "duration_ms": 4.0},
+                "lexical": {"status": "skipped", "duration_ms": 0.0},
+            }
+            return response
+
+    result = run_queries(
+        TimedService(),
+        [query()],
+        {"name": "unit", "retrieval_mode": "dense", "reranker": "none"},
+        {"top_k": 10, "latency_repetitions": 2},
+    )
+    assert result["stage_latency_ms"]["dense"]["p50"] == 4.0
+    assert result["stage_latency_ms"]["dense"]["samples"] == 2
+    assert result["stage_latency_ms"]["lexical"]["samples"] == 0
+    assert result["stage_latency_ms"]["lexical"]["skipped_samples"] == 2
+    assert len(result["per_query"][0]["stage_timings_ms"]) == 2
