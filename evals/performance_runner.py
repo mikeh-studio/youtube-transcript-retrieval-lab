@@ -328,6 +328,7 @@ def install_offline_guard() -> None:
             "HF_HUB_OFFLINE": "1",
             "TRANSFORMERS_OFFLINE": "1",
             "HF_DATASETS_OFFLINE": "1",
+            "HF_HUB_DISABLE_IMPLICIT_TOKEN": "1",
             "PYTHON_DOTENV_DISABLED": "1",
             "YT_RAG_SKIP_GLOBAL_SERVICE": "1",
             "YT_RAG_FEEDBACK_TUNING": "0",
@@ -341,6 +342,11 @@ def install_offline_guard() -> None:
         "SAKANA_API_KEY",
         "FUGU_API_KEY",
         "YOUTUBE_API_KEY",
+        "GOOGLE_API_KEY",
+        "GEMINI_API_KEY",
+        "AZURE_OPENAI_API_KEY",
+        "HF_TOKEN",
+        "HUGGINGFACE_HUB_TOKEN",
     ):
         os.environ.pop(key, None)
 
@@ -510,7 +516,11 @@ def run(args: argparse.Namespace) -> dict:
             setup_ms["model_and_tokenizers"] = (time.perf_counter() - started) * 1000
 
             started = time.perf_counter()
-            library = VideoLibrary(data_dir=str(temp_data), processor=processor)
+            # The copied manifest would trigger VideoLibrary's auto-load and
+            # rebuild. Use a separate empty runtime directory to build once.
+            library = VideoLibrary(
+                data_dir=str(Path(temp) / "runtime"), processor=processor
+            )
             library.videos = videos
             library._rebuild_index()
             chunk_count = sum(len(v["chunks"]) for v in videos.values())
