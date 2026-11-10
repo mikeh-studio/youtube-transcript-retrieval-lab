@@ -23,8 +23,8 @@ sets offline environment flags and a socket guard before importing production
 modules, disables dotenv loading and global service creation, clears provider
 keys from its process environment, and rejects a hashing/model fallback. It
 does not ingest, fetch transcripts, invoke ASR, or load feedback. The chosen
-output directory must be new, private, and outside the repository and input
-trees. The runner writes read-only `workload.json` and `report.json` there, or
+output directory must be new, private, and outside the repository, source,
+snapshot, and cached model trees. The runner writes read-only `workload.json` and `report.json` there, or
 a `failure.json` with the exception type if setup or execution fails.
 
 ```sh
@@ -64,7 +64,9 @@ The report pins the source commit; corpus, workload, config, and rebuilt index
 hashes; actual embedding backend/model/revision/dimension; video and chunk
 counts; package and machine metadata; setup timings; per-request timings; and
 per-stage diagnostic status. It hashes the cached model files before and after
-the run and checks source checkout identity. Required English/Japanese query
+the run and checks source checkout identity. Status, tracked diff, and Python
+source tree hashes identify uncommitted code and detect changes during the run;
+the commit alone identifies the code only for a clean checkout. Required English/Japanese query
 tokenizers and Japanese morphological lexical tokenization must be available.
 The rebuilt index embeds each saved chunk's `embed_text` as stored; the runner
 does not regenerate or repair that text.
@@ -81,6 +83,8 @@ one-based `ceil(p*n)` item. Counts show attempted, successful, and failed or
 degraded calls for every phase and mode. A stage exception or degraded fallback
 is a failure even if it returns rows; such durations are excluded from the
 successful percentile distribution.
+Missing or unknown diagnostics and skipped requested stages also fail the
+sample. A completed `no_matches` stage remains a valid empty retrieval.
 
 Repeated snapshots compare ordered video/chunk IDs, start/end timestamps,
 scores, and SHA-256 hashes of evidence text. Exact parity on these fixed probes

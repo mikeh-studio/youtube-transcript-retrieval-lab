@@ -244,6 +244,28 @@ def _rank_signature(results: list[dict]) -> list[dict]:
     ]
 
 
+def _diagnostics_failed(details: dict, mode: str) -> bool:
+    """Require affirmative completion of every requested production stage."""
+    if not isinstance(details, dict) or details.get("status") not in {
+        "ok",
+        "no_matches",
+    }:
+        return True
+    stages = details.get("stages")
+    if not isinstance(stages, dict):
+        return True
+    for name in ("dense", "lexical"):
+        stage = stages.get(name)
+        allowed = {"ok", "no_matches"} if mode in {name, "hybrid"} else {"skipped"}
+        if (
+            not isinstance(stage, dict)
+            or stage.get("status") not in allowed
+            or stage.get("error_type")
+        ):
+            return True
+    return bool((details.get("reranker") or {}).get("error"))
+
+
 def measure_requests(
     service, workload: dict, config: dict = CONFIG
 ) -> tuple[list[dict], dict]:
@@ -270,14 +292,7 @@ def measure_requests(
                     elapsed = (time.perf_counter() - started) * 1000
                     details = outcome["details"]
                     stages = details.get("stages") or {}
-                    degraded = (
-                        details.get("status") in {"error", "degraded"}
-                        or any(
-                            stage.get("status") in {"error", "degraded"}
-                            for stage in stages.values()
-                        )
-                        or bool((details.get("reranker") or {}).get("error"))
-                    )
+                    degraded = _diagnostics_failed(details, mode)
                     status = "failed_or_degraded" if degraded else "ok"
                     ranks = _rank_signature(outcome["results"])
                     if status == "ok":
@@ -369,11 +384,34 @@ def _source_commit() -> str:
 
 def _code_provenance() -> dict:
     status = subprocess.check_output(
-        ["git", "status", "--porcelain"], cwd=REPO_ROOT, text=True
+        ["git", "status", "--porcelain=v1", "--untracked-files=all"], cwd=REPO_ROOT
     )
+    diff = subprocess.check_output(["git", "diff", "HEAD", "--binary"], cwd=REPO_ROOT)
+    paths = subprocess.check_output(
+        [
+            "git",
+            "ls-files",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            "-z",
+            "*.py",
+            "Makefile",
+        ],
+        cwd=REPO_ROOT,
+    )
+    source_digest = hashlib.sha256()
+    for relative in sorted(set(paths.split(b"\0")) - {b""}):
+        path = REPO_ROOT / os.fsdecode(relative)
+        if path.is_file():
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            source_digest.update(relative + b"\0" + digest.encode() + b"\0")
     return {
         "source_commit": _source_commit(),
         "worktree_clean": not bool(status.strip()),
+        "status_sha256": hashlib.sha256(status).hexdigest(),
+        "tracked_diff_sha256": hashlib.sha256(diff).hexdigest(),
+        "source_tree_sha256": source_digest.hexdigest(),
         "runner_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
     }
 
@@ -465,7 +503,9 @@ def run(args: argparse.Namespace) -> dict:
 
     code_provenance = _code_provenance()
     output = args.output.resolve()
-    _prepare_output(output, [REPO_ROOT, snapshot] + ([source] if source else []))
+    _prepare_output(
+        output, [REPO_ROOT, snapshot, model_path] + ([source] if source else [])
+    )
     setup_ms = {}
     install_offline_guard()
     os.environ["YT_RAG_EMBED_MODEL"] = "intfloat/multilingual-e5-large"

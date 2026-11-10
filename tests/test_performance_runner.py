@@ -1,6 +1,9 @@
 """Focused checks for the ungraded offline performance contract."""
 
 import json
+import subprocess
+from copy import deepcopy
+from types import SimpleNamespace
 
 import pytest
 
@@ -16,6 +19,7 @@ from evals.performance_runner import (
     validate_model_snapshot_path,
     validate_workload,
 )
+from evals import performance_runner
 
 
 def _videos():
@@ -133,6 +137,7 @@ class _Service:
                         "status": "error" if self.failed else "ok",
                         "error_type": "RuntimeError" if self.failed else None,
                     },
+                    "lexical": {"status": "skipped"},
                 },
                 "fallback": "lexical_only" if self.failed else None,
             },
@@ -175,3 +180,102 @@ def test_nearest_rank_is_explicit_for_small_samples():
     assert nearest_rank([], 0.95) is None
     assert nearest_rank([4, 1, 3, 2], 0.50) == 2
     assert nearest_rank([4, 1, 3, 2], 0.95) == 4
+
+
+@pytest.mark.parametrize(
+    "details",
+    [
+        {},
+        {"status": "unknown", "stages": {"dense": {"status": "ok"}}},
+        {"status": "ok"},
+        {"status": "ok", "stages": {}},
+        {"status": "ok", "stages": {"dense": {"status": "skipped"}}},
+        {"status": "ok", "stages": {"dense": {"status": "unknown"}}},
+    ],
+)
+def test_missing_or_invalid_diagnostics_are_failures(details):
+    outcome = _Service().retrieve("probe")
+    outcome["details"] = details
+    service = SimpleNamespace(retrieve=lambda *_args, **_kwargs: deepcopy(outcome))
+    config = {**CONFIG, "modes": ["dense"], "warm_repetitions": 1}
+    samples, parity = measure_requests(service, _one_query(), config)
+    assert all(sample["status"] == "failed_or_degraded" for sample in samples)
+    assert parity == {"q1:dense": False}
+    assert summarize_samples(samples)["warm:dense"]["p50_ms"] is None
+
+
+def test_no_matches_is_a_valid_completed_request():
+    outcome = {
+        "results": [],
+        "details": {
+            "status": "no_matches",
+            "stages": {
+                "dense": {"status": "no_matches"},
+                "lexical": {"status": "skipped"},
+            },
+        },
+    }
+    service = SimpleNamespace(retrieve=lambda *_args, **_kwargs: deepcopy(outcome))
+    config = {**CONFIG, "modes": ["dense"], "warm_repetitions": 1}
+    samples, parity = measure_requests(service, _one_query(), config)
+    assert all(sample["status"] == "ok" for sample in samples)
+    assert parity == {"q1:dense": True}
+
+
+def test_dirty_production_changes_have_distinct_provenance(monkeypatch, tmp_path):
+    def git(*args):
+        return subprocess.run(
+            ["git", *args], cwd=tmp_path, check=True, capture_output=True
+        )
+
+    git("init")
+    git("config", "user.name", "Test")
+    git("config", "user.email", "test@example.invalid")
+    source = tmp_path / "retrieval.py"
+    source.write_text("VERSION = 1\n")
+    git("add", "retrieval.py")
+    git("commit", "-m", "initial")
+    monkeypatch.setattr(performance_runner, "REPO_ROOT", tmp_path)
+    source.write_text("VERSION = 2\n")
+    first = performance_runner._code_provenance()
+    source.write_text("VERSION = 3\n")
+    second = performance_runner._code_provenance()
+    assert first["source_commit"] == second["source_commit"]
+    assert first["worktree_clean"] is second["worktree_clean"] is False
+    assert first != second
+    untracked = tmp_path / "helper.py"
+    untracked.write_text("VALUE = 1\n")
+    third = performance_runner._code_provenance()
+    untracked.write_text("VALUE = 2\n")
+    assert performance_runner._code_provenance() != third
+
+
+def test_output_cannot_modify_cached_model_input(monkeypatch, tmp_path):
+    snapshot = tmp_path / "data"
+    record = snapshot / "library" / "videos" / "id1" / "record.json"
+    record.parent.mkdir(parents=True)
+    record.write_text(json.dumps(_record("id1")))
+    (snapshot / "library" / "library.json").write_text(json.dumps({"videos": ["id1"]}))
+    model = (
+        tmp_path / "models--intfloat--multilingual-e5-large" / "snapshots" / ("a" * 40)
+    )
+    model.mkdir(parents=True)
+    (model / "modules.json").write_text("[]")
+    output = model / "results"
+    monkeypatch.setattr(performance_runner, "_code_provenance", lambda: {})
+
+    def unexpected_guard():
+        raise AssertionError("output isolation must run before offline execution")
+
+    monkeypatch.setattr(performance_runner, "install_offline_guard", unexpected_guard)
+    args = SimpleNamespace(
+        snapshot_data=snapshot,
+        source_data=None,
+        model_path=model,
+        model_revision=None,
+        output=output,
+        workload=None,
+    )
+    with pytest.raises(ValueError, match="outside"):
+        performance_runner.run(args)
+    assert not output.exists()
