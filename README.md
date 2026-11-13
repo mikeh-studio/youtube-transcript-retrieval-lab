@@ -90,7 +90,8 @@ miss required context; this is an unjudged workflow example, not measured accura
 | Area | Current evidence |
 | --- | --- |
 | Regression fixture | Small Japanese fixture with hand-authored dense scores. [Methods and limits](docs/evaluation.md#offline-benchmark). |
-| Real retrieval pilot | Offline, pinned-model runner for supplied private transcript chunks and reviewed judgments. No public quality result is established. [Run and interpret it](evals/REAL_EVAL.md). |
+| Real retrieval pilot | Offline, pinned-model runner for supplied private transcript chunks and reviewed judgments. [Run and interpret it](evals/REAL_EVAL.md). |
+| Development study | [Seven-arm EN+JA aggregate results](docs/evaluation-development-study.md), with paired uncertainty and mostly model-generated labels. No held-out accuracy claim. |
 | Retrieval defaults | Baseline RRF; experimental profiles and reranking are opt-in. |
 | Independent answer evaluation | Answer quality/cost remains incomplete. The 85% source-selection and underspecification-handling targets are unverified. |
 
