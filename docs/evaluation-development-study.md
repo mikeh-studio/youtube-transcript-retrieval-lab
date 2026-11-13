@@ -1,22 +1,46 @@
 # Bilingual retrieval development study
 
-Aggregate results from a local study completed on **13 November 2026**. Cleaning source framing before cross-encoder scoring and translating the lexical query each improved their declared development comparisons. These are separate interventions on exposed material, with mostly model-generated relevance labels. They do not establish held-out accuracy, a general winner or a production improvement. **Retrieval defaults are unchanged.**
+This **13 November 2026** study measures passage ranking within a known recording, not video discovery. It covers **21 answerable targets / 42 EN+JA forms**. **1,100/1,101 labels are model-only; no sufficient-passage label is human-confirmed.** These are exposed development results.
 
-## Population and comparison
+## Findings and declared effects
 
-The corpus contains seven saved caption editions: three English and four Japanese, totaling 450 overlapping chunks. There are 22 semantic targets with two equivalent query-language forms each (44 forms). Ranking metrics cover **21 answerable targets / 42 forms**, split into 21 same-language and 21 cross-language forms. One transcript-scoped negative target contributes two additional diagnostic forms; it is excluded from ranking aggregates. Each search was restricted to its designated recording: this measures passage ranking within a known source, not finding the right video across the library.
+1. **Original-query cross-encoder reranking performed poorly.** Its nDCG@10 was **0.3817**, the poorest control, versus **0.6262 dense** and **0.5902 hybrid**.
+2. **Arm A demonstrates sensitivity to query framing.** Cleaning source framing only before cross-encoder (CE) scoring raised observed nDCG to **0.7790**. The **+0.3974** effect is against that weak CE comparator, not dense or hybrid. Its hand-authored, source-specific rules do not establish superiority on unseen questions.
+3. **Arm B improves cross-language lexical retrieval.** Original cross-language questions were translated offline into the recording’s language and independently checked for equivalence; same-language questions passed through verbatim. Secondary translated hybrid adds the original dense query, without CE. Pure translated BM25 has no dense stage. **A and B were never combined.**
 
-The four controls are dense, BM25, hybrid, and hybrid with a cross-encoder (CE). Three additional arms isolate query inputs:
+| Declared comparison | Answerable forms | Absolute Δ nDCG@10 | Paired target 95% interval |
+| --- | ---: | ---: | --- |
+| A cleaned CE − original-query CE | 42 | +0.3974 | [0.2339, 0.5558] |
+| B translated BM25 − BM25 | 21 cross-language | +0.3289 | [0.1724, 0.4833] |
+| B translated hybrid − hybrid (secondary) | 21 cross-language | +0.2049 | [0.1173, 0.2997] |
 
-- **A: cleaned-query CE.** Remove one anchored source/program/episode framing span before CE scoring, preserving requested scope and every answer part. Eighteen hand-authored, source-specific rules for this exposed development set change 38 of 44 forms; six remain unchanged. Their generalization beyond this set is untested. Dense retrieval, BM25, passage text and the full pre-CE candidate list remain identical to the controls. Judgments use the original question.
-- **B: translated BM25.** Use a prepared, equivalence-reviewed query in the source language for BM25; native-language forms are exact identity controls.
-- **B secondary: translated hybrid.** Combine translated lexical retrieval with the original dense query. No CE is applied.
+Changes are absolute on the 0–1 nDCG scale, not relative percentages. B excludes unchanged native controls. Intervals condition on fixed rules/labels, excluding rule-selection and generalization uncertainty. Full aggregates and family sensitivity follow in the appendix.
 
-**A and B were never combined.** All four control top-ten lists reproduced the earlier saved rankings for every form. A retained the original pre-CE candidates. Both B arms retained native-language control rankings; only translated hybrid has a dense stage, which retains the original dense query. Translated BM25 is purely lexical. All seven arms are scored against one expanded common judgment pool.
+## Decision and tradeoff
 
-## Overall results
+**Defaults remain unchanged.** Cleaned CE has the highest observed nDCG, but warm p50 is **2775.00 ms**, versus **195.47 ms dense** and **177.73 ms hybrid**. Its p95 is **3741.28 ms**, versus **278.86 ms hybrid**, exceeding the provisional two-second development budget. A cleaned-CE-versus-hybrid paired comparison was not predeclared; no new interval is presented here.
 
-Means below use all 42 answerable forms, including one fully judged zero-positive pool scored as zero for every metric. A cleaned-query CE has the highest observed nDCG, while translated hybrid has the highest observed Hit@10. A point leader does not establish general superiority.
+Next, translated hybrid warrants fresh evaluation with measured automatic translation and human support checks. Published timings exclude prepared translation/review; live translation quality and end-to-end cost remain unmeasured.
+
+## Limits
+
+- No sealed holdout, representative source admission or source/audio fidelity validation. Source cohorts contain different topics, confounding source-language effects.
+- Broad human audit remains pending. Model agreement is not human correctness; positive averages conceal individual regressions.
+- Exploratory intervals have no multiplicity adjustment. Translations, overlapping chunks and timing repetitions are dependent; pooled recall is not exhaustive corpus recall.
+- Negative diagnostics do not test refusal, false-answer rates or full-audio absence; no answer/abstention mechanism was evaluated.
+- **The exact study is not reproducible from this checkout:** its private questions, labels and corpus, and local experiment-specific adapters, are unavailable here. The [public general-purpose runner](../evals/REAL_EVAL.md) accepts separately supplied inputs; it does not reproduce this experiment or install its transformations. [Evaluation guide](evaluation.md).
+
+## Appendix: population, methods and full aggregates
+
+### Population and controls
+
+Seven caption editions (three EN, four JA) contain 450 chunks and **seven episode families, one per edition**; families group related sources for resampling. The 22 targets / 44 forms include 21 answerable targets, split into 21 native and 21 cross-language forms, plus one negative target / two diagnostic forms.
+
+All four controls reproduced saved top-ten rankings for every form. A changes only the CE query, retaining dense/BM25 retrieval, passage text and pre-CE candidates. Eighteen source-specific rules change 38/44 forms; six are identities, with scope and all answer parts preserved. B retains native control rankings. Every arm is judged against the original question in one expanded exact-form pool.
+
+### Overall ranking metrics
+
+All means retain 42 answerable forms, including one fully judged zero-positive pool scored zero for every metric. Translated hybrid has the highest observed Hit@10; point leaders depend on the metric.
 
 | Arm | nDCG@10 | Hit@3 | Hit@10 | Pooled Recall@5 | Pooled Recall@10 | MRR@10 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -28,21 +52,9 @@ Means below use all 42 answerable forms, including one fully judged zero-positiv
 | B: translated BM25 | 0.6122 | 0.6429 | 0.8571 | 0.6905 | 0.7722 | 0.6234 |
 | B secondary: translated hybrid | 0.6927 | 0.7619 | 0.9048 | 0.6706 | 0.8214 | 0.6965 |
 
-## Declared paired effects
+### Query language → source language
 
-Differences are **absolute changes on the 0–1 nDCG scale**, not relative percentage improvements. A uses all 42 answerable forms; each B comparison uses only the 21 cross-language answerable forms. Averaging B over all forms would dilute its effect with unchanged native controls.
-
-| Comparison | Forms | Δ nDCG@10 | Target 95% interval | Family sensitivity 95% interval |
-| --- | ---: | ---: | --- | --- |
-| A cleaned CE − original-query CE | 42 | +0.3974 | [0.2339, 0.5558] | [0.2225, 0.5605] |
-| B translated BM25 − BM25 | 21 | +0.3289 | [0.1724, 0.4833] | [0.1568, 0.4935] |
-| B translated hybrid − hybrid (secondary) | 21 | +0.2049 | [0.1173, 0.2997] | [0.0909, 0.3279] |
-
-Intervals use 10,000 paired semantic-target bootstrap resamples, seed 20261112. Both language forms and all arm outcomes stay together. The sensitivity analysis resamples whole episode families and divides by the actual sampled form count. These percentile intervals condition on fixed labels; they exclude label error and have no multiplicity adjustment. With only 21 targets and seven families, they support exploratory development conclusions. Individual forms can regress despite positive averages.
-
-## Query language → source language
-
-The table reports mean nDCG@10. EN-source and JA-source cohorts contain different topics; differences between them cannot isolate a source-language effect. Translations of the same target are paired observations, not independent questions.
+Each cell is mean nDCG@10; counts in headers are forms. Small cells are descriptive. Both language forms of a target remain paired.
 
 | Arm | EN → EN (9) | JA → EN (9) | EN → JA (12) | JA → JA (12) |
 | --- | ---: | ---: | ---: | ---: |
@@ -54,25 +66,33 @@ The table reports mean nDCG@10. EN-source and JA-source cohorts contain differen
 | B: translated BM25 | 0.5250 | 0.4905 | 0.5930 | 0.7880 |
 | B secondary: translated hybrid | 0.5544 | 0.5369 | 0.7686 | 0.8372 |
 
-Small direction cells are descriptive. The overall matched JA-minus-EN nDCG difference for cleaned CE is −0.0257, with target 95% interval [−0.1519, 0.0768]; language parity is not established.
+The cleaned-CE **JA-query minus EN-query, matched by target**, nDCG difference is −0.0257, target 95% interval [−0.1519, 0.0768]; language parity is not established.
 
-## Labels and metric definitions
+### Labels, metrics and uncertainty
 
-The expanded pool contains **1,101 exact query-form/chunk pairs**: 915 labels carried forward unchanged and 186 newly pooled pairs with three independent model judgments each. Effective labels comprise **1,100 model-only items and one exact human-adjudicated item**. Model agreement or majority is not human gold. No grade-2 sufficient-passage label is human-confirmed. There are two separate audit cohorts: 53 earlier agreement flags and 24 newly judged uncertainty/low-confidence flags; a broad human audit remains pending. Labels remain specific to the original query form; a decision for one language form is not automatically transferred to its translation.
+The 1,101 exact form/chunk pairs comprise 915 unchanged labels and 186 new pairs with three independent model judgments each; one historical human decision is retained. Separate audit cohorts contain 53 earlier agreement flags and 24 new uncertainty/low-confidence flags. Labels and human decisions are form-specific, not automatically transferred to translations.
 
-- Grades are **0: no answer support; 1: partial support; 2: sufficient standalone support for the full question**.
-- **nDCG@10** discounts gains 0/1/3 by `1/log2(rank+1)`. Its ideal ranking uses the full common exact-form pool, truncated at ten.
-- **Hit@3/10** requires at least one grade-2 passage within the cutoff.
-- **Pooled Recall@5/10** counts retrieved grade-at-least-1 passages divided by all such positives in the common pool. It is not exhaustive corpus recall; overlapping chunks can represent related evidence.
-- **MRR@10** uses the reciprocal rank of the first grade-at-least-1 passage, or zero if none. Partial support can therefore earn reciprocal-rank credit without a complete answer.
+- **Grades:** 0 = no answer support; 1 = partial support; 2 = sufficient standalone support for the full question.
+- **nDCG@10:** gains 0/1/3 discounted by `1/log2(rank+1)`; ideal ranking from the full common exact-form pool, truncated at ten.
+- **Hit@3/10:** at least one grade-2 passage within the cutoff.
+- **Pooled Recall@5/10:** retrieved grade-at-least-1 passages divided by all such positives in the common pool. Overlapping chunks can represent related evidence.
+- **MRR@10:** reciprocal rank of the first grade-at-least-1 passage, or zero if none; partial support earns credit without a complete answer.
 
-Baseline and every challenger use the expanded pool. Changing that pool changes IDCG and Recall denominators even when baseline ranks are unchanged, so cross-study score changes must not be attributed to a retrieval change. Both negative forms returned candidates but no grade-2 item in the top ten for any arm. This does not test answer refusal, false-answer rates or full-audio absence.
+Baseline and challengers share the expanded pool. Changing its IDCG/Recall denominators shifts scores without changing ranks. Both negative forms returned candidates but no grade-2 top-ten item in any arm.
 
-## Configuration and measured cost
+Intervals use 10,000 paired semantic-target bootstrap resamples, seed 20261112, keeping both translations and all arm outcomes together. Sensitivity resamples whole episode families using the actual sampled form denominator. The three declared effects have these family intervals:
 
-The study uses `intfloat/multilingual-e5-large` at public model revision `3d7cfbdacd47fdda877c5cd8a79fbcc4f2a574f3` and `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1` at revision `1427fd652930e4ba29e8149678df786c240d8825`. Caption windows target 60 seconds with 15-second overlap, retaining whole caption segments. Each dense/lexical stage requests up to 80 edition-scoped candidates, equal reciprocal-rank fusion uses constant 60, and CE scores the first up-to-50 fused candidates. Every arm applies the same diversity selection and returns up to ten passages. Feedback tuning was disabled.
+| Declared comparison | Family sensitivity 95% interval |
+| --- | --- |
+| A cleaned CE − original-query CE | [0.2225, 0.5605] |
+| B translated BM25 − BM25 | [0.1568, 0.4935] |
+| B translated hybrid − hybrid (secondary) | [0.0909, 0.3279] |
 
-One CPU process loaded each model and built the index once. A fixed shuffled order covered 44 forms × seven arms, each with one untimed warmup and two timed repeats: **924 calls, 308 warmups and 616 timed observations**. Model/index construction is excluded from warm timings. These repetitions check stability; they are not additional independent questions.
+### Configuration and latency
+
+Models are `intfloat/multilingual-e5-large` at public revision `3d7cfbdacd47fdda877c5cd8a79fbcc4f2a574f3` and `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1` at revision `1427fd652930e4ba29e8149678df786c240d8825`. Caption windows target 60 seconds with 15-second overlap, retaining whole segments. Each dense/lexical stage requests up to 80 edition-scoped candidates. Equal reciprocal-rank fusion uses constant 60; CE scores the first up-to-50 fused candidates. Every arm applies the same diversity selection and returns up to ten passages. Feedback tuning was disabled.
+
+One CPU process loaded each model and built one index. Fixed shuffled tasks cover 44 forms × seven arms × one untimed warmup plus two timed repeats: **924 calls, 308 warmups, 616 timed observations**. Warm timings exclude construction.
 
 | Arm | Timed observations | Warm p50 ms | Warm p95 ms |
 | --- | ---: | ---: | ---: |
@@ -84,10 +104,4 @@ One CPU process loaded each model and built the index once. A fixed shuffled ord
 | B: translated BM25 | 88 | 5.54 | 7.64 |
 | B secondary: translated hybrid | 88 | 179.10 | 293.41 |
 
-Measurements used an eight-logical-CPU Apple Silicon machine, CPU embedding/CE, and PyTorch intra-op/inter-op threads 1/8. Instrumentation and retrieval/diversity costs are included. **Prepared query translation, equivalence review and their time/cost are excluded**, so B timings are not end-to-end translated-query serving latency. Both CE p95 values exceed the provisional two-second development budget. The figures establish neither a production SLA nor a historical speedup.
-
-## Availability and remaining validation
-
-This repository publishes aggregate findings only. The study-specific orchestration, corpus, exact queries, labels and individual results are not distributed, so **the exact study cannot be reproduced from this checkout**. The [public real-model runner](../evals/REAL_EVAL.md) is a general workflow for separately supplied private inputs; it does not reproduce this local experiment or install these query transformations. The [evaluation guide](evaluation.md) explains the public fixture and annotation boundaries.
-
-There is no sealed holdout, representative source-admission claim, independent source/audio fidelity validation or broad human relevance audit. Further work requires separately admitted sources, family-separated unseen targets, human label checks, a declared answer/abstention mechanism and an end-to-end cost budget that includes translation. No retrieval default or deployment changes follow from these results.
+The machine has eight logical CPUs (Apple Silicon); embedding/CE used CPU, with PyTorch intra-op/inter-op threads 1/8. Instrumentation, retrieval and diversity costs are included. Prepared query translation, equivalence review and their time/cost are excluded. These are descriptive measurements for this workload; differences between arm medians do not identify a hardware cause, historical speedup or production SLA.
