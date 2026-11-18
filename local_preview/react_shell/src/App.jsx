@@ -29,6 +29,7 @@ import {
 import { LibraryPage } from "./library.jsx";
 import { SearchWorkbench } from "./workbench.jsx";
 import { SettingsPage } from "./settings.jsx";
+import { WhatsNewPage } from "./whats-new.jsx";
 import { CollectionPage, KeyAreasPage } from "./summaries.jsx";
 import { ModelSelectLabel, PlayerPanel, useLlmProviderOptions } from "./studio-controls.jsx";
 
@@ -45,6 +46,7 @@ const ROUTES = {
   KEY_AREAS: "/key-areas",
   COLLECTION: "/collection",
   QA: "/qa",
+  WHATS_NEW: "/whats-new",
   SETTINGS: "/settings",
 };
 const STUDY_FOCUS_PRESETS = [
@@ -237,6 +239,7 @@ function readHashRoute() {
     || raw === ROUTES.COLLECTION
     || raw === ROUTES.SETTINGS
     || raw === ROUTES.QA
+    || raw === ROUTES.WHATS_NEW
   ) {
     return raw;
   }
@@ -2847,6 +2850,7 @@ function App() {
       && route !== ROUTES.LOCAL_VIDEO
       && route !== ROUTES.SETTINGS
       && route !== ROUTES.QA
+      && route !== ROUTES.WHATS_NEW
       && route !== ROUTES.COLLECTION
     ) {
       navigate(ROUTES.INGEST);
@@ -2985,6 +2989,7 @@ function App() {
           ) : null}
           {route === ROUTES.LOCAL_VIDEO ? <LocalVideoAnalysisPage locale={locale} /> : null}
           {route === ROUTES.QA ? <SearchWorkspace locale={locale} /> : null}
+          {route === ROUTES.WHATS_NEW ? <WhatsNewPage /> : null}
           {route === ROUTES.SETTINGS ? <SettingsPage /> : null}
           {STUDY_MODES.some((mode) => mode.route === route) && unlocked ? <StudyWorkspace route={route} /> : null}
           {route === ROUTES.COLLECTION ? <CollectionPage /> : null}

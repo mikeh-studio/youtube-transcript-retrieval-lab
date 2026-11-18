@@ -1,5 +1,10 @@
 # What's-new digest
 
+Open **What's new** in the local app to add feeds, check for releases, and
+build a digest for a range of calendar dates in your local time zone. The
+digest window selects indexed sources, including sources added outside feed
+subscriptions. Open a citation's timestamp to play the source in the app.
+
 Build a digest from indexed sources with `POST /v1/digest/whats-new`. Send
 `{"source_ids":["source_id"],"language":"en"}` or
 `{"window":{"start":"2026-03-01T00:00:00Z","end":"2026-03-08T00:00:00Z"}}`.

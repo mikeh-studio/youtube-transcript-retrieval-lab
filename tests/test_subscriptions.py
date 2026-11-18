@@ -124,6 +124,21 @@ def test_filters_and_dry_run_do_not_ingest_or_mutate(tmp_path):
     assert [row["status"] for row in actual["releases"]] == ["skipped", "skipped", "ingested"]
 
 
+def test_update_domain_tag_on_legacy_subscription(tmp_path):
+    store = SubscriptionStore(tmp_path)
+    sub_id = store.create({"url": PODCAST})["id"]
+    state = json.loads(store.subscriptions_path.read_text())
+    state["subscriptions"][sub_id].pop("domain_tag")
+    store.subscriptions_path.write_text(json.dumps(state))
+
+    assert store.list()[0]["domain_tag"] is None
+    assert store.update(sub_id, {"min_duration_s": 0})["domain_tag"] is None
+    assert store.update(sub_id, {"domain_tag": " Paper folding "})["domain_tag"] == "Paper folding"
+    reopened = SubscriptionStore(tmp_path)
+    assert reopened.update(sub_id, {"language": "ja"})["domain_tag"] == "Paper folding"
+    assert reopened.update(sub_id, {"domain_tag": None})["domain_tag"] is None
+
+
 def test_thirty_clip_flood_cap_counts_skips_and_drains_after_304(tmp_path):
     clock = Clock()
     ids = [f"synthetic{i:02}" for i in range(30)]
@@ -246,7 +261,9 @@ def test_poll_and_crud_routes_enforce_browser_boundary(tmp_path, monkeypatch):
     path = "/v1/subscriptions"
     call("POST", path, {"url": PODCAST}, 403, authenticated=False)
     call("POST", path, {"url": PODCAST, "title_include": "["}, 400)
-    sub = call("POST", path, {"url": PODCAST}, 201)["subscription"]
+    call("POST", path, {"url": PODCAST, "domain_tag": ["Paper folding"]}, 400)
+    sub = call("POST", path, {"url": PODCAST, "domain_tag": "Paper folding"}, 201)["subscription"]
+    assert sub["domain_tag"] == "Paper folding"
     sub_id = sub["id"]
     assert call("GET", path)["subscriptions"] == [sub]
     assert call("POST", path, {"id": sub_id, "min_duration_s": 0})["subscription"]["min_duration_s"] == 0

@@ -3317,7 +3317,7 @@ th {
   }
 
   .appbar .appbar-nav > .app-nav-link {
-    padding-inline: 10px;
+    padding-inline: 6px;
   }
 }
 
@@ -4140,4 +4140,142 @@ a.btn {
   .label-workspace {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+.whats-new-page,
+.whats-new-results {
+  display: grid;
+  gap: 1rem;
+}
+
+.whats-new-page h1 {
+  margin: 0;
+  font-size: clamp(1.4rem, 2.5vw, 1.95rem);
+}
+
+.whats-new-form {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr));
+  align-items: end;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.whats-new-checkbox,
+.whats-new-feeds li,
+.whats-new-citation,
+.whats-new-feedback {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.whats-new-checkbox {
+  min-height: 2.75rem;
+  flex-wrap: nowrap;
+}
+
+.whats-new-checkbox input {
+  width: 1rem;
+  flex: 0 0 1rem;
+  accent-color: var(--brand-blue);
+}
+
+.whats-new-feeds,
+.whats-new-group ul {
+  list-style: none;
+  padding: 0;
+}
+
+.whats-new-feeds {
+  margin: 0.75rem 0 0;
+}
+
+.whats-new-feeds li {
+  justify-content: space-between;
+  border-top: 1px solid var(--line-soft);
+  padding: 0.75rem 0;
+}
+
+.whats-new-feeds li > div {
+  min-width: 0;
+}
+
+.whats-new-feeds p {
+  margin: 0.3rem 0 0;
+}
+
+.whats-new-page :is(td, .whats-new-feeds, .whats-new-release) {
+  overflow-wrap: anywhere;
+}
+
+.whats-new-page td a {
+  color: var(--brand-blue);
+}
+
+.whats-new-release-status {
+  text-transform: capitalize;
+}
+
+.whats-new-results {
+  margin-top: 1rem;
+}
+
+.whats-new-release {
+  background: var(--surface-2);
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+  padding: 1rem;
+}
+
+.whats-new-release :is(h3, h4, h5, p) {
+  margin: 0 0 0.5rem;
+}
+
+.whats-new-release h5 {
+  font-size: 0.9rem;
+}
+
+.whats-new-group ul {
+  display: grid;
+  gap: 0.7rem;
+  margin: 0 0 0.95rem;
+}
+
+.whats-new-highlight {
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 0.8rem;
+}
+
+.whats-new-citation {
+  color: var(--text-muted);
+  margin-top: 0.55rem;
+  font-size: 0.85rem;
+}
+
+.whats-new-citation blockquote {
+  flex-basis: 100%;
+  margin: 0;
+  padding-inline-start: 0.75rem;
+  border-inline-start: 2px solid var(--line);
+}
+
+.whats-new-feedback,
+.whats-new-player .panel {
+  margin-top: 0.75rem;
+}
+
+.whats-new-feedback [aria-pressed="true"] {
+  border-color: var(--brand-blue);
+}
+
+.whats-new-player {
+  scroll-margin-top: 5rem;
+}
+
+.whats-new-player audio {
+  max-width: 100%;
 }

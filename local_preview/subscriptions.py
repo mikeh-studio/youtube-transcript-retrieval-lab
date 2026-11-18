@@ -23,7 +23,7 @@ MAX_AUTO_INGESTS = 5
 VIDEO_ID = re.compile(r"[A-Za-z0-9_-]{11}")
 EDITABLE = {
     "url", "kind", "language", "auto_ingest", "title_include",
-    "title_exclude", "min_duration_s",
+    "title_exclude", "min_duration_s", "domain_tag",
 }
 
 
@@ -71,10 +71,10 @@ def _subscription_fields(payload, previous=None):
         raise ValueError(f"Unknown subscription field: {min(unknown)}")
     fields = {
         "language": "en", "auto_ingest": False, "title_include": None,
-        "title_exclude": None, "min_duration_s": 600,
+        "title_exclude": None, "min_duration_s": 600, "domain_tag": None,
     }
     if previous:
-        fields.update({key: previous[key] for key in EDITABLE})
+        fields.update({key: previous[key] for key in EDITABLE if key in previous})
     fields.update(payload)
     url = feeds.split_http_url(fields.get("url"))
     feeds.check_feed_destination(url)
@@ -83,6 +83,11 @@ def _subscription_fields(payload, previous=None):
         raise ValueError("kind must be youtube or podcast.")
     if fields["language"] not in ("en", "ja"):
         raise ValueError("language must be en or ja.")
+    tag = fields["domain_tag"]
+    if tag is not None:
+        if not isinstance(tag, str):
+            raise ValueError("domain_tag must be a string or null.")
+        fields["domain_tag"] = tag.strip() or None
     if not isinstance(fields["auto_ingest"], bool):
         raise ValueError("auto_ingest must be a boolean.")
     duration = fields["min_duration_s"]
@@ -164,7 +169,7 @@ class SubscriptionStore:
 
     def list(self):
         """List subscriptions in creation order."""
-        return list(self._state()["subscriptions"].values())
+        return [{"domain_tag": None, **row} for row in self._state()["subscriptions"].values()]
 
     def get(self, subscription_id):
         """Read a subscription by ID."""

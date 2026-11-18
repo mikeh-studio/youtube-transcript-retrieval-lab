@@ -111,6 +111,7 @@ at any setting.
 
 Subscription settings include `kind` (`youtube` or `podcast`, inferred from
 the feed URL by default), `language` (`en` by default, or `ja`),
+`domain_tag` (optional display text, default `null`),
 `auto_ingest` (default `false`), `title_include` and `title_exclude`
 (optional case-sensitive regexes), and `min_duration_s` (default `600`,
 `0` disables the duration filter). Changing the URL or kind requires a

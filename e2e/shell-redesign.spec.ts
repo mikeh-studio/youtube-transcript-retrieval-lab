@@ -36,7 +36,7 @@ test.describe("mobile bottom tabs", () => {
 
     const tabBar = page.locator(".bottom-tabbar");
     await expect(tabBar).toBeVisible();
-    await expect(tabBar.locator(".bottom-tab-link")).toHaveCount(4);
+    await expect(tabBar.locator(".bottom-tab-link")).toHaveText(PRIMARY_LABELS);
 
     await tabBar.getByRole("button", { name: "Search" }).click();
     await expect(page).toHaveURL(/#\/qa$/);
@@ -46,7 +46,7 @@ test.describe("mobile bottom tabs", () => {
   });
 });
 
-const PRIMARY_LABELS = ["Library", "Search", "Evaluation", "Settings"];
+const PRIMARY_LABELS = ["Library", "Search", "What's new", "Evaluation", "Settings"];
 
 test("shared navigation exposes both workspaces and utilities", async ({
   page,
@@ -221,11 +221,12 @@ for (const width of [1440, 900]) {
           viewport: innerWidth,
         };
       });
-      const [library, search, evaluation, settings] = layout.links;
+      const [library, search, whatsNew, evaluation, settings] = layout.links;
       expect(library.left - layout.brandRight).toBeGreaterThanOrEqual(8);
       expect(library.left - layout.brandRight).toBeLessThanOrEqual(32);
       expect(search.left - library.right).toBeLessThanOrEqual(8);
-      expect(evaluation.left - search.right).toBeGreaterThan(16);
+      expect(whatsNew.left - search.right).toBeLessThanOrEqual(8);
+      expect(evaluation.left - whatsNew.right).toBeGreaterThan(16);
       expect(settings.right).toBeLessThanOrEqual(width);
       expect(layout.pageWidth).toBeLessThanOrEqual(layout.viewport);
       expect(

@@ -23,6 +23,13 @@ export const LAB_NAV_PRIMARY = [
     labels: { "en-US": "Search", "ja-JP": "検索" },
   },
   {
+    key: "whats-new",
+    href: "/index.html#/whats-new",
+    route: "/whats-new",
+    icon: "/icons/icon-chat.svg",
+    labels: { "en-US": "What's new", "ja-JP": "新着" },
+  },
+  {
     key: "evaluate",
     href: "/evaluation.html",
     icon: "/icons/icon-jobs.svg",
