@@ -40,10 +40,27 @@ Each JSONL row contains:
 - `required_facts`
 - `notes`
 
-Gold evidence can match either:
+Gold evidence uses timestamp spans in seconds, for example
+`{"video_id": "...", "start": 120, "end": 180}`. `source_id` is accepted as
+an alias for `video_id`. Both timestamps must be finite, and `start` must be
+less than or equal to `end`. A result from the same video matches when its
+overlap with the gold span, divided by the shorter duration, meets
+`span_min_overlap_ratio` in the benchmark config (default `0.5`). If `start`
+equals `end`, a result matches when it contains that point, including either
+endpoint. Results need timestamps to match a span.
+The agentic benchmark scores the original retrieved span when a result also
+includes expanded context.
 
-- exact chunk identity: `{"video_id": "...", "chunk_index": 3}`
-- timestamp overlap: `{"video_id": "...", "start": 120, "end": 180}`
+Labels may include an integer `grade` and retain `legacy_chunk_index` and
+`chunking_version` as provenance. Rows without timestamps fall back to exact
+chunk-index matching and accept the older `chunk_index` field. If both sides
+provide a chunking version, a mismatch raises an error for legacy matching.
+Use `python -m evals.migrate_gold_spans --dataset IN --corpus CORPUS --out OUT`
+to convert legacy labels using the corpus that defined their chunk indexes.
+
+Video-routing `gold_chunks` refer to fixture-defined chunks and remain
+chunk-indexed. Real-eval judgments also remain chunk-indexed because they are
+pinned to a hashed frozen corpus.
 
 ## Metrics
 

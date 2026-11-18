@@ -913,6 +913,11 @@ class EvalGeneratorService:
 
         dataset_id = f"dataset_{uuid.uuid4()}"
         created_at = now_iso()
+        source_snapshot = draft.get("source_snapshot") or {}
+        chunking_versions = {
+            video["video_id"]: video.get("chunking_version")
+            for video in source_snapshot.get("videos", [])
+        }
         rows = []
         for case in accepted:
             rows.append(
@@ -924,8 +929,12 @@ class EvalGeneratorService:
                     "difficulty": case["difficulty"],
                     "gold_evidence": [
                         {
-                            key: row[key]
-                            for key in ("video_id", "chunk_index", "start", "end")
+                            "video_id": row["video_id"],
+                            "chunk_index": row["chunk_index"],
+                            "start": row["start"],
+                            "end": row["end"],
+                            "legacy_chunk_index": row["chunk_index"],
+                            "chunking_version": chunking_versions.get(row["video_id"]),
                         }
                         for row in case["gold_evidence"]
                     ],
@@ -968,7 +977,7 @@ class EvalGeneratorService:
             "created_at": created_at,
             "source_draft_id": draft_id,
             "generator": deepcopy(draft.get("generator") or {}),
-            "source_snapshot": deepcopy(draft.get("source_snapshot") or {}),
+            "source_snapshot": deepcopy(source_snapshot),
             "rows": rows,
             "query_set": query_set,
         }

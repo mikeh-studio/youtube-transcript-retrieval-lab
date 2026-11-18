@@ -1,5 +1,6 @@
 {
   "name": "jp_core_v1_fixture_corpus",
+  "chunking_version": "jp_core_v1_fixture",
   "videos": [
     {
       "video_id": "jpCoreVid01",

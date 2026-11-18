@@ -22,6 +22,11 @@ if str(LOCAL_PREVIEW_DIR) not in sys.path:
 
 os.environ.setdefault("YT_RAG_SKIP_GLOBAL_SERVICE", "1")
 
+from evals.evidence_spans import (  # noqa: E402
+    chunking_version,
+    normalize_gold_evidence,
+    validate_overlap_ratio,
+)
 from evals.scoring import (  # noqa: E402
     METRIC_MRR_10,
     METRIC_NDCG_10,
@@ -131,6 +136,11 @@ def _validate_dataset_row(row: dict, *, line_no: int) -> None:
         raise ValueError(
             f"dataset line {line_no} gold_evidence must be a non-empty list"
         )
+    for index, gold in enumerate(row["gold_evidence"]):
+        try:
+            normalize_gold_evidence(gold)
+        except ValueError as exc:
+            raise ValueError(f"dataset line {line_no} gold_evidence[{index}]: {exc}") from exc
 
 
 class FixtureLibrary:
@@ -163,6 +173,7 @@ class FixtureLibrary:
                 ),
                 "language": str(video.get("language") or "ja"),
                 "chunks": chunks,
+                "chunking_version": chunking_version(video) or chunking_version(payload),
                 "full_transcript": self._full_transcript(video),
             }
 
@@ -304,12 +315,31 @@ def _slim_result(row: dict) -> dict:
     }
 
 
+def _results_with_chunking_versions(service, rows: list[dict]) -> list[dict]:
+    library = getattr(getattr(service, "engine", None), "library", None)
+    videos = getattr(library, "videos", {})
+    get_metadata = getattr(library, "get_video_chunking_metadata", None)
+    versioned_rows = []
+    for row in rows:
+        video_id = row.get("video_id") or row.get("source_id")
+        video = videos.get(video_id)
+        version = chunking_version(row)
+        if not version and video is not None:
+            version = chunking_version(video)
+            if not version and get_metadata is not None:
+                version = get_metadata(video_id).get("version")
+        versioned_rows.append({**row, "chunking_version": version} if version else row)
+    return versioned_rows
+
+
 def run_one_config(
     service,
     dataset: List[dict],
     run_config: dict,
     default_top_k: int,
     latency_repetitions: int = 1,
+    *,
+    min_overlap_ratio: float = 0.5,
 ) -> dict:
     name = str(run_config.get("name") or run_config.get("retrieval_mode") or "run")
     mode = str(run_config.get("retrieval_mode") or "hybrid")
@@ -359,7 +389,24 @@ def run_one_config(
                     )
             latency_ms = float(median(iteration_latencies))
             rows = response.get("results") or []
-            scores = score_query_results(query_case, rows)
+            scoring_rows = rows
+            if strategy == "agentic":
+                # Context expansion can include neighboring chunks. Score the
+                # original retrieved span while retaining context in the report.
+                scoring_rows = [
+                    {**row, "start": row["retrieval_start"], "end": row["retrieval_end"]}
+                    if "retrieval_start" in row and "retrieval_end" in row
+                    else row
+                    for row in rows
+                ]
+            gold_rows = [
+                normalize_gold_evidence(gold) for gold in query_case.get("gold_evidence") or []
+            ]
+            if any("start" not in gold and "chunking_version" in gold for gold in gold_rows):
+                scoring_rows = _results_with_chunking_versions(service, scoring_rows)
+            scores = score_query_results(
+                query_case, scoring_rows, min_overlap_ratio=min_overlap_ratio
+            )
             query_scores.append(scores)
             latencies_ms.append(latency_ms)
             per_query.append(
@@ -597,6 +644,7 @@ def write_reports(result: dict, out_dir: Path) -> None:
 
 def run_benchmark(dataset_path: Path, config_path: Path, out_dir: Path) -> dict:
     config = load_config(config_path)
+    min_overlap_ratio = validate_overlap_ratio(config.get("span_min_overlap_ratio", 0.5))
     dataset = load_dataset(dataset_path)
     service = build_service(config, config_path)
     default_top_k = int(config.get("top_k", 10))
@@ -612,6 +660,7 @@ def run_benchmark(dataset_path: Path, config_path: Path, out_dir: Path) -> dict:
             run_config,
             default_top_k,
             latency_repetitions=latency_repetitions,
+            min_overlap_ratio=min_overlap_ratio,
         )
         for run_config in run_configs
     ]
