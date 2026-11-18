@@ -174,6 +174,50 @@ points, and `anchor_mode: "line_ids"`. Results are cached under
 `data/cache/key_areas/<source_id>.json` by version, language, provider, model,
 and transcript fingerprint. The response indicates cache reuse in `cached`.
 
+### Collection summaries API
+
+`POST /v1/summaries/collection` accepts `source_ids` (2–12 distinct indexed
+IDs), `language` (`en` or `ja`), an optional `focus` string, `provider`, and
+`model`. It reuses cached key areas and clusters section embeddings at cosine
+similarity 0.80. Up to eight clusters are ranked by distinct source count, then
+total section duration. Each theme retrieves up to eight hybrid transcript
+matches within the selection. The focus guides synthesis over that evidence.
+
+The response includes `overview`, `themes`, and an `evidence_catalog`. A theme
+has `title`, `summary`, and `perspectives`. Each perspective contains a
+`source_id`, a `stance` (`agrees`, `differs`, `adds`, or `only_here`), a
+`statement`, and `citations` such as `["E1"]`. Resolve each ID against
+`evidence_catalog[].citation_id` for its transcript excerpt, timestamp in seconds,
+and playback URL. The server drops references outside the theme or the
+perspective's source, then omits perspectives that have no valid citation.
+`coverage` reports selected and cited source counts and the share of proposed
+references that pass validation. The share is zero when there are no references.
+
+### Cross-source labels and evaluation
+
+In **Label review**, choose **Multi-source questions** or **Collection themes**
+and select 2–12 sources. Codex drafts both tasks from numbered transcript
+excerpts. Finalized JSONL rows include `selected_source_ids`, source fingerprints,
+and owner review provenance. Question labels include `question`, `required_facts`,
+and timestamped `gold_spans` across two or more sources. Theme labels include
+`title` and `source_ids` for the sources that discuss the theme.
+
+`evals.summary.cross_source` exposes `generate_ask_prediction` and
+`generate_collection_prediction`. Each takes an injected callable accepting the
+request fields as keyword arguments and returning the corresponding API response
+dictionary. Ask generation uses library-wide `multi_vector` routing. Collection
+generation uses the label's selected sources and defaults to the question as
+focus when a question label is supplied.
+
+Use `score_ask` and `score_collection` to measure the fraction of gold sources
+cited and the fraction of gold timestamp spans matched by a same-source citation
+under the P1 overlap rule. Pass question gold spans to score a focused collection
+on the same evidence task. Pass reviewed theme rows and an explicit `judge_llm`
+to `score_collection` for `theme_recall` and `stance_source_precision`.
+The judge compares theme meanings and grades each perspective against its own
+cited excerpts in the context of the theme. A metric is `null` when its
+denominator is empty or it requires a judge and none was supplied.
+
 ## Summary evaluation
 
 The summary evaluator measures the coverage of owner-reviewed key points, where

@@ -22,7 +22,7 @@
     <main class="shell">
       <div class="hero">
         <h1>Label review</h1>
-        <p class="subtitle">Review summary key points and audit automated judge decisions.</p>
+        <p class="subtitle">Review transcript labels and audit automated judge decisions.</p>
       </div>
       <div class="label-workspace">
         <aside class="label-sidebar">
@@ -70,6 +70,7 @@
               <p id="itemTiming"></p>
               <p id="rationale" class="label-status" hidden></p>
               <ul id="auditGoldPoints" hidden></ul>
+              <ul id="crossSourceDetails" hidden></ul>
               <label id="auditNoteField" hidden>Optional disagreement note
                 <textarea id="auditNote" maxlength="4000"></textarea>
               </label>
@@ -81,12 +82,22 @@
               </div>
               <form id="editForm" class="grid" hidden>
                 <label><span id="editTextLabel">Label text</span><textarea name="text" required maxlength="4000"></textarea></label>
-                <div class="label-edit-fields">
+                <div id="singleSourceFields" class="label-edit-fields">
                   <label>Importance (1–3)<input name="importance" type="number" required min="1" max="3" step="1" /></label>
                   <label>Onset (seconds)<input name="onset" type="number" required min="0" step="any" /></label>
                   <label><span id="editStartLabel">Span start (seconds)</span><input name="span_start" type="number" required min="0" step="any" /></label>
                   <label><span id="editEndLabel">Span end (seconds)</span><input name="span_end" type="number" required min="0" step="any" /></label>
                 </div>
+                <label id="editFactsField" hidden>Required facts, one per line
+                  <textarea name="required_facts" required disabled></textarea>
+                </label>
+                <label id="editSpansField" hidden>Gold spans, one per line (source ID, start seconds, end seconds, separated by spaces)
+                  <textarea name="gold_spans" required disabled></textarea>
+                  <small id="editSpanSources"></small>
+                </label>
+                <label id="editSourcesField" hidden>Discussed in
+                  <select name="source_ids" multiple required disabled></select>
+                </label>
                 <div class="label-actions">
                   <button class="btn" id="saveEdit">Save edit</button>
                   <button class="btn secondary" id="cancelEdit" type="button">Cancel</button>
@@ -97,6 +108,7 @@
               <h3 id="contextHeading">Transcript context</h3>
               <p id="contextStatus" class="label-status" role="status"></p>
               <ul id="context" class="label-context" aria-label="Transcript lines" tabindex="0" hidden></ul>
+              <div id="contextGroups"></div>
             </section>
             <div class="label-actions">
               <button class="btn" id="finalize" type="button">Finalize dataset</button>

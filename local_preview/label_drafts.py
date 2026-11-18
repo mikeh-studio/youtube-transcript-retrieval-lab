@@ -17,6 +17,7 @@ from typing import Callable
 
 from local_preview.codex_runner import CodexRunnerError
 from evals.summary.predictions import record_sha256
+from local_preview import cross_source_labels
 from local_preview.judge_audit import validate_sample
 from local_preview.local_files import json_bytes as _json_bytes, write_atomic as _write_atomic
 from local_preview.transcript_lines import fingerprint_lines, format_lines, numbered_lines
@@ -285,6 +286,24 @@ TASKS = {
         canonicalize=_sections,
         edit=_edit_section,
     ),
+    "multi_source_qa": LabelTask(
+        title="Multi-source questions",
+        min_sources=2,
+        max_sources=12,
+        schema="label_multi_source_qa.schema.json",
+        prompt=cross_source_labels.qa_prompt,
+        canonicalize=cross_source_labels.canonical_qa,
+        edit=cross_source_labels.edit_qa,
+    ),
+    "collection_themes": LabelTask(
+        title="Collection themes",
+        min_sources=2,
+        max_sources=12,
+        schema="label_collection_themes.schema.json",
+        prompt=cross_source_labels.themes_prompt,
+        canonicalize=cross_source_labels.canonical_themes,
+        edit=cross_source_labels.edit_theme,
+    ),
 }
 
 
@@ -424,7 +443,7 @@ class LabelDraftService:
             configured_provider = (os.environ.get("YT_RAG_LABEL_DRAFTER") or "").strip()
             provider = (
                 "codex_cli"
-                if job["task"] == "sections"
+                if job["task"] == "sections" or spec.min_sources > 1
                 else configured_provider or "claude_cli"
             )
             if provider not in ("codex_cli", "claude_cli"):
@@ -446,7 +465,10 @@ class LabelDraftService:
                 raise LabelDraftError(
                     "INVALID_DRAFTER_OUTPUT", "The drafter returned invalid JSON.", 502
                 ) from exc
-            items, notes = spec.canonicalize(generated, sources)
+            try:
+                items, notes = spec.canonicalize(generated, sources)
+            except ValueError as exc:
+                raise LabelDraftError("INVALID_DRAFTER_OUTPUT", str(exc), 502) from exc
             draft_id = f"draft_{uuid.uuid4().hex}"
             timestamp = self.clock()
             draft = {
@@ -608,11 +630,48 @@ class LabelDraftService:
                 "end": judgment["end"],
                 "lines": judgment.get("window", []),
             }
+        effective = {**item, **(item["review"] or {}).get("edits", {})}
+        if TASKS[draft["task"]].min_sources > 1:
+            sources = {source["source_id"]: source for source in draft["sources"]}
+            spans = effective.get("gold_spans")
+            if spans is None:
+                budget = MAX_CONTEXT_CHARS // len(sources)
+                groups = [
+                    {
+                        "source_id": source_id,
+                        "lines": _sample_lines(self._checked_lines(source), budget),
+                    }
+                    for source_id, source in sources.items()
+                ]
+            else:
+                lines_by_source = {
+                    source_id: self._checked_lines(sources[source_id])
+                    for source_id in dict.fromkeys(span["source_id"] for span in spans)
+                }
+                groups = [
+                    self._context_window(
+                        sources[span["source_id"]], lines_by_source[span["source_id"]],
+                        span["start"], span["end"],
+                    )
+                    for span in spans
+                ]
+            return {"item_id": item_id, "groups": groups}
         source = next(
             source
             for source in draft["sources"]
             if source["source_id"] == item["source_id"]
         )
+        first, last = (
+            (effective["start"], effective["end"])
+            if draft["task"] == "sections"
+            else (effective["span_start"], effective["span_end"])
+        )
+        return {
+            "item_id": item_id,
+            **self._context_window(source, self._checked_lines(source), first, last),
+        }
+
+    def _checked_lines(self, source):
         current, lines = self._source(source["source_id"])
         if current["source_fingerprint"] != source["source_fingerprint"]:
             raise LabelDraftError(
@@ -620,15 +679,12 @@ class LabelDraftService:
                 "The stored transcript has changed since drafting.",
                 409,
             )
-        effective = {**item, **(item["review"] or {}).get("edits", {})}
-        first, last = (
-            (effective["start"], effective["end"])
-            if draft["task"] == "sections"
-            else (effective["span_start"], effective["span_end"])
-        )
+        return lines
+
+    @staticmethod
+    def _context_window(source, lines, first, last):
         start, end = max(0, first - 20), min(source["duration"], last + 20)
         return {
-            "item_id": item_id,
             "source_id": source["source_id"],
             "start": start,
             "end": end,
@@ -683,9 +739,9 @@ class LabelDraftService:
                     review["note"] = note.strip()
                 if decision == "edited":
                     try:
-                        review["edits"] = TASKS[draft["task"]].edit(
-                            item, row.get("edits"), sources[item["source_id"]]
-                        )
+                        spec = TASKS[draft["task"]]
+                        scope = sources if spec.min_sources > 1 else sources[item["source_id"]]
+                        review["edits"] = spec.edit(item, row.get("edits"), scope)
                     except ValueError as exc:
                         raise LabelDraftError("INVALID_REVIEW", str(exc)) from exc
                 elif "edits" in row:
@@ -714,6 +770,7 @@ class LabelDraftService:
                     "REVIEW_INCOMPLETE", "Decide every item before finalizing.", 409
                 )
             audit = draft["task"] == "judge_audit"
+            multi_source = not audit and TASKS[draft["task"]].min_sources > 1
             counts = dict.fromkeys(DECISIONS, 0)
             rows = []
             fingerprints = {
@@ -741,7 +798,12 @@ class LabelDraftService:
                         **({"review_note": review["note"]} if "note" in review else {}),
                         "task": draft["task"],
                         "language": draft["language"],
-                        "source_fingerprint": fingerprints[item["source_id"]],
+                        **(
+                            {"selected_source_ids": list(fingerprints),
+                             "source_fingerprints": fingerprints}
+                            if multi_source
+                            else {"source_fingerprint": fingerprints[item["source_id"]]}
+                        ),
                         "label_provenance": draft["label_provenance"],
                     }
                 )

@@ -60,6 +60,11 @@ if load_dotenv is not None:
     load_dotenv(ROOT_DIR / ".env.local", override=True)
 
 from browser_boundary import BrowserBoundary  # noqa: E402
+from local_preview.collection_summary import (  # noqa: E402
+    CollectionSummaryError,
+    build_collection_summary,
+    collection_source_ids,
+)
 from local_preview.key_areas import KeyAreasGenerationError, cached_key_areas  # noqa: E402
 from local_preview.lexical_index import LexicalIndex  # noqa: E402
 from local_preview.retrieval_diagnostics import has_retrieval_failure  # noqa: E402
@@ -4950,6 +4955,32 @@ class LocalRAGService:
             model=model,
         )
 
+    def summarize_collection(self, *, source_ids, language, focus, provider, model):
+        """Synthesize themes from indexed sources using cached key areas."""
+        source_ids = collection_source_ids(source_ids)
+        library = self.engine.library
+        for source_id in source_ids:
+            if source_id not in library.videos:
+                raise KeyError(f"video_id not found: {source_id}")
+        language = str(language or "en").strip().lower()
+        if language not in SUMMARY_LANGUAGES:
+            raise ValueError("language must be one of: en, ja")
+        provider = str(provider or DEFAULT_ASK_PROVIDER).strip().lower()
+        model = self._resolve_llm_model(provider, model)
+        return build_collection_summary(
+            source_ids,
+            language=language,
+            focus=focus,
+            provider=provider,
+            model=model,
+            key_areas_fn=self.generate_key_areas,
+            retrieve_fn=self.retrieve,
+            embed_fn=lambda texts: library.processor.generate_embeddings(
+                [{"embed_text": text} for text in texts]
+            ),
+            llm=self._llm_text_response,
+        )
+
     def summarize_video_transcript(
         self,
         *,
@@ -8741,6 +8772,36 @@ class Handler(BrowserBoundary, BaseHTTPRequestHandler):
             if path == "/v1/feedback/search-review":
                 feedback = SERVICE.save_search_feedback(body)
                 self._json({"ok": True, "feedback": feedback})
+                return
+
+            if path == "/v1/summaries/collection":
+                try:
+                    result = SERVICE.summarize_collection(
+                        source_ids=body.get("source_ids"),
+                        language=body.get("language"),
+                        focus=body.get("focus"),
+                        provider=body.get("provider"),
+                        model=body.get("model"),
+                    )
+                except CodexRunnerError as exc:
+                    self._json(
+                        {"ok": False, "error": {"code": exc.code, "message": str(exc)}},
+                        exc.status,
+                    )
+                    return
+                except (CollectionSummaryError, KeyAreasGenerationError) as exc:
+                    self._json(
+                        {
+                            "ok": False,
+                            "error": {
+                                "code": "COLLECTION_SUMMARY_FAILED",
+                                "message": str(exc),
+                            },
+                        },
+                        502,
+                    )
+                    return
+                self._json({"ok": True, **result})
                 return
 
             if path == "/v1/summaries/key-areas":
