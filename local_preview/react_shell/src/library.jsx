@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { AudioIngestPanel } from "./audio-ingest.jsx";
 import {
   COLLECTION_MAX_SOURCES,
   COLLECTION_MIN_SOURCES,
@@ -18,6 +19,11 @@ export const SEARCH_SCOPE_HANDOFF_KEY = "yt_rag_search_scope";
 
 const CATALOG_PAGE_LIMIT = 100;
 const CATALOG_MAX_PAGES = 5;
+const SOURCE_TYPE_LABELS = {
+  youtube: "YouTube",
+  podcast_rss: "Podcast",
+  local_audio: "Local audio",
+};
 
 const QUALIFICATION_LABELS = {
   not_reviewed: "Not reviewed",
@@ -230,6 +236,11 @@ export function LibraryPage({ onSuccess, onSummarizeSelection }) {
     }
   }
 
+  function onAudioIndexed(sourceId) {
+    void loadVideos();
+    onSuccess(sourceId);
+  }
+
   const languages = useMemo(
     () => Array.from(new Set(videos.map((video) => String(video.language || "").trim()).filter(Boolean))).sort(),
     [videos],
@@ -285,12 +296,12 @@ export function LibraryPage({ onSuccess, onSummarizeSelection }) {
       <header className="hero">
         <h1>Library</h1>
         <p className="subtitle">
-          Videos indexed for retrieval. Each keeps its timestamped transcript as the source of truth for search results and answers.
+          Sources indexed for retrieval. Each keeps its timestamped transcript as the source of truth for search results and answers.
         </p>
       </header>
 
       <div className="lab-stats" aria-label="Library summary">
-        <div className="lab-stat"><strong>{videos.length}</strong><span>Indexed videos</span></div>
+        <div className="lab-stat"><strong>{videos.length}</strong><span>Indexed sources</span></div>
         <div className="lab-stat"><strong>{totalChunks.toLocaleString()}</strong><span>Searchable chunks</span></div>
         <div className="lab-stat">
           <strong>{languages.length ? languages.join(" · ") : "—"}</strong>
@@ -364,11 +375,13 @@ export function LibraryPage({ onSuccess, onSummarizeSelection }) {
         ) : null}
       </details>
 
+      <AudioIngestPanel onIndexed={onAudioIndexed} />
+
       <section className="panel lab-videos-panel">
         <div className="section-head">
           <h2 className="section-title">
             <img src="/icons/icon-library.svg" alt="" aria-hidden="true" />
-            <span>Indexed videos</span>
+            <span>Indexed sources</span>
           </h2>
           <div className="lab-filters">
             <input
@@ -376,7 +389,7 @@ export function LibraryPage({ onSuccess, onSummarizeSelection }) {
               value={filterText}
               onChange={(event) => setFilterText(event.target.value)}
               placeholder="Filter by title, channel, or ID"
-              aria-label="Filter videos"
+              aria-label="Filter sources"
             />
             <select
               value={filterLanguage}
@@ -395,16 +408,16 @@ export function LibraryPage({ onSuccess, onSummarizeSelection }) {
         {videosError ? (
           <FriendlyError
             error={videosError}
-            title="Could not load indexed videos."
+            title="Could not load indexed sources."
             onRetry={() => loadVideos().catch(() => {})}
           />
         ) : null}
-        {isLoadingVideos ? <div className="search-empty">Loading indexed videos…</div> : null}
+        {isLoadingVideos ? <div className="search-empty">Loading indexed sources…</div> : null}
         {!isLoadingVideos && !videos.length ? (
-          <div className="search-empty">No videos indexed yet. Add a YouTube URL above to start.</div>
+          <div className="search-empty">No sources indexed yet. Add a video or audio source above to start.</div>
         ) : null}
         {!isLoadingVideos && videos.length && !visibleVideos.length ? (
-          <div className="search-empty">No videos match these filters.</div>
+          <div className="search-empty">No sources match these filters.</div>
         ) : null}
         {staleCount ? (
           <p className="lab-hint">
@@ -426,7 +439,7 @@ export function LibraryPage({ onSuccess, onSummarizeSelection }) {
               Summarize selection
             </button>
             <span className="lab-hint" aria-live="polite">
-              {selectedVideoIds.length} selected · Choose {COLLECTION_MIN_SOURCES}–{COLLECTION_MAX_SOURCES} videos
+              {selectedVideoIds.length} selected · Choose {COLLECTION_MIN_SOURCES}–{COLLECTION_MAX_SOURCES} sources
             </span>
           </div>
         ) : null}
@@ -440,7 +453,7 @@ export function LibraryPage({ onSuccess, onSummarizeSelection }) {
                   {videos.length >= COLLECTION_MIN_SOURCES ? (
                     <th scope="col"><span className="sr-only">Select for collection</span></th>
                   ) : null}
-                  <th scope="col">Video</th>
+                  <th scope="col">Source</th>
                   {showChannelColumn ? <th scope="col">Channel</th> : null}
                   <th scope="col">Lang</th>
                   <th scope="col" className="num">Chunks</th>
@@ -495,6 +508,7 @@ export function LibraryPage({ onSuccess, onSummarizeSelection }) {
                             )}
                             <span className="lab-video-id">
                               {videoId}
+                              <span className="lab-chip">{SOURCE_TYPE_LABELS[platform] || platform}</span>
                               {video.chunking_stale ? <span className="lab-chip warn">older chunking</span> : null}
                             </span>
                           </span>

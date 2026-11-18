@@ -57,7 +57,8 @@ def app(tmp_path, monkeypatch):
 
     stream_media = Mock(side_effect=stream)
     monkeypatch.setattr(local_api, "AudioIngestQueue", partial(
-        AudioIngestQueue, engine_factory=lambda _: engine, fetch_feed=feed, stream_media=stream_media
+        AudioIngestQueue, engine_factory=lambda _: engine, fetch_feed=feed, stream_media=stream_media,
+        timer=iter(index * 0.75 for index in range(100)).__next__,
     ))
     monkeypatch.setattr(local_api, "SERVICE", service)
     monkeypatch.setattr(local_api, "ROOT_DIR", tmp_path)
@@ -110,6 +111,9 @@ def test_local_file_to_persisted_library(app, monkeypatch, keep):
     assert job["source_type"] == "local_audio"
     assert job["attempts"] == 1
     assert job["progress"] == 1.0
+    assert job["transcription_seconds"] == 0.75
+    assert job["audio_duration_seconds"] == 3
+    assert (job["stt_engine"], job["stt_model"]) == ("fake", "fixture")
     assert app.events == ["resolving", "validating", "transcribing", "indexing", "completed"]
     digest = hashlib.sha256(AUDIO).hexdigest()
     source_id = make_file_source_id(digest)
@@ -165,6 +169,8 @@ def test_rss_enclosure_deduplicates_and_force_updates_retention(app, monkeypatch
 
     again = _submit(app, kind="rss_episode", feed_url=FEED_URL, guid="fold-1")
     assert again["status"] == "completed"
+    assert again["transcription_seconds"] is None
+    assert again["audio_duration_seconds"] is None
     assert app.events == ["resolving", "completed"]
     app.feed.assert_called_once()
     app.stream.assert_called_once()

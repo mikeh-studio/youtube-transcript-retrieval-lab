@@ -17,7 +17,7 @@ from typing import Callable
 
 from local_preview.codex_runner import CodexRunnerError
 from evals.summary.predictions import record_sha256
-from local_preview import cross_source_labels
+from local_preview import audio_labels, cross_source_labels
 from local_preview.judge_audit import validate_sample
 from local_preview.local_files import json_bytes as _json_bytes, write_atomic as _write_atomic
 from local_preview.transcript_lines import fingerprint_lines, format_lines, numbered_lines
@@ -42,9 +42,9 @@ class LabelTask:
     title: str
     min_sources: int
     max_sources: int
-    schema: str
-    prompt: Callable[[list[dict], str], str]
-    canonicalize: Callable[[object, list[dict]], tuple[list[dict], str]]
+    schema: str | None
+    prompt: Callable[[list[dict], str], str] | None
+    canonicalize: Callable[[object, list[dict]], tuple[list[dict], str]] | None
     edit: Callable[[dict, dict, dict], dict]
 
 
@@ -304,6 +304,14 @@ TASKS = {
         canonicalize=cross_source_labels.canonical_themes,
         edit=cross_source_labels.edit_theme,
     ),
+    "stt_reference": LabelTask(
+        title="STT reference excerpts", min_sources=1, max_sources=1,
+        schema=None, prompt=None, canonicalize=None, edit=audio_labels.edit_reference,
+    ),
+    "ts_landing": LabelTask(
+        title="Timestamp landing", min_sources=1, max_sources=1,
+        schema=None, prompt=None, canonicalize=None, edit=audio_labels.edit_landing,
+    ),
 }
 
 
@@ -331,6 +339,7 @@ class LabelDraftService:
                 "title": task.title,
                 "min_sources": task.min_sources,
                 "max_sources": task.max_sources,
+                **({"input": "stt_segments"} if key in audio_labels.TASK_NAMES else {}),
             }
             for key, task in TASKS.items()
         ] + [{
@@ -338,7 +347,7 @@ class LabelDraftService:
             "min_sources": 0, "max_sources": 0,
         }]
 
-    def _source(self, source_id):
+    def _source(self, source_id, *, audio_language=None):
         source = self.source_getter(source_id)
         if not isinstance(source, dict):
             raise LabelDraftError("SOURCE_NOT_FOUND", "Source was not found.", 404)
@@ -349,7 +358,8 @@ class LabelDraftService:
             raise LabelDraftError(
                 "TRANSCRIPT_UNAVAILABLE", "Source has no stored transcript segments."
             )
-        duration = max(line["end"] for line in lines)
+        transcript_end = max(line["end"] for line in lines)
+        duration = transcript_end
         declared_duration = source.get("duration_seconds")
         if type(declared_duration) in (int, float) and 0 < declared_duration < math.inf:
             duration = declared_duration
@@ -362,9 +372,19 @@ class LabelDraftService:
             "duration": duration,
             "source_fingerprint": fingerprint_lines(lines),
         }
+        if audio_language is not None:
+            try:
+                audio = audio_labels.source_details(source_id, source, audio_language)
+            except ValueError as exc:
+                raise LabelDraftError("AUDIO_LABEL_UNAVAILABLE", str(exc)) from exc
+            metadata["audio"] = audio
+            episode_duration = (source["source"].get("episode") or {}).get("duration_seconds")
+            metadata["duration"] = max(duration, transcript_end)
+            if type(episode_duration) in (int, float) and 0 < episode_duration < math.inf:
+                metadata["duration"] = max(metadata["duration"], episode_duration)
         return metadata, lines
 
-    def start_job(self, task, source_ids, language):
+    def start_job(self, task, source_ids, language, seed=None):
         """Reserve the single worker slot and start a background draft job."""
         spec = TASKS.get(task) if isinstance(task, str) else None
         if spec is None:
@@ -384,6 +404,11 @@ class LabelDraftService:
             raise LabelDraftError(
                 "INVALID_LANGUAGE", "Provide a language tag such as en or ja."
             )
+        if task in audio_labels.TASK_NAMES:
+            if seed is None:
+                seed = audio_labels.DEFAULT_SEED
+            if type(seed) is not int or not 0 <= seed < 2**32:
+                raise LabelDraftError("INVALID_SEED", "Seed must be an unsigned 32-bit integer.")
         with self._lock:
             if self._active_job is not None:
                 raise LabelDraftError(
@@ -407,6 +432,7 @@ class LabelDraftService:
                 "error_message": None,
                 "created_at": self.clock(),
                 "completed_at": None,
+                **({"seed": seed} if task in audio_labels.TASK_NAMES else {}),
             }
             self._jobs[job_id] = job
             self._active_job = job_id
@@ -437,38 +463,27 @@ class LabelDraftService:
         try:
             sources = []
             budget = MAX_CONTEXT_CHARS // len(job["source_ids"])
+            audio_task = job["task"] in audio_labels.TASK_NAMES
             for source_id in job["source_ids"]:
-                metadata, lines = self._source(source_id)
-                sources.append({**metadata, "sample": _sample_lines(lines, budget)})
-            configured_provider = (os.environ.get("YT_RAG_LABEL_DRAFTER") or "").strip()
-            provider = (
-                "codex_cli"
-                if job["task"] == "sections" or spec.min_sources > 1
-                else configured_provider or "claude_cli"
-            )
-            if provider not in ("codex_cli", "claude_cli"):
-                raise LabelDraftError("INVALID_DRAFTER", "Choose codex_cli or claude_cli.")
-            model = (
-                os.environ.get("YT_RAG_LABEL_DRAFTER_MODEL")
-                if configured_provider in ("", provider)
-                else None
-            ) or ("opus" if provider == "claude_cli" else None)
-            response = self.drafter(
-                provider=provider, model=model,
-                system_prompt="Draft evidence labels in the supplied JSON schema.",
-                user_message=spec.prompt(sources, job["language"]),
-                schema_path=self.schema_dir / spec.schema,
-            )
-            try:
-                generated = json.loads(response["text"])
-            except ValueError as exc:
-                raise LabelDraftError(
-                    "INVALID_DRAFTER_OUTPUT", "The drafter returned invalid JSON.", 502
-                ) from exc
-            try:
-                items, notes = spec.canonicalize(generated, sources)
-            except ValueError as exc:
-                raise LabelDraftError("INVALID_DRAFTER_OUTPUT", str(exc), 502) from exc
+                metadata, lines = self._source(
+                    source_id, audio_language=job["language"] if audio_task else None,
+                )
+                if not audio_task:
+                    metadata["sample"] = _sample_lines(lines, budget)
+                sources.append(metadata)
+            if audio_task:
+                try:
+                    items = audio_labels.sample_segments(sources[0], lines, job["seed"])
+                except ValueError as exc:
+                    raise LabelDraftError("AUDIO_LABEL_UNAVAILABLE", str(exc)) from exc
+                notes = ""
+                provenance = {
+                    "drafter": "stored_stt_segments",
+                    "seed": job["seed"],
+                    "system_under_test_used": job["task"] == "stt_reference",
+                }
+            else:
+                items, notes, provenance = self._model_labels(job, spec, sources)
             draft_id = f"draft_{uuid.uuid4().hex}"
             timestamp = self.clock()
             draft = {
@@ -483,14 +498,7 @@ class LabelDraftService:
                     for source in sources
                 ],
                 "notes": notes,
-                "label_provenance": {
-                    "drafter": response["provider"],
-                    "model_override": response["model"],
-                    "provider": response["provider"],
-                    "model": response["model"],
-                    "cli_version": response.get("cli_version"),
-                    "system_under_test_used": False,
-                },
+                "label_provenance": provenance,
                 "items": [
                     {**item, "id": f"item_{index}", "review": None}
                     for index, item in enumerate(items, start=1)
@@ -511,6 +519,45 @@ class LabelDraftService:
             with self._lock:
                 self._jobs[job_id].update(result, completed_at=self.clock())
                 self._active_job = None
+
+    def _model_labels(self, job, spec, sources):
+        configured_provider = (os.environ.get("YT_RAG_LABEL_DRAFTER") or "").strip()
+        provider = (
+            "codex_cli"
+            if job["task"] == "sections" or spec.min_sources > 1
+            else configured_provider or "claude_cli"
+        )
+        if provider not in ("codex_cli", "claude_cli"):
+            raise LabelDraftError("INVALID_DRAFTER", "Choose codex_cli or claude_cli.")
+        model = (
+            os.environ.get("YT_RAG_LABEL_DRAFTER_MODEL")
+            if configured_provider in ("", provider)
+            else None
+        ) or ("opus" if provider == "claude_cli" else None)
+        response = self.drafter(
+            provider=provider, model=model,
+            system_prompt="Draft evidence labels in the supplied JSON schema.",
+            user_message=spec.prompt(sources, job["language"]),
+            schema_path=self.schema_dir / spec.schema,
+        )
+        try:
+            generated = json.loads(response["text"])
+        except ValueError as exc:
+            raise LabelDraftError(
+                "INVALID_DRAFTER_OUTPUT", "The drafter returned invalid JSON.", 502
+            ) from exc
+        try:
+            items, notes = spec.canonicalize(generated, sources)
+        except ValueError as exc:
+            raise LabelDraftError("INVALID_DRAFTER_OUTPUT", str(exc), 502) from exc
+        return items, notes, {
+            "drafter": response["provider"],
+            "model_override": response["model"],
+            "provider": response["provider"],
+            "model": response["model"],
+            "cli_version": response.get("cli_version"),
+            "system_under_test_used": False,
+        }
 
     def import_judge_audit(self, rows):
         """Import the report's local audit sample without running a model."""
@@ -663,17 +710,21 @@ class LabelDraftService:
         )
         first, last = (
             (effective["start"], effective["end"])
-            if draft["task"] == "sections"
+            if draft["task"] == "sections" or draft["task"] in audio_labels.TASK_NAMES
             else (effective["span_start"], effective["span_end"])
         )
         return {
             "item_id": item_id,
-            **self._context_window(source, self._checked_lines(source), first, last),
+            **self._context_window(source, self._checked_lines(source, draft["language"]), first, last),
         }
 
-    def _checked_lines(self, source):
-        current, lines = self._source(source["source_id"])
-        if current["source_fingerprint"] != source["source_fingerprint"]:
+    def _checked_lines(self, source, language=None):
+        audio = source.get("audio")
+        current, lines = self._source(source["source_id"], audio_language=language if audio else None)
+        if (
+            current["source_fingerprint"] != source["source_fingerprint"]
+            or audio and current["audio"]["stt"] != audio["stt"]
+        ):
             raise LabelDraftError(
                 "SOURCE_CHANGED",
                 "The stored transcript has changed since drafting.",
@@ -777,6 +828,8 @@ class LabelDraftService:
                 source["source_id"]: source["source_fingerprint"]
                 for source in draft["sources"]
             }
+            if draft["task"] in audio_labels.TASK_NAMES:
+                self._checked_lines(draft["sources"][0], draft["language"])
             for item in draft["items"]:
                 review = item["review"]
                 decision = review["decision"]
@@ -790,6 +843,9 @@ class LabelDraftService:
                 }
                 if draft["task"] == "sections":
                     del fields["start_line"], fields["end_line"]
+                if draft["task"] == "stt_reference":
+                    fields["draft_text"] = item["text"]
+                    fields["stt"] = draft["sources"][0]["audio"]["stt"]
                 rows.append(
                     {
                         **fields,

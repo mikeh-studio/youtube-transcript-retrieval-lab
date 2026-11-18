@@ -193,6 +193,47 @@ perspective's source, then omits perspectives that have no valid citation.
 `coverage` reports selected and cited source counts and the share of proposed
 references that pass validation. The share is zero when there are no references.
 
+### Speech-to-text evaluation
+
+In **Label review**, choose **STT reference excerpts** or **Timestamp landing**
+and an indexed audio source. Each task samples up to 10 stored segments with a
+configurable seed (default 42). Play the audio in the review pane. For a
+reference excerpt, approve the draft if it matches the audio or edit the
+transcript. For timestamp landing, approve if playback lands within a second
+of the expected onset, or record the actual onset minus the sample start in
+seconds. Reject unusable items. Finalization writes the accepted rows and a
+digest manifest under `data/evaluation/labels/<task>/`. Reference rows retain both
+the corrected text and the engine draft used to start the review.
+
+```sh
+.venv/bin/python -m evals.stt.runner \
+  --references data/evaluation/labels/stt_reference/dataset_EXAMPLE.manifest.json \
+  --landing data/evaluation/labels/ts_landing/dataset_EXAMPLE.manifest.json \
+  --drift-pairs data/stt/paired-timelines.json \
+  --jobs data/stt/jobs.json \
+  --out evals/reports/stt.json
+```
+
+Supply any combination of inputs. Reference scores compare each engine draft to
+the reviewed excerpt and pool edit counts by engine, model, and language.
+Japanese reports character error rate because the runner does not segment
+Japanese into words. Report sample sizes alongside the scores and account for
+the reviewers having seen the engine draft.
+
+For drift, supply explicit pairs of the same published content as a JSON
+`pairs` array. Each pair has a `pair_id`, `language`, `caption_words`, and
+`stt_words`. Each word array contains `{"word":"kite","start":1.25}` rows in
+timestamp order. Use the same timeline and word segmentation for both streams.
+Flatten the saved `stt_words.json` segments for the STT stream when word timing
+is available. The report gives the STT-minus-caption offsets at unique shared
+three-word anchors, their median, and IQR. A pair with no matching anchors
+reports an unavailable median and IQR.
+
+For real-time factor (RTF), save a `GET /v1/ingest/jobs` response before stopping
+the server. RTF uses engine wall time divided by audio duration. It includes
+engine startup on cold jobs and excludes queue time, downloading, and indexing.
+Reused transcripts have no timing sample.
+
 ### Cross-source labels and evaluation
 
 In **Label review**, choose **Multi-source questions** or **Collection themes**

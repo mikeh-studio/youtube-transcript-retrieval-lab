@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { apiRequest, formatSeconds } from "./lab.jsx";
+import { audioPlayback, remoteTimingNote } from "../../web/audio-playback.js";
 
 const FALLBACK_LLM_PROVIDER_OPTIONS = {
   chatgpt: {
@@ -81,13 +82,41 @@ export function ModelSelectLabel({ providerOptions, provider, model, onChange, d
   );
 }
 
-export function PlayerPanel({ videoId, startSeconds, title }) {
+function AudioPlayer({ videoId, source, start, title }) {
+  const [localFailed, setLocalFailed] = useState(false);
+  const [remoteFailed, setRemoteFailed] = useState(false);
+  const { local, remote } = audioPlayback(videoId, source, start);
+  const useLocal = local && !localFailed;
+  const src = useLocal ? local : remoteFailed ? "" : remote;
+
+  return (
+    <section className="panel">
+      <h2 className="section-title">Audio player</h2>
+      <p className="section-desc">{title} ({formatSeconds(start)})</p>
+      {src ? <audio controls autoPlay key={src} src={src} onError={() => {
+        if (useLocal) setLocalFailed(true);
+        else setRemoteFailed(true);
+      }} /> : <p role="status">Audio is unavailable for this source.</p>}
+      {!useLocal && src ? <p className="lab-hint">{remoteTimingNote}</p> : null}
+    </section>
+  );
+}
+
+export function PlayerPanel({ videoId, startSeconds, title, video }) {
   if (!videoId) {
     return null;
   }
 
+  const offset = Number(startSeconds);
+  const seconds = Number.isFinite(offset) ? Math.max(0, offset) : 0;
+  const source = video?.source;
+  if ((video?.source_type || source?.platform || "youtube") !== "youtube") {
+    return <AudioPlayer key={`${videoId}-${seconds}`} videoId={videoId} source={source || {}}
+      start={seconds} title={title || videoId} />;
+  }
+
   const safeVideoId = encodeURIComponent(videoId);
-  const start = Math.max(0, Math.floor(Number(startSeconds || 0)));
+  const start = Math.floor(seconds);
   const src = `https://www.youtube.com/embed/${safeVideoId}?start=${start}&autoplay=1&rel=0&modestbranding=1&playsinline=1`;
 
   return (

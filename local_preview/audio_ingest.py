@@ -9,6 +9,7 @@ import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from time import monotonic
 from urllib.parse import unquote, urlsplit
 
 from local_preview.audio_media import AUDIO_TYPES, VIDEO_TYPES, registered_media_path
@@ -46,6 +47,10 @@ class IngestJob:
     source_type: str = "youtube"
     step: str = ""
     progress: float = 0.0
+    transcription_seconds: float | None = None
+    audio_duration_seconds: float | None = None
+    stt_engine: str | None = None
+    stt_model: str | None = None
 
 
 def _reject_youtube_media(url):
@@ -126,7 +131,7 @@ class AudioIngestQueue:
     def __init__(
         self, *, library, write_lock, root_dir, clock, store_job, update_job,
         mark_router_stale, engine_factory=get_engine, fetch_feed=preview_feed,
-        stream_media=open_fetch,
+        stream_media=open_fetch, timer=monotonic,
     ):
         self.library = library
         self.write_lock = write_lock
@@ -138,6 +143,7 @@ class AudioIngestQueue:
         self.engine_factory = engine_factory
         self.fetch_feed = fetch_feed
         self.stream_media = stream_media
+        self.timer = timer
         self.media_dir = Path(library.data_dir).resolve() / "media"
         self.pending = queue.Queue()
         threading.Thread(target=self._work, name="audio-ingest", daemon=True).start()
@@ -200,11 +206,12 @@ class AudioIngestQueue:
         with self.write_lock:
             return self.library.videos.get(source_id)
 
-    def _complete(self, job_id, source_id, record):
+    def _complete(self, job_id, source_id, record, **timing):
         source = record["source"]
         self.update_job(
             job_id, status="completed", step="completed", progress=1.0,
             video_id=source_id, url=canonical_url(source), language=record["language"],
+            **timing,
         )
 
     def _ingest(self, job, request):
@@ -279,7 +286,9 @@ class AudioIngestQueue:
                     return
 
             self.update_job(job.job_id, video_id=source_id, step="transcribing", progress=0.4)
+            started = self.timer()
             result = self.engine_factory(request["engine"]).transcribe(staged, job.language)
+            elapsed = self.timer() - started
             if not result.segments:
                 raise ValueError("Speech-to-text returned no transcript segments.")
             if metadata.get("episode", {}).get("duration_seconds") is None:
@@ -296,7 +305,11 @@ class AudioIngestQueue:
             with self.write_lock:
                 record = self._publish(source_id, staged, extension, title, metadata, result)
                 staged.unlink(missing_ok=True)
-                self._complete(job.job_id, source_id, record)
+                self._complete(
+                    job.job_id, source_id, record, transcription_seconds=elapsed,
+                    audio_duration_seconds=result.duration, stt_engine=result.engine,
+                    stt_model=result.model,
+                )
         finally:
             if staged is not None:
                 staged.unlink(missing_ok=True)

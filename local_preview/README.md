@@ -71,8 +71,10 @@ Static hosting or mocked `/v1/*` responses are not valid ingestion verification.
 ## Podcast and local audio ingestion
 
 Install the optional audio dependencies and start the local app. Audio
-ingestion is available through the JSON API. See the engine setup and retention
-settings in [Audio ingestion](../docs/configuration.md#audio-ingestion).
+ingestion is available under **Library → Add audio** or through the JSON API.
+Preview an RSS feed and choose an episode, or enter a file path on the server.
+See the engine setup and retention settings in
+[Audio ingestion](../docs/configuration.md#audio-ingestion).
 
 - `GET /v1/stt/capabilities` returns the configured engine, models, device,
   compute type and word-timestamp setting, plus package and key availability.
@@ -100,8 +102,10 @@ Send JSON POSTs with the same-origin session cookie and the `X-CSRF-Token`
 from `GET /browser-session`.
 
 Poll `GET /v1/ingest/jobs/{job_id}` for `status`, `step`, `progress` (0 to 1),
-and the source ID in `video_id`. Jobs run one at a time in memory. Completed
-sources appear in `GET /v1/videos` alongside other indexed transcripts.
+and the source ID in `video_id`. Jobs run one at a time in memory. Jobs that
+transcribed audio also report `transcription_seconds`, `audio_duration_seconds`,
+`stt_engine`, and `stt_model` on completion. Completed sources appear in
+`GET /v1/videos` alongside other indexed transcripts.
 `GET /v1/sources/{id}/media` serves a retained copy and supports a single
 byte range for seeking. When word timestamps are enabled, the library stores
 them in `data/library/videos/{id}/stt_words.json` with second offsets and word

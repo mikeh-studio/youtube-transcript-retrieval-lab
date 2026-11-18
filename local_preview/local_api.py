@@ -8750,6 +8750,7 @@ class Handler(BrowserBoundary, BaseHTTPRequestHandler):
                 self._label_json(
                     "job", SERVICE._label_draft_service().start_job,
                     body.get("task"), body.get("source_ids"), body.get("language"),
+                    body.get("seed"),
                     status=202,
                 )
                 return

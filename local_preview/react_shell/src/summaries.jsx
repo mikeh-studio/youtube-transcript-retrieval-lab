@@ -172,7 +172,8 @@ function KeyAreasResult({ result, video }) {
       </section>
       {playback ? (
         <div ref={playerRef}>
-          <PlayerPanel videoId={video.video_id} startSeconds={playback.start} title={video.title || video.video_id} />
+          <PlayerPanel videoId={video.video_id} startSeconds={playback.start} title={video.title || video.video_id}
+            video={video} />
         </div>
       ) : null}
       <section className="panel">

@@ -1,10 +1,12 @@
 import { renderLabNav } from "./lab-nav.js";
+import { audioPlayback, remoteTimingNote } from "./audio-playback.js";
 
 renderLabNav({ active: "evaluate" });
 
 const $ = (id) => document.getElementById(id);
 const state = {
   tasks: [],
+  videos: [],
   drafts: [],
   draft: null,
   index: 0,
@@ -22,6 +24,8 @@ const isAudit = () => state.draft?.task === "judge_audit";
 const isSections = () => state.draft?.task === "sections";
 const isMultiSourceQA = () => state.draft?.task === "multi_source_qa";
 const isCollectionThemes = () => state.draft?.task === "collection_themes";
+const isReference = () => state.draft?.task === "stt_reference";
+const isLanding = () => state.draft?.task === "ts_landing";
 const draftSource = (id) => state.draft.sources.find((source) => source.source_id === id);
 
 async function api(path, body) {
@@ -82,6 +86,7 @@ async function openDraft(id) {
   state.draft = null;
   state.index = 0;
   $("review").hidden = true;
+  clearReviewAudio();
   $("reviewStatus").textContent = id ? "Loading draft…" : "Choose a saved draft to review.";
   if (!id) return;
   try {
@@ -193,6 +198,36 @@ function renderCrossSourceDetails(label) {
   }
 }
 
+function clearReviewAudio() {
+  const player = $("reviewAudio");
+  player.onerror = null;
+  player.hidden = $("audioNote").hidden = true;
+  if (player.hasAttribute("src")) {
+    player.removeAttribute("src");
+    player.load();
+  }
+}
+
+function renderReviewAudio(source, label) {
+  clearReviewAudio();
+  if (!source || !(isReference() || isLanding())) return;
+  const { local, remote } = audioPlayback(source.source_id, source.audio || {}, label.start, isReference() ? label.end : null);
+  const player = $("reviewAudio");
+  const note = $("audioNote");
+  function play(src, fallback) {
+    player.hidden = !src;
+    note.hidden = Boolean(src) && !fallback;
+    note.textContent = src ? remoteTimingNote : "Audio is unavailable for this source.";
+    if (!src) return;
+    player.onerror = () => {
+      if (fallback || !remote) clearReviewAudio();
+      play(fallback ? "" : remote, true);
+    };
+    player.src = src;
+  }
+  play(local || remote, !local);
+}
+
 function renderItem() {
   const { draft, index } = state;
   const item = currentItem();
@@ -202,6 +237,7 @@ function renderItem() {
   const judgment = item.judgment;
   const multiQA = isMultiSourceQA();
   const collectionThemes = isCollectionThemes();
+  const audio = isReference() || isLanding();
   const source = draftSource(item.source_id);
   $("review").hidden = false;
   $("editForm").hidden = true;
@@ -216,6 +252,11 @@ function renderItem() {
   } else if (collectionThemes) {
     $("itemText").textContent = label.title;
     $("itemTiming").textContent = label.source_ids.map((id) => draftSource(id).title).join(" · ");
+  } else if (audio) {
+    $("itemText").textContent = label.text;
+    $("itemTiming").textContent = isLanding()
+      ? `Sample start ${timecode(label.start, true)}. Approve if the excerpt lands within one second.${label.offset_seconds === undefined ? "" : ` Recorded offset ${label.offset_seconds} s.`}`
+      : `Excerpt ${timecode(label.start, true)}–${timecode(label.end, true)}. Listen and correct the draft text as needed.`;
   } else {
     $("itemText").textContent = audit ? judgment.prediction_text : section ? label.title : label.text;
     $("itemTiming").textContent = audit
@@ -241,13 +282,15 @@ function renderItem() {
   $("approve").textContent = audit ? "Agree" : "Approve";
   $("reject").textContent = audit ? "Disagree" : "Reject";
   $("edit").hidden = audit;
+  $("edit").textContent = isLanding() ? "Record offset" : "Edit";
   $("reviewKeys").hidden = audit;
   $("notes").textContent = draft.notes ? `Draft notes · ${draft.notes}` : "";
   $("notes").hidden = !draft.notes;
-  const url = audit || !source ? "" : timestampUrl(source.url, section ? label.start : label.onset);
+  const url = audio || audit || !source ? "" : timestampUrl(source.url, section ? label.start : label.onset);
   $("timestamp").hidden = !url;
   if (url) $("timestamp").href = url;
   else $("timestamp").removeAttribute("href");
+  renderReviewAudio(source, label);
   updateControls();
   $("contextHeading").textContent = collectionThemes ? "Transcript excerpts" : "Transcript context";
   $("contextSection").hidden = audit && judgment.kind === "match";
@@ -271,18 +314,24 @@ function startEdit() {
   const multiQA = isMultiSourceQA();
   const collectionThemes = isCollectionThemes();
   const multiple = multiQA || collectionThemes;
-  $("singleSourceFields").hidden = multiple;
+  const landing = isLanding();
+  const reference = isReference();
+  const hideSpan = multiple || landing || reference;
+  $("singleSourceFields").hidden = hideSpan;
+  form.elements.text.disabled = $("editTextLabel").closest("label").hidden = landing;
+  form.elements.text.required = !reference;
   for (const [id, name, enabled] of [
     ["editFactsField", "required_facts", multiQA],
     ["editSpansField", "gold_spans", multiQA],
     ["editSourcesField", "source_ids", collectionThemes],
+    ["editOffsetField", "offset_seconds", landing],
   ]) {
     form.elements[name].disabled = $(id).hidden = !enabled;
   }
   for (const name of ["importance", "onset", "span_start", "span_end"]) {
-    form.elements[name].disabled = multiple;
+    form.elements[name].disabled = hideSpan;
   }
-  $("editTextLabel").textContent = section ? "Section title" : "Label text";
+  $("editTextLabel").textContent = reference ? "Reference transcript" : section ? "Section title" : "Label text";
   $("editStartLabel").textContent = section ? "Section start (seconds)" : "Span start (seconds)";
   $("editEndLabel").textContent = section ? "Section end (seconds)" : "Span end (seconds)";
   form.elements.text.value = section ? item.title : item.text;
@@ -290,10 +339,14 @@ function startEdit() {
   form.elements.span_end.value = section ? item.end : item.span_end;
   for (const name of ["importance", "onset"]) {
     const field = form.elements[name];
-    field.disabled = field.closest("label").hidden = section || multiple;
+    field.disabled = field.closest("label").hidden = section || hideSpan;
     field.value = item[name] ?? "";
   }
-  if (multiQA) {
+  if (landing) {
+    form.elements.offset_seconds.value = item.offset_seconds ?? "";
+    form.elements.offset_seconds.min = -item.start;
+    form.elements.offset_seconds.max = draftSource(item.source_id).duration - item.start;
+  } else if (multiQA) {
     $("editTextLabel").textContent = "Question";
     form.elements.text.value = item.question;
     form.elements.required_facts.value = item.required_facts.join("\n");
@@ -316,7 +369,7 @@ function startEdit() {
   }
   form.hidden = false;
   updateControls();
-  form.elements.text.focus();
+  (landing ? form.elements.offset_seconds : form.elements.text).focus();
 }
 
 async function mutate(action, body) {
@@ -365,14 +418,39 @@ function decide(decision, edits) {
 function setSourceCount() {
   const task = state.tasks.find((entry) => entry.task === $("task").value);
   const audit = task?.input === "judge_audit_sample";
+  const audio = task?.input === "stt_segments";
   $("sources").multiple = task?.max_sources > 1;
   $("sourceField").hidden = $("languageField").hidden = audit;
   $("sources").disabled = $("language").disabled = audit;
   $("auditFileField").hidden = !audit;
   $("auditFile").disabled = !audit;
   $("auditFile").required = audit;
+  $("seedField").hidden = $("seed").disabled = !audio;
+  $("language").readOnly = audio;
   $("startJob").textContent = audit ? "Import audit sample" : "Start draft";
   $("startJob").disabled = state.starting || !task || (!audit && !$("sources").options.length);
+}
+
+function populateSources() {
+  const task = state.tasks.find((entry) => entry.task === $("task").value);
+  const selected = new Set(Array.from($("sources").selectedOptions, (option) => option.value));
+  const audio = task?.input === "stt_segments";
+  const videos = audio ? state.videos.filter(({ source }) =>
+    ["podcast_rss", "local_audio"].includes(source?.platform) &&
+    source.stt?.engine && source.stt.model && (source.local_media_path || source.media_url),
+  ) : state.videos;
+  $("sources").multiple = task?.max_sources > 1;
+  $("sources").replaceChildren(...videos.map((video) =>
+    new Option(video.title, video.video_id, false, selected.has(video.video_id)),
+  ));
+  syncAudioLanguage();
+}
+
+function syncAudioLanguage() {
+  const task = state.tasks.find((entry) => entry.task === $("task").value);
+  if (task?.input === "stt_segments") {
+    $("language").value = state.videos.find((video) => video.video_id === $("sources").value)?.language || "";
+  }
 }
 
 async function pollJob(job) {
@@ -415,6 +493,7 @@ $("startForm").addEventListener("submit", async (event) => {
         task: $("task").value,
         source_ids: sourceIds,
         language: $("language").value.trim(),
+        ...(task.input === "stt_segments" ? { seed: $("seed").valueAsNumber } : {}),
       });
       draftID = await pollJob(job);
     }
@@ -434,9 +513,11 @@ $("startForm").addEventListener("submit", async (event) => {
 });
 
 $("task").addEventListener("change", () => {
+  populateSources();
   setSourceCount();
   $("jobStatus").textContent = "";
 });
+$("sources").addEventListener("change", syncAudioLanguage);
 $("drafts").addEventListener("change", () => void openDraft($("drafts").value));
 $("previous").addEventListener("click", () => move(-1));
 $("next").addEventListener("click", () => move(1));
@@ -451,6 +532,14 @@ $("cancelEdit").addEventListener("click", () => {
 $("editForm").addEventListener("submit", (event) => {
   event.preventDefault();
   const fields = event.currentTarget.elements;
+  if (isReference()) {
+    decide("edited", { text: fields.text.value });
+    return;
+  }
+  if (isLanding()) {
+    decide("edited", { offset_seconds: fields.offset_seconds.valueAsNumber });
+    return;
+  }
   if (isMultiSourceQA()) {
     const lines = fields.gold_spans.value.trim().split(/\n/).map((line) => line.trim().split(/\s+/));
     if (lines.some((line) => line.length !== 3 || !line.slice(1).every((value) => Number.isFinite(Number(value))))) {
@@ -494,7 +583,7 @@ $("review").addEventListener("keydown", (event) => {
   if (
     !state.draft || state.saving || !$("editForm").hidden || event.repeat ||
     event.altKey || event.ctrlKey || event.metaKey || event.target.isContentEditable ||
-    event.target.matches("input, select, textarea")
+    event.target.matches("input, select, textarea, audio")
   ) return;
   const buttons = { a: "approve", e: "edit", r: "reject", j: "next", k: "previous" };
   const button = $(buttons[event.key.toLowerCase()]);
@@ -506,10 +595,11 @@ $("review").addEventListener("keydown", (event) => {
 Promise.all([api(`${apiRoot}/tasks`), api("/v1/videos")])
   .then(([{ tasks }, { videos }]) => {
     state.tasks = tasks;
+    state.videos = videos;
     for (const task of tasks) $("task").add(new Option(task.title, task.task));
-    for (const video of videos) $("sources").add(new Option(video.title, video.video_id));
+    populateSources();
     if (tasks.length) setSourceCount();
-    if (!videos.length) $("jobStatus").textContent = "Add a video to the Library before drafting.";
+    if (!videos.length) $("jobStatus").textContent = "Add a source to the Library before drafting.";
   })
   .catch((error) => { $("jobStatus").textContent = error.message; });
 

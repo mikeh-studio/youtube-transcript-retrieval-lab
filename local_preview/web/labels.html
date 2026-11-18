@@ -38,6 +38,9 @@
                   <option value="ja">Japanese</option>
                 </datalist>
               </label>
+              <label id="seedField" hidden>Sample seed
+                <input id="seed" type="number" min="0" max="4294967295" step="1" value="42" required disabled />
+              </label>
               <label id="auditFileField" hidden>Judge audit sample
                 <input type="file" id="auditFile" accept=".jsonl,application/x-ndjson" disabled />
               </label>
@@ -68,6 +71,8 @@
               <p id="decisionStatus" class="label-status"></p>
               <p id="itemText" class="label-text"></p>
               <p id="itemTiming"></p>
+              <audio id="reviewAudio" aria-label="Review audio excerpt" controls preload="metadata" hidden></audio>
+              <p id="audioNote" class="label-status" hidden></p>
               <p id="rationale" class="label-status" hidden></p>
               <ul id="auditGoldPoints" hidden></ul>
               <ul id="crossSourceDetails" hidden></ul>
@@ -82,6 +87,9 @@
               </div>
               <form id="editForm" class="grid" hidden>
                 <label><span id="editTextLabel">Label text</span><textarea name="text" required maxlength="4000"></textarea></label>
+                <label id="editOffsetField" hidden>Actual onset minus sample start (seconds)
+                  <input name="offset_seconds" type="number" required step="any" disabled />
+                </label>
                 <div id="singleSourceFields" class="label-edit-fields">
                   <label>Importance (1–3)<input name="importance" type="number" required min="1" max="3" step="1" /></label>
                   <label>Onset (seconds)<input name="onset" type="number" required min="0" step="any" /></label>
