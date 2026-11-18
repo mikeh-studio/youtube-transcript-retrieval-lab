@@ -16,7 +16,7 @@ from local_preview.transcript_lines import (
     format_lines,
     numbered_lines,
 )
-from multilingual.youtube_metadata import youtube_timestamp_url
+from multilingual.source_model import is_youtube, normalize_source, timestamp_url
 from pipelines.export_library import parse_json
 
 
@@ -234,6 +234,7 @@ def build_key_areas(
         raise ValueError("Invalid section count or minimum duration")
 
     source_id = source_meta.get("source_id") or source_meta.get("video_id")
+    source = normalize_source(source_id, source_meta.get("source"))
     context = json.dumps(
         {"title": source_meta.get("title", ""), "participants": participants},
         ensure_ascii=False,
@@ -337,7 +338,7 @@ def build_key_areas(
                     ),
                     "start": start,
                     "end": max(span["end"] for span in spans),
-                    "url": youtube_timestamp_url(source_id, start) if source_id else "",
+                    "url": timestamp_url(source, start) if source_id else "",
                 }
             )
         section["key_points"] = points
@@ -405,7 +406,11 @@ def cached_key_areas(
         raise ValueError("Invalid source_id")
     path = Path(cache_dir) / f"{source_id}.json"
     fingerprint = fingerprint_lines(numbered_lines(segments))
-    key = json.dumps([KEY_AREAS_VERSION, language, provider, model, fingerprint])
+    key_fields = [KEY_AREAS_VERSION, language, provider, model, fingerprint]
+    source = normalize_source(source_id, source_meta.get("source"))
+    if not is_youtube(source):
+        key_fields.append(timestamp_url(source, 0))
+    key = json.dumps(key_fields)
     cached = _cache_hit(_read_cache(path), key)
     if cached is not None:
         return cached

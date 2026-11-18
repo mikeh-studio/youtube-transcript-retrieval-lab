@@ -8,6 +8,7 @@ import {
   apiRequest,
   errorInfo,
   navigate,
+  safeExternalUrl,
   thumbnailUrlForVideo,
   writeLocalStorage,
 } from "./lab.jsx";
@@ -451,7 +452,9 @@ export function LibraryPage({ onSuccess, onSummarizeSelection }) {
                 {visibleVideos.map((video) => {
                   const videoId = String(video.video_id || "").trim();
                   const selected = selectedVideoIds.includes(videoId);
-                  const thumbnailUrl = thumbnailUrlForVideo(videoId);
+                  const platform = video.source_type || video.source?.platform || "youtube";
+                  const thumbnailUrl = platform === "youtube" ? thumbnailUrlForVideo(videoId) : "";
+                  const sourceUrl = safeExternalUrl(video.url || video.source?.url);
                   const catalogItem = catalog.byVideoId.get(videoId);
                   const topics = (catalogItem?.labels || []).map((label) => label.en).filter(Boolean);
                   return (
@@ -483,9 +486,13 @@ export function LibraryPage({ onSuccess, onSummarizeSelection }) {
                             ) : null}
                           </span>
                           <span>
-                            <a className="lab-video-title" href={video.url || `https://www.youtube.com/watch?v=${videoId}`} target="_blank" rel="noopener noreferrer">
-                              {video.title || videoId}
-                            </a>
+                            {sourceUrl ? (
+                              <a className="lab-video-title" href={sourceUrl} target="_blank" rel="noopener noreferrer">
+                                {video.title || videoId}
+                              </a>
+                            ) : (
+                              <span className="lab-video-title">{video.title || videoId}</span>
+                            )}
                             <span className="lab-video-id">
                               {videoId}
                               {video.chunking_stale ? <span className="lab-chip warn">older chunking</span> : null}

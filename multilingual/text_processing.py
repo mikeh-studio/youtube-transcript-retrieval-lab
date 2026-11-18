@@ -537,6 +537,8 @@ class TextProcessor:
                     "raw_text": self.clean_text(raw_text),
                     "embed_text": embed_text,
                 })
+                if "speaker" in line:
+                    lines[-1]["speaker"] = line["speaker"]
         return lines
 
     def generate_embeddings(self, chunks):

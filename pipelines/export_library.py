@@ -8,8 +8,14 @@ import json
 import math
 import os
 import re
+import sys
 import tempfile
 from pathlib import Path
+
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from multilingual.source_model import SOURCE_ID_RE, is_youtube
 
 SCHEMA_VERSION = "youtube-library-export/v1"
 VIDEO_ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
@@ -66,6 +72,11 @@ def build_export(data_dir: Path) -> dict:
     receiving service. Source files are checked again before returning to catch
     concurrent changes; operators should pause library writes during export.
     """
+    bundle, _ = _build_export(data_dir)
+    return bundle
+
+
+def _build_export(data_dir: Path) -> tuple[dict, int]:
     library_dir = (Path(data_dir) / "library").resolve()
     manifest_path = library_dir / "library.json"
     if manifest_path.is_symlink():
@@ -82,25 +93,42 @@ def build_export(data_dir: Path) -> dict:
     ids = manifest.get("videos")
     if not isinstance(ids, list) or not ids:
         raise ValueError("manifest videos must be a nonempty list")
-    if any(not isinstance(vid, str) or not VIDEO_ID.fullmatch(vid) for vid in ids):
-        raise ValueError("manifest contains an invalid YouTube video ID")
+    if any(not isinstance(vid, str) or not SOURCE_ID_RE.fullmatch(vid) for vid in ids):
+        raise ValueError("manifest contains an invalid YouTube video or audio source ID")
     if len(set(ids)) != len(ids):
         raise ValueError("manifest contains duplicate video IDs")
 
     videos = []
+    skipped_non_youtube = 0
     captured = [(manifest_path, manifest_bytes)]
     for video_id in ids:
         path = library_dir / "videos" / video_id / "record.json"
         if path.is_symlink() or not path.resolve().is_relative_to(library_dir):
             raise ValueError(f"record escapes library root: {video_id}")
+        if not VIDEO_ID.fullmatch(video_id) and not path.exists():
+            raise ValueError(f"invalid YouTube video ID or missing audio record: {video_id}")
         raw = path.read_bytes()
         text = raw.decode("utf-8")
-        if not isinstance(parse_json(text), dict):
+        record = parse_json(text)
+        if not isinstance(record, dict):
             raise ValueError(f"record is not an object: {video_id}")
+        captured.append((path, raw))
+        if not is_youtube(record.get("source")):
+            skipped_non_youtube += 1
+            continue
+        if not VIDEO_ID.fullmatch(video_id):
+            raise ValueError(f"manifest contains an invalid YouTube video ID: {video_id}")
         videos.append(
             {"video_id": video_id, "record_sha256": sha256(raw), "record_json": text}
         )
-        captured.append((path, raw))
+
+    if not videos:
+        raise ValueError("no YouTube records to export")
+    if skipped_non_youtube:
+        # The v1 manifest has the same membership and order as the records.
+        projected_manifest = {**manifest, "videos": [row["video_id"] for row in videos]}
+        manifest_text = canonical_json(projected_manifest)
+        manifest_bytes = manifest_text.encode("utf-8")
 
     envelope = {
         "schema_version": SCHEMA_VERSION,
@@ -119,7 +147,7 @@ def build_export(data_dir: Path) -> dict:
     envelope["snapshot_id"] = sha256(canonical_json(identity).encode("utf-8"))
     if any(path.read_bytes() != raw for path, raw in captured):
         raise ValueError("library changed during export; pause writes and retry")
-    return envelope
+    return envelope, skipped_non_youtube
 
 
 def write_export(bundle: dict, output: Path) -> None:
@@ -147,13 +175,14 @@ def main() -> None:
     parser.add_argument("--data-dir", type=Path, default=Path("data"))
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    bundle = build_export(args.data_dir)
+    bundle, skipped_non_youtube = _build_export(args.data_dir)
     write_export(bundle, args.output)
     print(
         json.dumps(
             {
                 "snapshot_id": bundle["snapshot_id"],
                 "videos": len(bundle["videos"]),
+                "skipped_non_youtube": skipped_non_youtube,
                 "output": str(args.output),
             }
         )

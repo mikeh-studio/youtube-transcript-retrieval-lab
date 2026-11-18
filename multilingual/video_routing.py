@@ -25,7 +25,7 @@ except Exception:
 
 import faiss
 
-from multilingual.youtube_metadata import normalize_youtube_source
+from multilingual.source_model import canonical_url, is_youtube, normalize_source
 
 
 ROUTING_PROFILE_VERSION = 2
@@ -111,22 +111,30 @@ def build_routing_profile(
     """Build identity, overview, and timestamped section texts for one video."""
     video_id = str(video_id or "").strip()
     title = _compact_text(video.get("title") or f"Video {video_id}")
-    source = normalize_youtube_source(
+    source = normalize_source(
         video_id,
         video.get("source"),
         legacy=not isinstance(video.get("source"), dict),
     )
-    channel = source["channel"]
+    youtube = is_youtube(source)
+    publisher = source["channel"] if youtube else source["show"]
+    channel_id = publisher.get("id") if youtube else None
+    source_url = canonical_url(source)
+    platform_label = {
+        "youtube": "YouTube",
+        "podcast_rss": "Podcast",
+        "local_audio": "Local audio",
+    }[source["platform"]]
 
     identity_lines = [
-        f"Video title: {title}",
-        "Source: YouTube",
-        f"URL: {source['url']}",
-        f"Video ID: {video_id}",
+        f"{'Video' if youtube else 'Episode'} title: {title}",
+        f"Source: {platform_label}",
+        f"URL: {source_url}",
+        f"{'Video' if youtube else 'Source'} ID: {video_id}",
     ]
-    if channel.get("name"):
-        # Channel is useful provenance, but appears in exactly one vector.
-        identity_lines.insert(1, f"Channel: {channel['name']}")
+    if publisher.get("name"):
+        label = "Channel" if youtube else "Show"
+        identity_lines.insert(1, f"{label}: {publisher['name']}")
     identity = "\n".join(identity_lines)
 
     chunks = [
@@ -185,7 +193,7 @@ def build_routing_profile(
             "start": None,
             "end": None,
             "text": identity,
-            "channel_id": channel.get("id"),
+            "channel_id": channel_id,
         },
         {
             "video_id": video_id,
@@ -194,7 +202,7 @@ def build_routing_profile(
             "start": None,
             "end": None,
             "text": f"Video overview: {overview}",
-            "channel_id": channel.get("id"),
+            "channel_id": channel_id,
         },
     ]
     vector_records.extend(
@@ -205,14 +213,14 @@ def build_routing_profile(
             "start": section["start"],
             "end": section["end"],
             "text": section["text"],
-            "channel_id": channel.get("id"),
+            "channel_id": channel_id,
         }
         for section in sections
     )
 
     lexical_parts = [title]
-    if channel.get("name"):
-        lexical_parts.append(channel["name"])
+    if publisher.get("name"):
+        lexical_parts.append(publisher["name"])
     lexical_parts.append(overview)
     lexical_parts.extend(section["text"] for section in sections)
     chunking_version = str(
@@ -226,8 +234,8 @@ def build_routing_profile(
         "source": {
             "platform": source["platform"],
             "video_id": source["video_id"],
-            "url": source["url"],
-            "channel": source["channel"],
+            "url": source_url,
+            "channel" if youtube else "show": publisher,
         },
         "chunking_version": chunking_version,
         "chunks": [

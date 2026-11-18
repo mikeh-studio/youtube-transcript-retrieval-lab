@@ -189,6 +189,7 @@ def test_list_videos_includes_chunking_metadata():
                 "metadata_provider": "legacy",
                 "fetched_at": None,
             },
+            "source_type": "youtube",
             "language": "en",
             "num_chunks": 1,
             "chunking_version": "time_v1_45s_15s",

@@ -5,6 +5,8 @@ from __future__ import annotations
 import math
 from typing import Callable, Optional
 
+from multilingual.source_model import normalize_source, timestamp_url
+
 
 DEFAULT_CONTEXT_WINDOW_SECONDS = 30.0
 
@@ -155,10 +157,7 @@ class TranscriptRetrievalTools:
         )
         context_end = max(row["end"] for row in selected) if selected else requested_end
         text = "\n".join(row["text"] for row in selected)
-        video_url = str(
-            video.get("url") or f"https://www.youtube.com/watch?v={scoped_video_id}"
-        )
-        separator = "&" if "?" in video_url else "?"
+        source = normalize_source(scoped_video_id, video.get("source"))
 
         return {
             "tool": "read_context",
@@ -174,6 +173,6 @@ class TranscriptRetrievalTools:
             "segments": selected,
             "segment_count": len(selected),
             "text": text,
-            "url": f"{video_url}{separator}t={int(context_start)}s",
+            "url": timestamp_url(source, context_start),
             "source_basis": "full_transcript.segments",
         }

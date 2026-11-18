@@ -6,6 +6,8 @@ import copy
 import re
 from typing import Callable, Dict, List, Optional, Tuple
 
+from multilingual.source_model import canonical_url, normalize_source, timestamp_url
+
 
 ANSWER_STATUSES = {"answered", "insufficient_evidence", "error"}
 ANSWER_CONFIDENCE_LEVELS = {"high", "medium", "low"}
@@ -15,7 +17,7 @@ CONFIDENCE_ORDER = {"low": 0, "medium": 1, "high": 2}
 
 
 def format_timestamp_label(seconds: float) -> str:
-    """Return a compact timestamp label for a YouTube offset."""
+    """Return a compact label for a playback offset."""
     total_seconds = max(0, int(float(seconds or 0.0)))
     hours = total_seconds // 3600
     minutes = (total_seconds % 3600) // 60
@@ -33,10 +35,6 @@ def format_timestamp_range_label(start_seconds: float, end_seconds: float) -> st
     )
 
 
-def _canonical_video_url(video_id: str) -> str:
-    return f"https://www.youtube.com/watch?v={video_id}"
-
-
 def _truncate_snippet(text: str, max_chars: int = SNIPPET_MAX_CHARS) -> str:
     clean = re.sub(r"\s+", " ", str(text or "")).strip()
     if len(clean) <= max_chars:
@@ -44,32 +42,12 @@ def _truncate_snippet(text: str, max_chars: int = SNIPPET_MAX_CHARS) -> str:
     return clean[: max_chars - 1].rstrip() + "…"
 
 
-def _source_payload(row: dict, video_id: str, video_url: str) -> dict | None:
+def _source_payload(row: dict, video_id: str, source_type: str) -> dict | None:
     """Return stable provenance without conflating it with evidence source_type."""
     raw = row.get("source")
-    source_type = str(row.get("source_type") or "transcript").strip().lower()
     if not isinstance(raw, dict) and source_type == "ocr":
         return None
-    source = copy.deepcopy(raw) if isinstance(raw, dict) else {}
-    channel = source.get("channel")
-    if not isinstance(channel, dict):
-        channel = {}
-    return {
-        "platform": str(source.get("platform") or "youtube").strip().lower(),
-        "video_id": str(source.get("video_id") or video_id).strip(),
-        "url": str(
-            source.get("url") or video_url or _canonical_video_url(video_id)
-        ).strip(),
-        "channel": {
-            "id": str(channel.get("id") or "").strip() or None,
-            "name": str(channel.get("name") or "").strip() or None,
-            "url": str(channel.get("url") or "").strip() or None,
-        },
-        "metadata_provider": str(
-            source.get("metadata_provider") or "legacy"
-        ).strip(),
-        "fetched_at": str(source.get("fetched_at") or "").strip() or None,
-    }
+    return normalize_source(video_id, raw, legacy=True)
 
 
 def default_insufficient_answer(language: str) -> str:
@@ -119,6 +97,7 @@ def build_citation_catalog(rows: List[dict]) -> List[dict]:
         if not video_id:
             continue
         source_type = str(row.get("source_type") or "transcript").strip().lower()
+        source = _source_payload(row, video_id, source_type)
         start_seconds = float(row.get("start", 0.0))
         end_seconds = float(row.get("end", start_seconds))
         if source_type == "ocr":
@@ -130,13 +109,8 @@ def build_citation_catalog(rows: List[dict]) -> List[dict]:
             )
             reason = f"Retrieved OCR frame #{int(row.get('rank') or citation_id)} for the question."
         else:
-            video_url = str(
-                row.get("video_url") or _canonical_video_url(video_id)
-            ).strip()
-            url = str(
-                row.get("url")
-                or f"{_canonical_video_url(video_id)}&t={int(max(0.0, start_seconds))}s"
-            ).strip()
+            video_url = str(row.get("video_url") or canonical_url(source)).strip()
+            url = str(row.get("url") or timestamp_url(source, start_seconds)).strip()
             timestamp_range_label = format_timestamp_range_label(
                 start_seconds, end_seconds
             )
@@ -148,7 +122,7 @@ def build_citation_catalog(rows: List[dict]) -> List[dict]:
                 "video_id": video_id,
                 "video_title": str(row.get("video_title") or video_id).strip(),
                 "video_url": video_url,
-                "source": _source_payload(row, video_id, video_url),
+                "source": source,
                 "chunk_id": (
                     f"{video_id}:{int(row['chunk_index'])}"
                     if row.get("chunk_index") is not None
@@ -183,25 +157,14 @@ def build_retrieved_chunks_payload(rows: List[dict]) -> List[dict]:
     """Return a lightweight debug payload derived from retrieved rows."""
     return [
         {
-            "source_type": str(row.get("source_type") or "transcript").strip().lower(),
+            "source_type": source_type,
             "video_id": video_id,
             "video_title": str(row.get("video_title") or "").strip(),
             "video_url": str(
                 row.get("video_url")
-                or ("" if str(row.get("source_type") or "").lower() == "ocr" else _canonical_video_url(video_id))
+                or ("" if source_type == "ocr" else canonical_url(source))
             ).strip(),
-            "source": _source_payload(
-                row,
-                video_id,
-                str(
-                    row.get("video_url")
-                    or (
-                        ""
-                        if str(row.get("source_type") or "").lower() == "ocr"
-                        else _canonical_video_url(video_id)
-                    )
-                ).strip(),
-            ),
+            "source": source,
             "language": str(row.get("language") or "").strip(),
             "chunk_index": row.get("chunk_index"),
             "frame_id": row.get("frame_id"),
@@ -211,7 +174,7 @@ def build_retrieved_chunks_payload(rows: List[dict]) -> List[dict]:
             "timestamp_label": format_timestamp_label(row.get("start", 0.0)),
             "timestamp_range_label": (
                 str(row.get("timestamp_hhmmss") or format_timestamp_label(row.get("start", 0.0)))
-                if str(row.get("source_type") or "").lower() == "ocr"
+                if source_type == "ocr"
                 else format_timestamp_range_label(
                     row.get("start", 0.0), row.get("end", row.get("start", 0.0))
                 )
@@ -220,8 +183,8 @@ def build_retrieved_chunks_payload(rows: List[dict]) -> List[dict]:
                 row.get("url")
                 or (
                     ""
-                    if str(row.get("source_type") or "").lower() == "ocr"
-                    else f"{_canonical_video_url(video_id)}&t={int(max(0.0, float(row.get('start', 0.0))))}s"
+                    if source_type == "ocr"
+                    else timestamp_url(source, row.get("start", 0.0))
                 )
             ).strip(),
             "rank": int(row.get("rank") or 0) or None,
@@ -234,6 +197,8 @@ def build_retrieved_chunks_payload(rows: List[dict]) -> List[dict]:
         for row in rows or []
         for video_id in [str(row.get("video_id") or "").strip()]
         if video_id
+        for source_type in [str(row.get("source_type") or "transcript").strip().lower()]
+        for source in [_source_payload(row, video_id, source_type)]
     ]
 
 

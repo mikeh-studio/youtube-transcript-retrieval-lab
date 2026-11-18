@@ -4,7 +4,7 @@ import json
 import math
 
 from local_preview.grounded_answer import build_citation_catalog
-from multilingual.youtube_metadata import youtube_timestamp_url
+from multilingual.source_model import normalize_source, timestamp_url
 from pipelines.export_library import parse_json
 
 
@@ -106,7 +106,8 @@ def _catalog(rows, selected):
             and type(end) in (int, float)
             and 0 <= start <= end < math.inf
         ):
-            eligible.append({**row, "url": youtube_timestamp_url(row["video_id"], start)})
+            source = normalize_source(row["video_id"], row.get("source"))
+            eligible.append({**row, "url": timestamp_url(source, start)})
     return build_citation_catalog(eligible)
 
 
