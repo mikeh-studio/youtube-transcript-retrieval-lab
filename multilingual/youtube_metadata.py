@@ -12,6 +12,7 @@ from urllib.request import Request, urlopen
 
 YOUTUBE_DATA_API_URL = "https://www.googleapis.com/youtube/v3/videos"
 YOUTUBE_OEMBED_URL = "https://www.youtube.com/oembed"
+YOUTUBE_INGEST_PAUSE_SECONDS = 1.2
 VALID_METADATA_PROVIDERS = {
     "youtube_data_api",
     "youtube_oembed",

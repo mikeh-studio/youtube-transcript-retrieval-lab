@@ -1,6 +1,7 @@
 """Single-worker ingestion of podcast enclosures and user-provided audio files."""
 
 import hashlib
+import math
 import os
 import queue
 import tempfile
@@ -148,7 +149,7 @@ class AudioIngestQueue:
         self.pending = queue.Queue()
         threading.Thread(target=self._work, name="audio-ingest", daemon=True).start()
 
-    def submit(self, payload):
+    def submit(self, payload, *, feed_snapshot=None, min_duration_s=None, done=None):
         """Validate an audio request and enqueue it without waiting for transcription."""
         kind = payload.get("kind")
         language = payload.get("language")
@@ -161,7 +162,10 @@ class AudioIngestQueue:
         if not isinstance(force, bool):
             raise ValueError("force must be a boolean.")
 
-        request = {"force": force, "engine": engine}
+        request = {
+            "force": force, "engine": engine, "feed_snapshot": feed_snapshot,
+            "min_duration_s": min_duration_s,
+        }
         source_id, url = "", ""
         if kind == "rss_episode":
             url, guid = payload.get("feed_url"), payload.get("guid")
@@ -184,12 +188,21 @@ class AudioIngestQueue:
             source_type=SOURCE_TYPES[kind], step="queued",
         )
         self.store_job(job)
-        self.pending.put((job, request))
+        self.pending.put((job, request, done))
         return job
+
+    def submit_episode_and_wait(self, payload, *, feed_snapshot, min_duration_s):
+        """Run a subscription episode through the same worker and wait for its result."""
+        done = threading.Event()
+        job = self.submit(
+            payload, feed_snapshot=feed_snapshot, min_duration_s=min_duration_s, done=done,
+        )
+        done.wait()
+        return job.job_id
 
     def _work(self):
         while True:
-            job, request = self.pending.get()
+            job, request, done = self.pending.get()
             try:
                 self._ingest(job, request)
             except Exception as exc:
@@ -198,6 +211,8 @@ class AudioIngestQueue:
                     error_message=str(exc)[:500],
                 )
             finally:
+                if done is not None:
+                    done.set()
                 self.pending.task_done()
 
     def _already_indexed(self, source_id, force):
@@ -236,8 +251,11 @@ class AudioIngestQueue:
         try:
             if job.mode == "rss_episode":
                 feed_url, guid = request["feed_url"], request["guid"]
-                feed = self.fetch_feed(feed_url)
-                item = next((row for row in feed["items"] if row["external_id"] == guid), None)
+                if request["feed_snapshot"] is None:
+                    feed = self.fetch_feed(feed_url)
+                    item = next((row for row in feed["items"] if row["external_id"] == guid), None)
+                else:
+                    feed, item = request["feed_snapshot"]
                 if item is None or not item["media_url"]:
                     raise ValueError("The feed does not contain an audio enclosure for this GUID.")
                 self.update_job(job.job_id, step="downloading", progress=0.15)
@@ -291,6 +309,18 @@ class AudioIngestQueue:
             elapsed = self.timer() - started
             if not result.segments:
                 raise ValueError("Speech-to-text returned no transcript segments.")
+            if (minimum := request["min_duration_s"]) is not None:
+                duration = result.duration
+                if not math.isfinite(duration) or duration <= 0:
+                    duration = max(segment.end for segment in result.segments)
+                if duration < minimum:
+                    self.update_job(
+                        job.job_id, status="skipped", step="skipped", progress=1.0,
+                        error_code="MIN_DURATION", audio_duration_seconds=duration,
+                        transcription_seconds=elapsed, stt_engine=result.engine,
+                        stt_model=result.model,
+                    )
+                    return
             if metadata.get("episode", {}).get("duration_seconds") is None:
                 metadata.setdefault("episode", {})["duration_seconds"] = result.duration
             metadata.update(
@@ -301,13 +331,16 @@ class AudioIngestQueue:
                     "word_timestamps": result.word_timestamps,
                 },
             )
+            if minimum is not None:
+                metadata["stt"]["audio_duration_seconds"] = duration
             self.update_job(job.job_id, step="indexing", progress=0.85)
             with self.write_lock:
                 record = self._publish(source_id, staged, extension, title, metadata, result)
                 staged.unlink(missing_ok=True)
                 self._complete(
                     job.job_id, source_id, record, transcription_seconds=elapsed,
-                    audio_duration_seconds=result.duration, stt_engine=result.engine,
+                    audio_duration_seconds=result.duration if minimum is None else duration,
+                    stt_engine=result.engine,
                     stt_model=result.model,
                 )
         finally:
