@@ -123,6 +123,25 @@ retrieval draft. Install the Codex CLI and run `codex login` first.
 
 ![Evaluation dataset generator turning a reviewed draft into a query set](media/evaluation-dataset-generator-query-set.png)
 
+## Review drafted labels
+
+Open **Label review** from the Evaluation sidebar. Choose **Summary key
+points**, an indexed video with a stored transcript, and an output language
+tag such as `en` or `ja`. Drafting uses the same Codex CLI setup as Query
+sets and sends up to 150,000 characters of numbered transcript lines.
+
+Use the excerpt and timestamp link to review each item. Approve, edit, or
+reject every item before finalizing. At least one item must be accepted.
+Context is tied to the transcript fingerprint captured when the draft was
+created. The context endpoint reports a conflict if that transcript changes.
+
+Drafts are saved under `data/runtime/label_drafts/drafts/`. Finalizing writes
+accepted labels to `data/evaluation/labels/summary_keypoints/` as JSONL. Each row
+includes the source ID, fingerprint, review decision, provenance, and onset and
+span timestamps in seconds. The matching manifest records the JSONL SHA-256
+and counts for each review decision. Use the manifest to identify completed
+datasets.
+
 ## Assisted labeling
 
 `local_preview/review_agent_workflow.py` batches live `/v1/search` results,

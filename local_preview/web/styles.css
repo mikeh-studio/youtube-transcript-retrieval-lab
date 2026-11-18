@@ -4020,3 +4020,93 @@ th {
 a.btn {
   text-decoration: none;
 }
+
+/* Label review */
+.label-workspace {
+  display: grid;
+  grid-template-columns: minmax(15rem, 1fr) minmax(0, 3fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.label-sidebar,
+.label-edit-fields {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.label-edit-fields {
+  grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+}
+
+.label-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+
+.label-workspace [hidden] {
+  display: none;
+}
+
+.label-workspace h3,
+.label-workspace p {
+  margin: 0;
+}
+
+.label-workspace h3 {
+  font-size: 1rem;
+}
+
+.label-workspace .label-status {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.label-item {
+  padding: 1rem;
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+  background: var(--surface-2);
+}
+
+.label-text {
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.label-context {
+  max-height: 19rem;
+  overflow: auto;
+  list-style: none;
+  padding: 0.5rem 0.75rem;
+  margin: 0.5rem 0 0;
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+}
+
+.label-context li {
+  display: grid;
+  grid-template-columns: 7.75rem minmax(0, 1fr);
+  gap: 0.55rem;
+  padding: 0.4rem 0;
+  overflow-wrap: anywhere;
+}
+
+.label-context li + li {
+  border-top: 1px solid var(--line-soft);
+}
+
+.label-context time {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 760px) {
+  .label-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

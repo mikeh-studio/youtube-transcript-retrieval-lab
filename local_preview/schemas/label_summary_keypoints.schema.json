@@ -1,0 +1,26 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["key_points", "notes"],
+  "properties": {
+    "key_points": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["text", "importance", "onset_line", "span_start_line", "span_end_line", "rationale"],
+        "properties": {
+          "text": { "type": "string" },
+          "importance": { "type": "integer", "minimum": 1, "maximum": 3 },
+          "onset_line": { "type": "integer", "minimum": 1 },
+          "span_start_line": { "type": "integer", "minimum": 1 },
+          "span_end_line": { "type": "integer", "minimum": 1 },
+          "rationale": { "type": "string" }
+        }
+      }
+    },
+    "notes": { "type": "string" }
+  }
+}

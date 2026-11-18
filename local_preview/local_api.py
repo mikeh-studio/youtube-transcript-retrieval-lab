@@ -109,6 +109,8 @@ from grounded_answer import (  # noqa: E402
     normalize_grounded_answer_payload,
 )
 from eval_generator import EvalGeneratorError, EvalGeneratorService  # noqa: E402
+from local_preview.codex_runner import CodexRunner  # noqa: E402
+from local_preview.label_drafts import LabelDraftError, LabelDraftService  # noqa: E402
 
 
 VIDEO_ID_RE = re.compile(r"[a-zA-Z0-9_-]{11}")
@@ -854,6 +856,22 @@ class LocalRAGService:
             )
             self.eval_generator = service
         return service
+
+    def _label_draft_service(self) -> LabelDraftService:
+        """Return the single label workflow service for this server."""
+        with self.lock:
+            service = getattr(self, "label_drafts", None)
+            if service is None:
+                service = LabelDraftService(
+                    root_dir=ROOT_DIR,
+                    runtime_dir=self.runtime_data_dir,
+                    eval_dir=ROOT_DIR / "data" / "evaluation",
+                    source_getter=lambda source_id: self.engine.library.videos.get(source_id),
+                    codex_runner=CodexRunner(),
+                    clock=now_iso,
+                )
+                self.label_drafts = service
+            return service
 
     def delete_video(self, video_id: str):
         self.engine.library.remove_video(video_id)
@@ -7964,6 +7982,14 @@ class Handler(BrowserBoundary, BaseHTTPRequestHandler):
             json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
         )
 
+    def _label_json(self, key, action, *args, status=200):
+        try:
+            result = action(*args)
+        except LabelDraftError as exc:
+            self._json({"ok": False, "error": {"code": exc.code, "message": str(exc)}}, exc.status)
+        else:
+            self._json({"ok": True, key: result}, status)
+
     def _download(self, payload: bytes, filename: str):
         self.send_response(200)
         self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
@@ -8057,6 +8083,36 @@ class Handler(BrowserBoundary, BaseHTTPRequestHandler):
             if path == "/v1/eval-generator/capabilities":
                 capabilities = SERVICE._eval_generator_service().capabilities()
                 self._json({"ok": True, "capabilities": capabilities})
+                return
+
+            if path == "/v1/labels/tasks":
+                self._label_json("tasks", SERVICE._label_draft_service().list_tasks)
+                return
+
+            if path.startswith("/v1/labels/jobs/") and (
+                match := re.fullmatch(r"/v1/labels/jobs/([^/]+)", path)
+            ):
+                self._label_json("job", SERVICE._label_draft_service().get_job, unquote(match[1]))
+                return
+
+            if path == "/v1/labels/drafts":
+                self._label_json("drafts", SERVICE._label_draft_service().list_drafts)
+                return
+
+            if path.startswith("/v1/labels/drafts/") and (
+                match := re.fullmatch(r"/v1/labels/drafts/([^/]+)(/context)?", path)
+            ):
+                labels = SERVICE._label_draft_service()
+                draft_id = unquote(match[1])
+                if match[2]:
+                    item_id = parse_qs(parsed.query).get("item", [""])[0]
+                    self._label_json("context", labels.context, draft_id, item_id)
+                else:
+                    self._label_json("draft", labels.get_draft, draft_id)
+                return
+
+            if path == "/v1/labels/datasets":
+                self._label_json("datasets", SERVICE._label_draft_service().list_datasets)
                 return
 
             if path == "/v1/eval-generator/jobs":
@@ -8518,6 +8574,25 @@ class Handler(BrowserBoundary, BaseHTTPRequestHandler):
                     else []
                 )
                 self._json({"ok": True, "job": job}, 202)
+                return
+
+            if path == "/v1/labels/jobs":
+                self._label_json(
+                    "job", SERVICE._label_draft_service().start_job,
+                    body.get("task"), body.get("source_ids"), body.get("language"),
+                    status=202,
+                )
+                return
+
+            if path.startswith("/v1/labels/drafts/") and (
+                match := re.fullmatch(r"/v1/labels/drafts/([^/]+)/(review|finalize)", path)
+            ):
+                labels = SERVICE._label_draft_service()
+                draft_id = unquote(match[1])
+                if match[2] == "review":
+                    self._label_json("draft", labels.save_review, draft_id, body.get("decisions"))
+                else:
+                    self._label_json("dataset", labels.finalize, draft_id)
                 return
 
             if (
