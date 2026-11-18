@@ -60,9 +60,11 @@ if load_dotenv is not None:
     load_dotenv(ROOT_DIR / ".env.local", override=True)
 
 from browser_boundary import BrowserBoundary  # noqa: E402
+from local_preview.key_areas import KeyAreasGenerationError, cached_key_areas  # noqa: E402
 from local_preview.lexical_index import LexicalIndex  # noqa: E402
 from local_preview.retrieval_diagnostics import has_retrieval_failure  # noqa: E402
 from local_preview.summary_timestamps import parse_summary_timestamp  # noqa: E402
+from local_preview.transcript_lines import numbered_lines  # noqa: E402
 
 _LEXICAL_INDEX_LOCK = threading.Lock()
 
@@ -73,7 +75,10 @@ from multilingual.reranker import (  # noqa: E402
 )
 from multilingual.text_processing import LANGUAGE_CONFIG  # noqa: E402
 from multilingual.video_routing import MultiVectorVideoRouter  # noqa: E402
-from multilingual.youtube_metadata import normalize_youtube_source  # noqa: E402
+from multilingual.youtube_metadata import (  # noqa: E402
+    normalize_youtube_source,
+    youtube_timestamp_url,
+)
 from pipelines.embed_ocr import embed_ocr  # noqa: E402
 from pipelines.extract_frames import extract_frames  # noqa: E402
 from pipelines.run_ocr import run_ocr  # noqa: E402
@@ -4742,9 +4747,16 @@ class LocalRAGService:
             "char_count": len(full_text),
         }
 
-    def _resolve_summary_full_transcript(self, *, video: dict) -> tuple[dict, bool]:
+    def _resolve_summary_full_transcript(
+        self, *, video: dict, preserve_line_ids: bool = False
+    ) -> tuple[dict, bool]:
+        """Resolve canonical evidence, optionally preserving numbered line order."""
         full_transcript = video.get("full_transcript")
-        if isinstance(full_transcript, dict):
+        if preserve_line_ids and isinstance(full_transcript, dict):
+            segments = full_transcript.get("segments")
+            if isinstance(segments, list) and numbered_lines(segments):
+                return full_transcript, False
+        if not preserve_line_ids and isinstance(full_transcript, dict):
             existing_segments = self._coerce_summary_segments(
                 full_transcript.get("segments") or []
             )
@@ -4762,6 +4774,15 @@ class LocalRAGService:
                 return payload, False
 
         raw_chunks = video.get("chunks", [])
+        if preserve_line_ids:
+            raw_chunks = numbered_lines(
+                {
+                    "start": row.get("start"),
+                    "end": row.get("end", row.get("timestamp_end")),
+                    "text": self._summary_segment_text(row),
+                }
+                for row in raw_chunks if isinstance(row, dict)
+            )
         payload = self._build_full_transcript_payload(raw_chunks)
         if not payload["segments"]:
             raise ValueError("video has no transcript segments")
@@ -4894,6 +4915,40 @@ class LocalRAGService:
         }
         video["summary_cache"] = deepcopy(cache_rows)
         self._persist_summary_cache_rows(video_id=video_id, cache_rows=cache_rows)
+
+    def generate_key_areas(
+        self,
+        source_id: str,
+        language: str = "en",
+        provider: str = DEFAULT_ASK_PROVIDER,
+        model: Optional[str] = None,
+    ) -> dict:
+        """Generate or load cited episode sections for one stored source."""
+        source_id = str(source_id or "").strip()
+        if not source_id:
+            raise ValueError("source_id or video_id is required")
+        video = self.engine.library.videos.get(source_id)
+        if video is None:
+            raise KeyError(f"video_id not found: {source_id}")
+        language = str(language or "en").strip().lower()
+        if language not in SUMMARY_LANGUAGES:
+            raise ValueError("language must be one of: en, ja")
+        provider = str(provider or DEFAULT_ASK_PROVIDER).strip().lower()
+        model = self._resolve_llm_model(provider, model)
+        transcript, _ = self._resolve_summary_full_transcript(
+            video=video, preserve_line_ids=True
+        )
+        episode = self._study_episode_context_pack(context={"video": video})
+        return cached_key_areas(
+            transcript["segments"],
+            cache_dir=self.cache_data_dir / "key_areas",
+            language=language,
+            source_meta={"source_id": source_id, "title": episode["video_title"]},
+            participants=episode["participants_from_title"],
+            llm=self._llm_text_response,
+            provider=provider,
+            model=model,
+        )
 
     def summarize_video_transcript(
         self,
@@ -5084,7 +5139,7 @@ class LocalRAGService:
                     "end": end,
                     "timestamp_source": resolved_timestamp["source"],
                     "segment_index": resolved_segment_index,
-                    "url": f"https://www.youtube.com/watch?v={scoped_video_id}&t={int(start)}s",
+                    "url": youtube_timestamp_url(scoped_video_id, start),
                 }
             )
 
@@ -8686,6 +8741,35 @@ class Handler(BrowserBoundary, BaseHTTPRequestHandler):
             if path == "/v1/feedback/search-review":
                 feedback = SERVICE.save_search_feedback(body)
                 self._json({"ok": True, "feedback": feedback})
+                return
+
+            if path == "/v1/summaries/key-areas":
+                try:
+                    result = SERVICE.generate_key_areas(
+                        source_id=body.get("source_id") or body.get("video_id"),
+                        language=body.get("language"),
+                        provider=body.get("provider"),
+                        model=body.get("model"),
+                    )
+                except CodexRunnerError as exc:
+                    self._json(
+                        {"ok": False, "error": {"code": exc.code, "message": str(exc)}},
+                        exc.status,
+                    )
+                    return
+                except KeyAreasGenerationError as exc:
+                    self._json(
+                        {
+                            "ok": False,
+                            "error": {
+                                "code": "KEY_AREAS_GENERATION_FAILED",
+                                "message": str(exc),
+                            },
+                        },
+                        502,
+                    )
+                    return
+                self._json({"ok": True, **result})
                 return
 
             if path == "/v1/summaries/transcript":

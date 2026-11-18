@@ -20,6 +20,7 @@ from evals.summary.predictions import (
 )
 from evals.summary.scoring import score
 from local_preview.codex_runner import CodexRunnerError
+from local_preview.key_areas import KeyAreasGenerationError
 from local_preview.local_files import json_bytes, write_atomic
 
 
@@ -168,7 +169,9 @@ def _parser():
             command.add_argument("--data-dir", type=Path, default=ROOT / "data")
         if name == "generate":
             command.add_argument("--provider", choices=PROVIDERS, required=True)
-            command.add_argument("--system")
+            command.add_argument(
+                "--system", help="Prediction system name. Use key_areas to generate episode sections."
+            )
         else:
             command.add_argument("--predictions", type=Path, required=True)
         if name == "judge":
@@ -198,7 +201,9 @@ def main(argv=None):
             if args.command == "generate":
                 rows = generate(
                     gold,
-                    service.summarize_video_transcript,
+                    service.generate_key_areas
+                    if args.system == "key_areas"
+                    else service.summarize_video_transcript,
                     provider=args.provider,
                     model=args.model,
                     system=args.system,
@@ -247,7 +252,7 @@ def main(argv=None):
                     "sha256": record_sha256(sample),
                 }
             _write_run(args.out, result, sample)
-    except (ValueError, OSError, CodexRunnerError) as exc:
+    except (ValueError, OSError, CodexRunnerError, KeyAreasGenerationError) as exc:
         parser.exit(2, f"summary evaluation: {exc}\n")
 
 

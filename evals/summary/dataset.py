@@ -140,6 +140,8 @@ def load_gold(path, manifest):
                 raise ContractError("Key point onset must be within a gold span")
         for section in objects(row.get("sections", []), "sections"):
             timestamp(section.get("start"), "section start", duration)
+            if "end" in section:
+                span(section, "gold section", duration, strict=True)
             text(section.get("title"), "section title")
     return rows, expected
 

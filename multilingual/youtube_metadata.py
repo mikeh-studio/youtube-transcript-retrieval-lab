@@ -31,6 +31,11 @@ def canonical_youtube_url(video_id: str) -> str:
     return f"https://www.youtube.com/watch?v={str(video_id).strip()}"
 
 
+def youtube_timestamp_url(video_id: str, start: float) -> str:
+    """Link to the whole-second onset on the canonical watch page."""
+    return f"{canonical_youtube_url(video_id)}&t={int(start)}s"
+
+
 def canonical_channel_url(channel_id: Optional[str]) -> Optional[str]:
     """Return a stable channel URL when a channel ID is known."""
     value = str(channel_id or "").strip()

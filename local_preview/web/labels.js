@@ -19,6 +19,7 @@ const draftPath = (id) => `${apiRoot}/drafts/${encodeURIComponent(id)}`;
 const currentItem = () => state.draft?.items[state.index];
 const effectiveItem = (item) => ({ ...item, ...item.review?.edits });
 const isAudit = () => state.draft?.task === "judge_audit";
+const isSections = () => state.draft?.task === "sections";
 
 async function api(path, body) {
   const response = await fetch(path, body === undefined ? undefined : {
@@ -152,6 +153,7 @@ function renderItem() {
   const item = currentItem();
   const label = effectiveItem(item);
   const audit = isAudit();
+  const section = isSections();
   const judgment = item.judgment;
   const source = draft.sources.find((entry) => entry.source_id === item.source_id);
   $("review").hidden = false;
@@ -161,10 +163,12 @@ function renderItem() {
   $("decisionStatus").textContent = decision
     ? audit ? (decision === "approved" ? "Agree" : "Disagree") : decision[0].toUpperCase() + decision.slice(1)
     : "Pending";
-  $("itemText").textContent = audit ? judgment.prediction_text : label.text;
+  $("itemText").textContent = audit ? judgment.prediction_text : section ? label.title : label.text;
   $("itemTiming").textContent = audit
     ? `${source.title} · ${timecode(judgment.start, true)} · ${judgment.judge.model}`
-    : `Importance ${label.importance}/3 · Onset ${timecode(label.onset, true)} · Span ${timecode(label.span_start, true)}–${timecode(label.span_end, true)}`;
+    : section
+      ? `Section ${timecode(label.start, true)}–${timecode(label.end, true)}`
+      : `Importance ${label.importance}/3 · Onset ${timecode(label.onset, true)} · Span ${timecode(label.span_start, true)}–${timecode(label.span_end, true)}`;
   $("rationale").textContent = audit
     ? `Judge ${judgment.kind === "match" ? "match" : "faithfulness"} · ${judgment.decision ?? "No match"}`
     : item.rationale ? `Draft rationale · ${item.rationale}` : "";
@@ -184,7 +188,7 @@ function renderItem() {
   $("reviewKeys").hidden = audit;
   $("notes").textContent = draft.notes ? `Draft notes · ${draft.notes}` : "";
   $("notes").hidden = !draft.notes;
-  const url = audit ? "" : timestampUrl(source?.url, label.onset);
+  const url = audit ? "" : timestampUrl(source?.url, section ? label.start : label.onset);
   $("timestamp").hidden = !url;
   if (url) $("timestamp").href = url;
   else $("timestamp").removeAttribute("href");
@@ -206,8 +210,17 @@ function startEdit() {
   if ($("edit").disabled || $("decisionActions").hidden) return;
   const item = effectiveItem(currentItem());
   const form = $("editForm");
-  for (const name of ["text", "importance", "onset", "span_start", "span_end"]) {
-    form.elements[name].value = item[name];
+  const section = isSections();
+  $("editTextLabel").textContent = section ? "Section title" : "Label text";
+  $("editStartLabel").textContent = section ? "Section start (seconds)" : "Span start (seconds)";
+  $("editEndLabel").textContent = section ? "Section end (seconds)" : "Span end (seconds)";
+  form.elements.text.value = section ? item.title : item.text;
+  form.elements.span_start.value = section ? item.start : item.span_start;
+  form.elements.span_end.value = section ? item.end : item.span_end;
+  for (const name of ["importance", "onset"]) {
+    const field = form.elements[name];
+    field.disabled = field.closest("label").hidden = section;
+    field.value = item[name] ?? "";
   }
   const source = state.draft.sources.find((entry) => entry.source_id === item.source_id);
   for (const name of ["onset", "span_start", "span_end"]) form.elements[name].max = source.duration;
@@ -343,6 +356,14 @@ $("cancelEdit").addEventListener("click", () => {
 $("editForm").addEventListener("submit", (event) => {
   event.preventDefault();
   const fields = event.currentTarget.elements;
+  if (isSections()) {
+    decide("edited", {
+      title: fields.text.value,
+      start: fields.span_start.valueAsNumber,
+      end: fields.span_end.valueAsNumber,
+    });
+    return;
+  }
   decide("edited", {
     text: fields.text.value,
     importance: fields.importance.valueAsNumber,

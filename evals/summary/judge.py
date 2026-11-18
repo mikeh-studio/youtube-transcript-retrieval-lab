@@ -5,7 +5,7 @@ import re
 
 from evals.contracts import ContractError
 from evals.summary.dataset import by_key, objects, read_jsonl, span, text
-from evals.summary.predictions import record_sha256
+from evals.summary.predictions import RESOLVED_TIMESTAMP_SOURCES, record_sha256
 from local_preview.transcript_lines import numbered_lines
 from pipelines.export_library import parse_json
 
@@ -93,7 +93,9 @@ def _decisions(rows, item_ids, gold_ids, kind):
 
 def _window(item, lines, matched_point=None):
     anchor_end = (
-        item["end"] if item.get("timestamp_source") == "anchor_match" else item["start"]
+        item["end"]
+        if item.get("timestamp_source") in RESOLVED_TIMESTAMP_SOURCES
+        else item["start"]
     )
     ranges = [(max(0, item["start"] - WINDOW_SECONDS), anchor_end + WINDOW_SECONDS)]
     if matched_point is not None:

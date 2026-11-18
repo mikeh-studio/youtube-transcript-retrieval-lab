@@ -375,3 +375,48 @@ def test_shared_runner_caches_probes_and_hides_new_job_diagnostics(monkeypatch):
     assert command[command.index("--model") + 1] == "fixture-model"
     assert kwargs["timeout"] == 300
     assert "OPENAI_API_KEY" not in kwargs["env"]
+
+
+def test_section_draft_resolves_lines_and_publishes_reviewed_boundary_seconds(workflow, monkeypatch):
+    service, codex, source = workflow
+    monkeypatch.setenv("YT_RAG_LABEL_DRAFTER", "claude_cli")
+    monkeypatch.setenv("YT_RAG_LABEL_DRAFTER_MODEL", "opus")
+    codex.output = {
+        "sections": [
+            {"title": "Gate and cleanup", "start_line": 4, "end_line": 5},
+            {"title": "Cart clearance", "start_line": 1, "end_line": 3},
+            {"title": "Bad line", "start_line": 30, "end_line": 40},
+        ],
+        "notes": "Check the transition.",
+    }
+    job = service.start_job("sections", [SOURCE_ID], "en")
+    finished = wait_for_job(service, job["job_id"])
+    assert finished["status"] == "completed"
+    assert codex.selection == ("codex_cli", None)
+    prompt, schema = codex.calls[0]
+    assert "[0004] 1:20 Swing the gate outward." in prompt
+    assert source["title"] not in prompt and source["summary"] not in prompt
+    assert schema.name == "label_sections.schema.json" and schema.is_file()
+
+    draft_id = finished["draft_id"]
+    first, second = service.get_draft(draft_id)["items"]
+    assert (first["title"], first["start_line"], first["end_line"]) == ("Cart clearance", 1, 3)
+    assert (first["start"], first["end"], second["start"], second["end"]) == (
+        0.25, 55, 80, 115,
+    )
+    bad_review = {"id": second["id"], "decision": "edited", "edits": {"start": 120}}
+    with pytest.raises(LabelDraftError, match="Section start must precede"):
+        service.save_review(draft_id, [bad_review])
+    service.save_review(draft_id, [
+        {"id": first["id"], "decision": "approved"},
+        {"id": second["id"], "decision": "edited", "edits": {"start": 79.25, "end": 113}},
+    ])
+    assert service.context(draft_id, second["id"])["start"] == 59.25
+    manifest = service.finalize(draft_id)
+    path = service.labels_dir / "sections" / f"{manifest['dataset_id']}.jsonl"
+    first, second = map(json.loads, path.read_text().splitlines())
+    assert (first["start"], first["end"], second["start"], second["end"]) == (
+        0.25, 55, 79.25, 113,
+    )
+    assert second["title"] == "Gate and cleanup" and second["task"] == "sections"
+    assert "start_line" not in second and "end_line" not in second

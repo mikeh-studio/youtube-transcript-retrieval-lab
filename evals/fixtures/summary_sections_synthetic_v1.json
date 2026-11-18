@@ -1,0 +1,14 @@
+{
+  "duration_s": 120,
+  "gold": [
+    {"title": "Curtain setup", "start": 0, "end": 40},
+    {"title": "Bell check", "start": 40, "end": 80},
+    {"title": "Seating", "start": 80, "end": 120}
+  ],
+  "predicted": [
+    {"title": "Curtain setup", "start": 0, "end": 34},
+    {"title": "First bell", "start": 49, "end": 53},
+    {"title": "Second bell", "start": 55, "end": 113},
+    {"title": "Seating", "start": 110, "end": 118}
+  ]
+}
