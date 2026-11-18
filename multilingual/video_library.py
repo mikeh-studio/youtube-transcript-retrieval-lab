@@ -49,6 +49,7 @@ from multilingual.youtube_metadata import (
     YouTubeMetadataClient,
     canonical_youtube_url,
     merge_youtube_sources,
+    utc_now_iso,
 )
 
 CHUNK_WINDOW_SECONDS = 60
@@ -246,6 +247,7 @@ class VideoLibrary:
             "url": canonical_url(source),
             "title": title,
             "source": source,
+            "ingested_at": utc_now_iso(),
             "language": language,
             "chunks": chunks,
             "full_transcript": full_transcript,
@@ -300,6 +302,7 @@ class VideoLibrary:
                 "url": canonical_url(source),
                 "title": title,
                 "source": source,
+                "ingested_at": utc_now_iso(),
                 "language": language,
                 "full_transcript": self._build_full_transcript(lines),
             },
@@ -870,6 +873,8 @@ class VideoLibrary:
                 "full_transcript": data.get("full_transcript"),
                 "chunking": self._normalize_chunking_metadata(data.get("chunking")),
             }
+            if "ingested_at" in data:
+                record["ingested_at"] = data["ingested_at"]
             with _atomic_library_path(self._video_record_path(vid)) as temporary:
                 with open(temporary, "w", encoding="utf-8") as f:
                     json.dump(record, f, ensure_ascii=False, indent=2)
@@ -1089,6 +1094,8 @@ class VideoLibrary:
             normalized["summary_cache"] = data.get("summary_cache")
         if isinstance(data.get("full_transcript"), dict):
             normalized["full_transcript"] = data.get("full_transcript")
+        if "ingested_at" in data:
+            normalized["ingested_at"] = data["ingested_at"]
         return normalized
 
     def backfill_source_metadata(self, video_ids=None, *, force=False, persist=True):

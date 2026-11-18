@@ -69,6 +69,8 @@ from local_preview.collection_summary import (  # noqa: E402
 )
 from local_preview.feeds import preview_feed  # noqa: E402
 from local_preview.key_areas import KeyAreasGenerationError, cached_key_areas  # noqa: E402
+from local_preview.digest import DigestNotFound, DigestService  # noqa: E402
+from local_preview.novelty import NoveltyError  # noqa: E402
 from local_preview.lexical_index import LexicalIndex  # noqa: E402
 from local_preview.retrieval_diagnostics import has_retrieval_failure  # noqa: E402
 from local_preview.summary_timestamps import parse_summary_timestamp  # noqa: E402
@@ -923,6 +925,7 @@ class LocalRAGService:
                     source_getter=lambda source_id: self.engine.library.videos.get(source_id),
                     drafter=CLI_LLM.text_response,
                     clock=now_iso,
+                    digest_getter=lambda digest_id: self._digest_service().get_digest(digest_id),
                 )
                 self.label_drafts = service
             return service
@@ -4994,6 +4997,38 @@ class LocalRAGService:
             model=model,
         )
 
+    def _digest_service(self):
+        """Return the digest workflow and its single feedback writer."""
+        with self.lock:
+            service = getattr(self, "digest_service", None)
+            if service is None:
+                service = DigestService(
+                    self.runtime_data_dir,
+                    library=self.engine.library,
+                    retrieve_fn=self.retrieve,
+                    key_areas_fn=self.generate_key_areas,
+                    llm=self._llm_text_response,
+                    clock=now_iso,
+                    ingest_log_paths=self._existing_log_paths,
+                )
+                self.digest_service = service
+            return service
+
+    def build_digest(self, payload):
+        """Validate model options and build a local novelty digest."""
+        language = payload.get("language", "en")
+        if not isinstance(language, str) or language not in SUMMARY_LANGUAGES:
+            raise ValueError("language must be one of: en, ja")
+        provider = payload.get("provider", DEFAULT_ASK_PROVIDER)
+        model = payload.get("model")
+        if not isinstance(provider, str) or (model is not None and not isinstance(model, str)):
+            raise ValueError("provider and model must be strings")
+        provider = provider.strip().lower() or DEFAULT_ASK_PROVIDER
+        return self._digest_service().build_digest(
+            window=payload.get("window"), source_ids=payload.get("source_ids"),
+            language=language, provider=provider, model=self._resolve_llm_model(provider, model),
+        )
+
     def summarize_collection(self, *, source_ids, language, focus, provider, model):
         """Synthesize themes from indexed sources using cached key areas."""
         source_ids = collection_source_ids(source_ids)
@@ -8182,6 +8217,18 @@ class Handler(BrowserBoundary, BaseHTTPRequestHandler):
         else:
             self._json({"ok": True, key: result}, status)
 
+    def _digest_json(self, key, action, *args, status=200):
+        try:
+            result = action(*args)
+        except DigestNotFound as exc:
+            self._json({"ok": False, "error": {"code": "DIGEST_NOT_FOUND", "message": str(exc)}}, 404)
+        except (NoveltyError, KeyAreasGenerationError) as exc:
+            self._json({"ok": False, "error": {"code": "DIGEST_GENERATION_FAILED", "message": str(exc)}}, 502)
+        except CodexRunnerError as exc:
+            self._json({"ok": False, "error": {"code": exc.code, "message": str(exc)}}, exc.status)
+        else:
+            self._json({"ok": True, key: result}, status)
+
     def _subscription_json(self, key, action, *args, status=200, **kwargs):
         try:
             result = action(*args, **kwargs)
@@ -8256,6 +8303,14 @@ class Handler(BrowserBoundary, BaseHTTPRequestHandler):
         path = parsed.path
 
         try:
+            if path == "/v1/digests":
+                self._digest_json("digests", SERVICE._digest_service().list_digests)
+                return
+
+            if path.startswith("/v1/digest/") and (match := re.fullmatch(r"/v1/digest/([^/]+)", path)):
+                self._digest_json("digest", SERVICE._digest_service().get_digest, unquote(match[1]))
+                return
+
             if path == "/v1/subscriptions":
                 self._json({"ok": True, "subscriptions": SERVICE.subscription_store().list()})
                 return
@@ -8786,6 +8841,17 @@ class Handler(BrowserBoundary, BaseHTTPRequestHandler):
             if not isinstance(body, dict):
                 raise ValueError("Request body must be a JSON object")
 
+            if path == "/v1/digest/whats-new":
+                self._digest_json("digest", SERVICE.build_digest, body, status=201)
+                return
+
+            if path.startswith("/v1/digest/") and (match := re.fullmatch(r"/v1/digest/([^/]+)/feedback", path)):
+                self._digest_json(
+                    "feedback", SERVICE._digest_service().save_feedback,
+                    unquote(match[1]), body, status=201,
+                )
+                return
+
             if path == "/v1/subscriptions":
                 store = SERVICE.subscription_store()
                 if "id" in body:
@@ -8852,6 +8918,12 @@ class Handler(BrowserBoundary, BaseHTTPRequestHandler):
                 return
 
             if path == "/v1/labels/jobs":
+                if body.get("task") == "digest_novelty":
+                    self._label_json(
+                        "job", SERVICE._label_draft_service().start_digest_job,
+                        body.get("digest_id"), status=202,
+                    )
+                    return
                 self._label_json(
                     "job", SERVICE._label_draft_service().start_job,
                     body.get("task"), body.get("source_ids"), body.get("language"),
