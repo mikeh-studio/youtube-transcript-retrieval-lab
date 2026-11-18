@@ -29,6 +29,8 @@ import {
 import { LibraryPage } from "./library.jsx";
 import { SearchWorkbench } from "./workbench.jsx";
 import { SettingsPage } from "./settings.jsx";
+import { CollectionPage, KeyAreasPage } from "./summaries.jsx";
+import { ModelSelectLabel, PlayerPanel, useLlmProviderOptions } from "./studio-controls.jsx";
 
 const LOCK_KEY = "yt_rag_ingest_unlocked";
 const LOCALE_STORAGE_KEY = "youtube-rag-ui-locale";
@@ -40,34 +42,10 @@ const ROUTES = {
   LOCAL_VIDEO: "/local-video",
   TLDR: "/tldr",
   STUDY: "/study",
+  KEY_AREAS: "/key-areas",
+  COLLECTION: "/collection",
   QA: "/qa",
   SETTINGS: "/settings",
-};
-const FALLBACK_LLM_PROVIDER_OPTIONS = {
-  chatgpt: {
-    default: "gpt-5.4-mini",
-    models: [
-      { id: "gpt-5.4-nano", label: "GPT-5.4 nano" },
-      { id: "gpt-5.4-mini", label: "GPT-5.4 mini" },
-      { id: "gpt-5.5", label: "GPT-5.5" },
-    ],
-  },
-  claude: {
-    default: "",
-    models: [
-      { id: "claude-haiku-4-5", label: "Claude Haiku 4.5" },
-      { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
-      { id: "claude-opus-4-8", label: "Claude Opus 4.8" },
-    ],
-  },
-  sakana: {
-    default: "fugu",
-    models: [
-      { id: "fugu", label: "Sakana Fugu" },
-      { id: "fugu-ultra", label: "Sakana Fugu Ultra" },
-      { id: "fugu-ultra-20260615", label: "Sakana Fugu Ultra 20260615" },
-    ],
-  },
 };
 const STUDY_FOCUS_PRESETS = [
   { id: "main_ideas", label: "Main ideas" },
@@ -92,58 +70,6 @@ const STUDY_TOPIC_DETAIL_LEVELS = [
   { id: "brief", label: "Brief Map" },
   { id: "explain", label: "Explain Topic" },
 ];
-let llmProviderOptionsPromise = null;
-
-function loadLlmProviderOptions() {
-  if (!llmProviderOptionsPromise) {
-    llmProviderOptionsPromise = apiRequest("/v1/llm-options")
-      .then((payload) => payload?.providers || FALLBACK_LLM_PROVIDER_OPTIONS)
-      .catch(() => FALLBACK_LLM_PROVIDER_OPTIONS);
-  }
-  return llmProviderOptionsPromise;
-}
-
-function useLlmProviderOptions() {
-  const [options, setOptions] = useState(FALLBACK_LLM_PROVIDER_OPTIONS);
-  useEffect(() => {
-    let cancelled = false;
-    loadLlmProviderOptions().then((value) => {
-      if (!cancelled) {
-        setOptions(value);
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-  return options;
-}
-
-function ModelSelectLabel({ providerOptions, provider, model, onChange, disabled = false, label = "Model" }) {
-  const providerEntry = providerOptions?.[provider] || {};
-  const models = Array.isArray(providerEntry.models) ? providerEntry.models : [];
-  const defaultLabel = providerEntry.default
-    ? `Default (${providerEntry.default})`
-    : "Default";
-  return (
-    <label>
-      <span>{label}</span>
-      <select
-        value={model}
-        onChange={(event) => onChange(event.target.value)}
-        disabled={disabled}
-      >
-        <option value="">{defaultLabel}</option>
-        {models
-          .map((row) => (
-            <option key={row.id} value={row.id}>
-              {row.id === providerEntry.default ? `${row.label} (default)` : row.label}
-            </option>
-          ))}
-      </select>
-    </label>
-  );
-}
 const QA_ANSWER_I18N = {
   "en-US": {
     answerStatusAnswered: "Answered from evidence",
@@ -307,6 +233,8 @@ function readHashRoute() {
     || raw === ROUTES.LOCAL_VIDEO
     || raw === ROUTES.TLDR
     || raw === ROUTES.STUDY
+    || raw === ROUTES.KEY_AREAS
+    || raw === ROUTES.COLLECTION
     || raw === ROUTES.SETTINGS
     || raw === ROUTES.QA
   ) {
@@ -929,36 +857,6 @@ function LocalVideoAnalysisPage({ locale }) {
           </>
         ) : null}
       </section>
-    </section>
-  );
-}
-
-function PlayerPanel({ videoId, startSeconds, title }) {
-  if (!videoId) {
-    return null;
-  }
-
-  const safeVideoId = encodeURIComponent(videoId);
-  const start = Math.max(0, Math.floor(Number(startSeconds || 0)));
-  const src = `https://www.youtube.com/embed/${safeVideoId}?start=${start}&autoplay=1&rel=0&modestbranding=1&playsinline=1`;
-
-  return (
-    <section className="panel">
-      <h2 className="section-title">
-        <img src="/icons/icon-play.svg" alt="" aria-hidden="true" />
-        <span>YouTube Player</span>
-      </h2>
-      <p className="section-desc">{title ? `Now playing: ${title} (${formatSeconds(start)})` : "Now playing"}</p>
-      <div className="player-shell player-active">
-        <iframe
-          key={`${videoId}-${start}`}
-          className="player-frame"
-          title="YouTube player"
-          src={src}
-          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-          allowFullScreen
-        />
-      </div>
     </section>
   );
 }
@@ -2827,6 +2725,7 @@ const LOCKED_NAV_HINT = "Index a video in the Library first";
 const STUDY_MODES = [
   { route: ROUTES.STUDY, label: "Study", icon: "/icons/icon-library.svg" },
   { route: ROUTES.TLDR, label: "Summary", icon: "/icons/icon-chat.svg" },
+  { route: ROUTES.KEY_AREAS, label: "Key areas", icon: "/icons/icon-play.svg" },
 ];
 
 function SearchWorkspace({ locale }) {
@@ -2839,7 +2738,7 @@ function SearchWorkspace({ locale }) {
 
 function StudyWorkspace({ route }) {
   const activeMode = STUDY_MODES.find((mode) => mode.route === route) || STUDY_MODES[0];
-  const panelId = `study-panel-${activeMode.label.toLowerCase()}`;
+  const panelId = `study-panel-${activeMode.label.toLowerCase().replaceAll(" ", "-")}`;
 
   return (
     <section className="studio-workspace">
@@ -2869,6 +2768,7 @@ function StudyWorkspace({ route }) {
       <div className="studio-mode-content" id={panelId} role="tabpanel">
         {route === ROUTES.STUDY ? <StudyStudioPage /> : null}
         {route === ROUTES.TLDR ? <TLDRStudioPage /> : null}
+        {route === ROUTES.KEY_AREAS ? <KeyAreasPage /> : null}
       </div>
     </section>
   );
@@ -2944,6 +2844,7 @@ function App() {
       && route !== ROUTES.LOCAL_VIDEO
       && route !== ROUTES.SETTINGS
       && route !== ROUTES.QA
+      && route !== ROUTES.COLLECTION
     ) {
       navigate(ROUTES.INGEST);
     }
@@ -3076,11 +2977,14 @@ function App() {
 
       <main className={`shell react-shell-main ${route === ROUTES.INGEST ? "ingest-route" : ""}`}>
         <div className="route-scene" key={`scene-${route}-${routeAnimationKey}`}>
-          {route === ROUTES.INGEST ? <LibraryPage onSuccess={handleIngestSuccess} /> : null}
+          {route === ROUTES.INGEST ? (
+            <LibraryPage onSuccess={handleIngestSuccess} onSummarizeSelection={() => navigate(ROUTES.COLLECTION)} />
+          ) : null}
           {route === ROUTES.LOCAL_VIDEO ? <LocalVideoAnalysisPage locale={locale} /> : null}
           {route === ROUTES.QA ? <SearchWorkspace locale={locale} /> : null}
           {route === ROUTES.SETTINGS ? <SettingsPage /> : null}
-          {(route === ROUTES.STUDY || route === ROUTES.TLDR) && unlocked ? <StudyWorkspace route={route} /> : null}
+          {STUDY_MODES.some((mode) => mode.route === route) && unlocked ? <StudyWorkspace route={route} /> : null}
+          {route === ROUTES.COLLECTION ? <CollectionPage /> : null}
         </div>
       </main>
 
