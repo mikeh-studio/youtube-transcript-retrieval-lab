@@ -22,7 +22,7 @@
     <main class="shell">
       <div class="hero">
         <h1>Label review</h1>
-        <p class="subtitle">Draft labels with Codex and review each item against the source transcript.</p>
+        <p class="subtitle">Review summary key points and audit automated judge decisions.</p>
       </div>
       <div class="label-workspace">
         <aside class="label-sidebar">
@@ -30,13 +30,16 @@
             <h2 class="section-title">New draft</h2>
             <form id="startForm" class="grid">
               <label>Task<select id="task" required></select></label>
-              <label>Sources<select id="sources" required></select></label>
-              <label>Output language
+              <label id="sourceField">Sources<select id="sources" required></select></label>
+              <label id="languageField">Output language
                 <input id="language" list="languages" value="en" required />
                 <datalist id="languages">
                   <option value="en">English</option>
                   <option value="ja">Japanese</option>
                 </datalist>
+              </label>
+              <label id="auditFileField" hidden>Judge audit sample
+                <input type="file" id="auditFile" accept=".jsonl,application/x-ndjson" disabled />
               </label>
               <button class="btn" id="startJob" disabled>Start draft</button>
               <p id="jobStatus" class="label-status" role="status"></p>
@@ -66,6 +69,10 @@
               <p id="itemText" class="label-text"></p>
               <p id="itemTiming"></p>
               <p id="rationale" class="label-status" hidden></p>
+              <ul id="auditGoldPoints" hidden></ul>
+              <label id="auditNoteField" hidden>Optional disagreement note
+                <textarea id="auditNote" maxlength="4000"></textarea>
+              </label>
               <a id="timestamp" target="_blank" rel="noopener noreferrer" hidden>Open at timestamp</a>
               <div id="decisionActions" class="label-actions">
                 <button class="btn secondary" id="approve" type="button" aria-keyshortcuts="a">Approve</button>
@@ -86,7 +93,7 @@
                 </div>
               </form>
             </article>
-            <section aria-labelledby="contextHeading">
+            <section id="contextSection" aria-labelledby="contextHeading">
               <h3 id="contextHeading">Transcript context</h3>
               <p id="contextStatus" class="label-status" role="status"></p>
               <ul id="context" class="label-context" aria-label="Transcript lines" tabindex="0" hidden></ul>
@@ -95,7 +102,7 @@
               <button class="btn" id="finalize" type="button">Finalize dataset</button>
               <p id="finalizeStatus" class="label-status"></p>
             </div>
-            <p class="label-status">Keys <kbd>A</kbd> approve, <kbd>E</kbd> edit, <kbd>R</kbd> reject, <kbd>J</kbd> next, <kbd>K</kbd> previous.</p>
+            <p id="reviewKeys" class="label-status">Keys <kbd>A</kbd> approve, <kbd>E</kbd> edit, <kbd>R</kbd> reject, <kbd>J</kbd> next, <kbd>K</kbd> previous.</p>
           </div>
         </section>
       </div>

@@ -6,9 +6,14 @@ from types import SimpleNamespace
 
 import pytest
 
+from evals.summary.dataset import load_gold
+from evals.summary.judge import load_judgments
+from evals.summary.predictions import load_predictions
+from evals.summary.runner import audit_sample
 from tests.test_eval_generator_api import _request, local_api
 from tests.test_label_drafts import SOURCE_ID, TASK, wait_for_job
 from tests.test_label_drafts import workflow as workflow
+from tests.test_summary_eval import GOLD, JUDGMENTS, MANIFEST, PREDICTIONS
 
 
 def request(method, path, body=None):
@@ -83,10 +88,55 @@ def test_label_route_errors(monkeypatch, workflow):
     assert status == 400 and body["error"]["code"] == "INVALID_SOURCES"
 
 
+def test_judge_audit_import_and_all_disagree(monkeypatch, workflow):
+    service, cli, _ = workflow
+    monkeypatch.setattr(
+        local_api, "SERVICE", SimpleNamespace(_label_draft_service=lambda: service)
+    )
+    gold, _ = load_gold(GOLD, MANIFEST)
+    predictions = load_predictions(PREDICTIONS, gold)
+    judgments = load_judgments(JUDGMENTS, gold, predictions)
+    sample = audit_sample(gold, predictions, judgments)
+    rows = [
+        next(row for row in sample if row["kind"] == "match" and row["language"] == "en"),
+        next(row for row in sample if row["kind"] == "faithfulness" and row["language"] == "ja"),
+    ]
+    path = "/v1/labels/judge-audits"
+    assert request("POST", path, {"judgments": [rows[0], rows[0]]})[0] == 400
+    status, payload = request("POST", path, {"judgments": rows})
+    assert status == 201 and not cli.calls
+    draft = payload["draft"]
+    assert draft["language"] == "mixed" and draft["task"] == "judge_audit"
+    assert len(draft["items"]) == 2
+    draft_path = f"/v1/labels/drafts/{draft['draft_id']}"
+    item = next(item for item in draft["items"] if item["judgment"]["kind"] == "faithfulness")
+    status, payload = request("GET", f"{draft_path}/context?item={item['id']}")
+    assert status == 200 and payload["context"]["lines"] == item["judgment"]["window"]
+    assert request("POST", f"{draft_path}/finalize", {})[0] == 409
+    first = draft["items"][0]["id"]
+    assert request("POST", f"{draft_path}/review", {
+        "decisions": [{"id": first, "decision": "edited", "edits": {"text": "changed"}}]
+    })[0] == 400
+    decisions = [{"id": item["id"], "decision": "rejected", "note": "Fixture disagreement."}
+                 for item in draft["items"]]
+    assert request("POST", f"{draft_path}/review", {"decisions": decisions})[0] == 200
+    status, payload = request("POST", f"{draft_path}/finalize", {})
+    assert status == 200 and payload["dataset"]["agreement_rate"] == 0
+    assert payload["dataset"]["row_count"] == 2
+    data_path, manifest = service._dataset_paths(draft)
+    assert manifest.is_file()
+    saved = [json.loads(line) for line in data_path.read_bytes().splitlines()]
+    assert saved[0]["review_note"] == "Fixture disagreement."
+    status, payload = request("POST", path, {"judgments": rows})
+    assert status == 201 and payload["draft"]["draft_id"] == draft["draft_id"]
+    assert payload["draft"]["agreement_rate"] == 0
+
+
 @pytest.mark.parametrize(
     "path",
     [
         "/v1/labels/jobs",
+        "/v1/labels/judge-audits",
         "/v1/labels/drafts/example/review",
         "/v1/labels/drafts/example/finalize",
     ],

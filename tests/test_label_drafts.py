@@ -57,9 +57,17 @@ class FakeCodex:
         self.calls.append((prompt, schema_path))
         return self.output, "test-model"
 
+    def text_response(self, *, provider, model, system_prompt, user_message, schema_path):
+        self.selection = (provider, model)
+        output, model = self.run(user_message, schema_path)
+        return {"text": json.dumps(output), "provider": provider, "model": model,
+                "cli_version": "test-version"}
+
 
 @pytest.fixture
-def workflow(tmp_path):
+def workflow(tmp_path, monkeypatch):
+    monkeypatch.delenv("YT_RAG_LABEL_DRAFTER", raising=False)
+    monkeypatch.delenv("YT_RAG_LABEL_DRAFTER_MODEL", raising=False)
     source = {
         "title": "Orchard cart rehearsal",
         "url": "https://www.youtube.com/watch?v=orcharddemo",
@@ -82,7 +90,7 @@ def workflow(tmp_path):
         tmp_path / "runtime",
         tmp_path / "eval",
         {SOURCE_ID: source}.get,
-        codex,
+        codex.text_response,
         lambda: "2026-01-01T00:00:00+00:00",
     )
     return service, codex, source
@@ -167,10 +175,14 @@ def test_draft_uses_full_transcript_and_canonicalizes_items(workflow):
     assert all(item["review"] is None for item in draft["items"])
     assert service.list_drafts()[0]["item_count"] == 3
     assert draft["label_provenance"] == {
-        "drafter": "codex_cli",
+        "drafter": "claude_cli",
         "model_override": "test-model",
+        "provider": "claude_cli",
+        "model": "test-model",
+        "cli_version": "test-version",
         "system_under_test_used": False,
     }
+    assert codex.selection == ("claude_cli", "opus")
     assert len(draft["sources"][0]["source_fingerprint"]) == 64
     context = service.context(draft["draft_id"], first["id"])
     assert (context["start"], context["end"]) == (0, 75)
@@ -296,6 +308,15 @@ def test_finalize_retry_after_manifest_write_failure(workflow, monkeypatch):
     assert service.list_datasets() == []
     assert service.get_draft(draft_id)["status"] == "pending_review"
     assert service.finalize(draft_id)["row_count"] == 3
+
+
+def test_drafter_can_select_codex_and_model(workflow, monkeypatch):
+    service, cli, _ = workflow
+    monkeypatch.setenv("YT_RAG_LABEL_DRAFTER", "codex_cli")
+    monkeypatch.setenv("YT_RAG_LABEL_DRAFTER_MODEL", "configured-model")
+    draft = make_draft(service)
+    assert cli.selection == ("codex_cli", "configured-model")
+    assert draft["label_provenance"]["provider"] == "codex_cli"
 
 
 def test_single_job_slot_is_released_after_failure(workflow, monkeypatch):

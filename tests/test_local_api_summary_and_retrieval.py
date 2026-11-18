@@ -2477,7 +2477,7 @@ def test_summarize_video_transcript_backfills_full_transcript_once():
             {
                 "title": "Theme 5",
                 "tldr": "One. Two. Three. Four.",
-                "anchor_text": "Intro section",
+                "anchor_text": "no matching phrase",
             },
         ],
         "strategy": "single_pass",
@@ -2492,9 +2492,24 @@ def test_summarize_video_transcript_backfills_full_transcript_once():
 
     assert first["generation_details"]["full_transcript_backfilled"] is True
     assert second["generation_details"]["full_transcript_backfilled"] is False
+    assert first["summary"][0]["timestamp_source"] == "anchor_match"
+    assert first["summary"][0]["segment_index"] == 0
+    assert first["summary"][-1]["timestamp_source"] == "model_fallback"
+    assert first["summary"][-1]["segment_index"] is None
+    assert second["summary"] == first["summary"]
     assert service.engine.library.save_calls == 1
     assert "full_transcript" in service.engine.library.videos["vid1"]
-    assert service._summary_cache_path("vid1").exists()
+    cache_path = service._summary_cache_path("vid1")
+    entries = json.loads(cache_path.read_text())
+    for item in next(iter(entries.values()))["result"]["summary"]:
+        item.pop("timestamp_source")
+        item.pop("segment_index")
+    cache_path.write_text(json.dumps(entries))
+    cached = service.summarize_video_transcript(
+        video_id="vid1", language="en", provider="chatgpt"
+    )
+    assert cached["cached"] is True
+    assert all("timestamp_source" not in item for item in cached["summary"])
 
 
 def test_summarize_video_transcript_uses_summary_cache_for_repeat_request():
@@ -3104,7 +3119,11 @@ def test_summary_cache_key_includes_model():
     assert key_a.endswith(":claude-sonnet-4-6")
 
 
-def test_llm_options_route_returns_models_and_defaults():
+@pytest.mark.parametrize("installed", [[], ["codex_cli", "claude_cli"]])
+def test_llm_options_route_returns_models_and_defaults(monkeypatch, installed):
+    monkeypatch.setattr(local_api.CLI_LLM, "installed", lambda: installed)
+    monkeypatch.delenv("YT_RAG_CODEX_LLM_MODEL", raising=False)
+    monkeypatch.delenv("YT_RAG_CLAUDE_CLI_MODEL", raising=False)
     class StubService:
         openai_model = "gpt-5.4-mini"
         sakana_model = "fugu"
@@ -3135,7 +3154,10 @@ def test_llm_options_route_returns_models_and_defaults():
     payload = handler.response_payload
     assert payload["ok"] is True
     providers = payload["providers"]
-    assert set(providers) == {"chatgpt", "claude", "sakana"}
+    assert set(providers) == {"chatgpt", "claude", "sakana", *installed}
+    if installed:
+        assert providers["codex_cli"]["default"] == "gpt-6-luna"
+        assert providers["claude_cli"]["default"] == "sonnet"
     assert providers["chatgpt"]["default"] == "gpt-5.4-mini"
     assert providers["claude"]["default"] == "claude-sonnet-4-5-20250929"
     assert providers["sakana"]["default"] == "fugu"

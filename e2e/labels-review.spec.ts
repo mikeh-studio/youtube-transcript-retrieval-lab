@@ -145,3 +145,71 @@ test("starts a label draft, reviews with shortcuts and edits, then finalizes", a
     { id: "item_3", decision: "rejected" },
   ]);
 });
+
+test("imports a judge audit and records a disagreement with a note", async ({ page }) => {
+  const decisions: unknown[] = [];
+  const judgment = {
+    kind: "faithfulness", decision: "partial", start: 25.5,
+    prediction_text: proposal, judge: { model: "fixture-judge" },
+    window: [{ line: 12, start: 25.5, end: 26, text: transcript }],
+  };
+  const draft = {
+    draft_id: draftId, task: "judge_audit", language: "en", status: "pending_review",
+    sources: [source], items: [{
+      id: "item_1", source_id: source.source_id, judgment,
+      review: null as null | { decision: string; note: string },
+    }],
+  };
+  let imported = false;
+  await page.route("**/v1/videos", (route) => route.fulfill({ json: { videos: [] } }));
+  await page.route("**/v1/labels/**", (route) => {
+    switch (new URL(route.request().url()).pathname) {
+      case "/v1/labels/tasks":
+        return route.fulfill({ json: { tasks: [
+          { task: "summary_keypoints", title: "Summary key points", min_sources: 1, max_sources: 1 },
+          { task: "judge_audit", title: "Judge audit", input: "judge_audit_sample" },
+        ] } });
+      case "/v1/labels/judge-audits":
+        expect(route.request().postDataJSON()).toEqual({ judgments: [judgment] });
+        imported = true;
+        return route.fulfill({ status: 201, json: { draft } });
+      case "/v1/labels/drafts":
+        return route.fulfill({ json: { drafts: imported ? [{
+          ...draft, item_count: 1, decided_count: 0,
+        }] : [] } });
+      case draftPath:
+        return route.fulfill({ json: { draft } });
+      case `${draftPath}/context`:
+        return route.fulfill({ json: { context: { lines: judgment.window } } });
+      case `${draftPath}/review`: {
+        const { decisions: [row] } = route.request().postDataJSON();
+        decisions.push(row);
+        draft.items[0].review = row;
+        return route.fulfill({ json: { draft } });
+      }
+      case `${draftPath}/finalize`:
+        return route.fulfill({ json: { dataset: { dataset_id: "dataset_audit", agreement_rate: 0 } } });
+      default:
+        return route.fulfill({ status: 404, json: { error: { message: "Unexpected mock request" } } });
+    }
+  });
+  await page.goto("/labels.html");
+  await page.getByLabel("Task").selectOption("judge_audit");
+  await expect(page.getByLabel("Sources")).toBeHidden();
+  await page.getByLabel("Judge audit sample").setInputFiles({
+    name: "judge_audit_sample.jsonl", mimeType: "application/x-ndjson",
+    buffer: Buffer.from(JSON.stringify(judgment) + "\n"),
+  });
+  await page.getByRole("button", { name: "Import audit sample" }).click();
+  await expect(page.getByText("Judge faithfulness · partial")).toBeVisible();
+  await expect(page.getByText(transcript, { exact: true })).toBeVisible();
+  await expect(page.locator("#context img, #itemText b")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Edit", exact: true })).toBeHidden();
+  await page.getByLabel("Optional disagreement note").fill("The window supports both claims.");
+  await page.getByRole("button", { name: "Disagree", exact: true }).click();
+  await page.getByRole("button", { name: "Finalize dataset" }).click();
+  await expect(page.getByText("Owner agreement 0.0%")).toBeVisible();
+  expect(decisions).toEqual([
+    { id: "item_1", decision: "rejected", note: "The window supports both claims." },
+  ]);
+});

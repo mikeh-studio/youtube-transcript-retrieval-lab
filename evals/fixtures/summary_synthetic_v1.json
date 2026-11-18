@@ -1,0 +1,220 @@
+{
+  "sources": [
+    {
+      "source_id": "synthetic_en",
+      "title": "Invented EN transcript",
+      "full_transcript": {
+        "segments": [
+          {
+            "start": 0,
+            "end": 10,
+            "text": "The roof team tested a lantern at dusk."
+          },
+          {
+            "start": 20,
+            "end": 30,
+            "text": "They slid a blue shield over the lamp to reduce glare."
+          },
+          {
+            "start": 30,
+            "end": 40,
+            "text": "The shield kept stray light off the staircase."
+          },
+          {
+            "start": 60,
+            "end": 70,
+            "text": "A paper star marked each storage shelf."
+          },
+          {
+            "start": 80,
+            "end": 90,
+            "text": "The team checked that each handle stayed cool."
+          },
+          {
+            "start": 100,
+            "end": 110,
+            "text": "They had spare cotton gloves by the door."
+          },
+          {
+            "start": 120,
+            "end": 130,
+            "text": "They held the rain gauge inside a broad copper ring."
+          },
+          {
+            "start": 140,
+            "end": 150,
+            "text": "The copper ring kept the rain gauge upright."
+          },
+          {
+            "start": 160,
+            "end": 170,
+            "text": "The morning reading was written in pencil."
+          },
+          {
+            "start": 180,
+            "end": 190,
+            "text": "The gauge drained into a glass jar."
+          },
+          {
+            "start": 200,
+            "end": 210,
+            "text": "A strip of yellow tape marked the bench edge."
+          },
+          {
+            "start": 220,
+            "end": 230,
+            "text": "The team washed the jars in warm water."
+          },
+          {
+            "start": 240,
+            "end": 250,
+            "text": "They packed dry towels for the return trip."
+          },
+          {
+            "start": 260,
+            "end": 270,
+            "text": "One towel was big enough to cover the bench."
+          },
+          {
+            "start": 280,
+            "end": 290,
+            "text": "The key to the shed hung by the back step."
+          },
+          {
+            "start": 300,
+            "end": 310,
+            "text": "They moved the weather log to the lower shelf so everyone could reach it."
+          },
+          {
+            "start": 320,
+            "end": 330,
+            "text": "The low shelf was near the door."
+          },
+          {
+            "start": 340,
+            "end": 350,
+            "text": "A spare pencil was tucked into the log."
+          },
+          {
+            "start": 360,
+            "end": 370,
+            "text": "The team locked the shed at sunset."
+          },
+          {
+            "start": 380,
+            "end": 390,
+            "text": "They left a small flag at the roof entrance."
+          }
+        ]
+      }
+    },
+    {
+      "source_id": "synthetic_ja",
+      "title": "Invented JA transcript",
+      "full_transcript": {
+        "segments": [
+          {
+            "start": 0,
+            "end": 10,
+            "text": "庭の観察会が始まりました。"
+          },
+          {
+            "start": 20,
+            "end": 30,
+            "text": "小さな温室の窓を開けました。"
+          },
+          {
+            "start": 40,
+            "end": 50,
+            "text": "西側の窓に網を張って虫を防ぎました。"
+          },
+          {
+            "start": 55,
+            "end": 65,
+            "text": "網の端を木の枠に留めました。"
+          },
+          {
+            "start": 80,
+            "end": 90,
+            "text": "鉢を日陰から机に移しました。"
+          },
+          {
+            "start": 100,
+            "end": 110,
+            "text": "鉢には色の違う札を付けました。"
+          },
+          {
+            "start": 120,
+            "end": 130,
+            "text": "空き箱は入り口の横に積みました。"
+          },
+          {
+            "start": 140,
+            "end": 150,
+            "text": "当番が床を掃きました。"
+          },
+          {
+            "start": 160,
+            "end": 170,
+            "text": "記録用の紙を配りました。"
+          },
+          {
+            "start": 180,
+            "end": 190,
+            "text": "机の右側に紙を並べました。"
+          },
+          {
+            "start": 200,
+            "end": 210,
+            "text": "土が乾いていたので、苗に少し水をやりました。"
+          },
+          {
+            "start": 220,
+            "end": 230,
+            "text": "水の量をノートに書きました。"
+          },
+          {
+            "start": 240,
+            "end": 250,
+            "text": "空のじょうろを棚に戻しました。"
+          },
+          {
+            "start": 260,
+            "end": 270,
+            "text": "布で机の水滴を拭きました。"
+          },
+          {
+            "start": 280,
+            "end": 290,
+            "text": "鉛筆は窓辺の缶に入れました。"
+          },
+          {
+            "start": 300,
+            "end": 310,
+            "text": "青い札を箱に片付けました。"
+          },
+          {
+            "start": 330,
+            "end": 340,
+            "text": "帰る前に温室の戸を木のつっかえ棒で固定しました。"
+          },
+          {
+            "start": 350,
+            "end": 360,
+            "text": "当番は戸を軽く押して確かめました。"
+          },
+          {
+            "start": 370,
+            "end": 380,
+            "text": "庭の時計が五時を知らせました。"
+          },
+          {
+            "start": 395,
+            "end": 400,
+            "text": "道具を片付けて会を終えました。"
+          }
+        ]
+      }
+    }
+  ]
+}

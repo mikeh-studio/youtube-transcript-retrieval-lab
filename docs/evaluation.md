@@ -127,8 +127,11 @@ retrieval draft. Install the Codex CLI and run `codex login` first.
 
 Open **Label review** from the Evaluation sidebar. Choose **Summary key
 points**, an indexed video with a stored transcript, and an output language
-tag such as `en` or `ja`. Drafting uses the same Codex CLI setup as Query
-sets and sends up to 150,000 characters of numbered transcript lines.
+tag such as `en` or `ja`. Drafting sends up to 150,000 characters of numbered
+transcript lines. It defaults to `claude_cli` with `opus`. Set
+`YT_RAG_LABEL_DRAFTER=codex_cli` to use Codex, or set
+`YT_RAG_LABEL_DRAFTER_MODEL` to override the selected model. Saved provenance
+records the provider, model and CLI version.
 
 Use the excerpt and timestamp link to review each item. Approve, edit, or
 reject every item before finalizing. At least one item must be accepted.
@@ -141,6 +144,86 @@ includes the source ID, fingerprint, review decision, provenance, and onset and
 span timestamps in seconds. The matching manifest records the JSONL SHA-256
 and counts for each review decision. Use the manifest to identify completed
 datasets.
+
+## Summary evaluation
+
+The summary evaluator measures the coverage of owner-reviewed key points, where
+summaries take a reader in the transcript, and whether the cited passage supports
+each claim. `score` and `report` operate on saved files and run offline.
+
+```bash
+.venv/bin/python -m evals.summary.runner report \
+  --gold evals/datasets/summary_synthetic_v1.gold.jsonl \
+  --manifest evals/datasets/summary_synthetic_v1.manifest.json \
+  --predictions evals/fixtures/summary_synthetic_v1.predictions.jsonl \
+  --out evals/reports/summary-synthetic
+```
+
+The bundled English and Japanese fixtures use invented transcripts and
+hand-written predictions and judgments. Add
+`--judgments evals/fixtures/summary_synthetic_v1.judgments.jsonl` and use a fresh
+output directory to exercise the judged report offline.
+
+Keep source transcripts, reviewed gold, generated predictions, judge decisions
+and reports under gitignored `data/` or `evals/reports/`. A gold JSONL row
+declares `"schema": "summary-gold/v1"` and contains `source_id`, `language`
+(`en` or `ja`), `source_fingerprint`, `duration_s`, and `key_points`.
+Optional `sections` contain `start` and `title`. When assembling gold from
+finalized **Summary key points** labels, group them by source, retain the
+transcript fingerprint, and map each label's `span_start` and `span_end` to
+a `{start,end}` entry in `spans`. Each point retains its `id`, reviewed
+`text`, `importance` from 1 to 3, and `onset` in seconds. Put the exact gold
+file SHA-256 in the manifest's `sha256` field. The evaluator checks that digest
+and verifies the stored transcript fingerprint before generation or judging.
+
+Use `generate --gold … --manifest … --provider … --out predictions.jsonl`
+against the stored library. The provider choices are `codex_cli`, `claude_cli`,
+`chatgpt`, `claude` and `sakana`. `--model` and `--system` can identify
+the run. Prediction rows record the model, provider, output language, cache hit
+and CLI version when available. Older cache entries can lack item-level
+timestamp provenance. Use `--data-dir` to select the stored library or
+`--transcripts` to supply a JSON file with the same shape as the
+[synthetic transcript fixture](../evals/fixtures/summary_synthetic_v1.json).
+
+Use `judge --gold … --manifest … --predictions … --judge claude_cli --out judgments.jsonl`
+to opt into semantic judging. The other judge choices are `codex_cli`,
+`claude` and `chatgpt`. Each run makes separate requests for one-to-one
+semantic matches and faithfulness against the anchored segment plus 45 seconds
+on either side. A fallback timestamp uses a window centered on its start.
+Judgment rows bind to the exact gold and prediction rows and record judge
+provenance and the excerpts used for faithfulness.
+
+The CLI providers use existing local subscription logins. The Codex default
+model is `gpt-6-luna` (`YT_RAG_CODEX_LLM_MODEL`) and the Claude default is
+`sonnet` (`YT_RAG_CLAUDE_CLI_MODEL`). Set `YT_RAG_CODEX_BIN` or
+`YT_RAG_CLAUDE_BIN` to override discovery. Claude Code must support
+`--safe-mode` and the isolation flags used by the runner. Generation runs in
+temporary working directories with a sanitized environment and a five-minute
+timeout.
+
+| Metric | Calculation |
+| --- | --- |
+| `anchor_resolution_rate` | Resolved anchors divided by items with known timestamp provenance. |
+| `ts_hit@15s`, `ts_hit@30s`, `ts_mae_s` | Inclusive hit rates and mean absolute error between predicted start and the matched point's onset. Judgments supply the matches when present. Otherwise the timestamp proxy makes a deterministic one-to-one pairing within 30 seconds of a gold span. |
+| `keypoint_span_recall@30s` | Share of gold points with any predicted start between 30 seconds before a span begins and 30 seconds after it ends. A prediction may cover multiple points for this proxy. |
+| `duplicate_anchor_rate` | Resolved anchors beyond the first use of the same start/end pair, divided by resolved anchors. |
+| `language_match_rate` | Share of item texts matching the gold language by Japanese or Latin script. Mixed script containing Japanese characters counts as Japanese. |
+| `keypoint_recall_w`, `keypoint_precision` | Importance covered divided by total gold importance, and matched items divided by predicted items. Both require judge decisions. |
+| `faithfulness_rate`, `partial_rate` | Items graded supported or partial, respectively, divided by all judged items. |
+
+Results contain per-source counts and per-system micro-aggregates. Rates
+with a zero denominator are unavailable. Span proximity measures timestamp
+coverage. Meaning and claim support require semantic review.
+
+`score` writes `results.json`. `report` also writes `summary.md` and a
+fixed-seed `judge_audit_sample.jsonl` containing up to 20 individual decisions.
+Both commands require a fresh results path. To review a sample, open **Label
+review**, choose **Judge audit**, and import that JSONL file. Mark every decision
+**Agree** or **Disagree** and finalize. The manifest under
+`data/evaluation/labels/judge_audit/` records the sample digest and agreement
+rate. Publish judged numbers only if owner agreement on the audit sample is
+at least **0.85**. The sample contains only machine decisions and their review
+inputs until an owner records their judgments.
 
 ## Assisted labeling
 

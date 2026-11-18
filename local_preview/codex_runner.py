@@ -48,19 +48,17 @@ class CodexRunner:
         self._lock = threading.Lock()
         self._capability_cache: Optional[dict] = None
         self._capability_cached_at = 0.0
+        self._capability_path: Optional[str] = None
 
     @staticmethod
     def _codex_path() -> Optional[str]:
         override = str(os.environ.get("YT_RAG_CODEX_BIN") or "").strip()
-        if override:
-            resolved = shutil.which(override)
-            if resolved:
-                return resolved
-            candidate = Path(override).expanduser()
-            if candidate.exists() and candidate.is_file():
-                return str(candidate.resolve())
-            return None
-        return shutil.which("codex")
+        path = shutil.which(os.path.expanduser(override) if override else "codex")
+        return os.path.abspath(path) if path else None
+
+    def binary(self) -> Optional[str]:
+        """Return the discovered executable path without running the CLI."""
+        return self._path_getter()
 
     @staticmethod
     def _sanitized_env() -> dict:
@@ -87,15 +85,16 @@ class CodexRunner:
         return {key: value for key, value in os.environ.items() if key in allowed}
 
     def capabilities(self, *, force: bool = False) -> dict:
+        codex_path = self.binary()
         with self._lock:
             if (
                 not force
                 and self._capability_cache is not None
+                and self._capability_path == codex_path
                 and time.monotonic() - self._capability_cached_at < 30
             ):
                 return deepcopy(self._capability_cache)
 
-        codex_path = self._path_getter()
         if not codex_path:
             result = {
                 "available": False,
@@ -160,10 +159,11 @@ class CodexRunner:
         with self._lock:
             self._capability_cache = deepcopy(result)
             self._capability_cached_at = time.monotonic()
+            self._capability_path = codex_path
         return result
 
     def _codex_command(
-        self, codex_path: str, temp_dir: str, schema_path: Path, model: Optional[str]
+        self, codex_path: str, temp_dir: str, schema_path: Optional[Path], model: Optional[str]
     ) -> List[str]:
         command = [
             codex_path,
@@ -176,13 +176,13 @@ class CodexRunner:
             "--skip-git-repo-check",
             "--ignore-user-config",
             "--strict-config",
-            "--output-schema",
-            str(schema_path.resolve()),
             "--color",
             "never",
             "-C",
             str(temp_dir),
         ]
+        if schema_path is not None:
+            command.extend(["--output-schema", str(schema_path.resolve())])
         if model:
             command.extend(["--model", model])
         command.append("-")
@@ -198,18 +198,44 @@ class CodexRunner:
         self, prompt: str, schema_path: Path, *, on_generating=None
     ) -> tuple[object, Optional[str]]:
         """Return decoded output and the model override used for this invocation."""
+        model = str(os.environ.get("YT_RAG_CODEX_MODEL") or "").strip() or None
+        output, _ = self._run(prompt, schema_path, model, on_generating=on_generating)
+        try:
+            return json.loads(output), model
+        except json.JSONDecodeError as exc:
+            raise CodexRunnerError(
+                "INVALID_CODEX_OUTPUT",
+                "Codex returned output that was not valid JSON.",
+                502,
+            ) from exc
+
+    def run_text(self, prompt: str, model: str, schema_path: Optional[Path] = None):
+        """Run a text-only request and return the CLI version used."""
+        return self._run(prompt, schema_path, model, text_only=True)
+
+    def _run(self, prompt, schema_path, model, *, on_generating=None, text_only=False):
         capability = self.capabilities()
-        codex_path = self._path_getter()
-        if not codex_path or not capability.get("authenticated"):
+        codex_path = self.binary()
+        if (
+            not codex_path or not capability.get("authenticated")
+            or (text_only and not capability.get("version"))
+        ):
             raise CodexRunnerError(
                 "CODEX_UNAVAILABLE", "Codex CLI is no longer available.", 503
             )
 
-        model = str(os.environ.get("YT_RAG_CODEX_MODEL") or "").strip() or None
         if on_generating:
             on_generating()
         with tempfile.TemporaryDirectory(prefix="yt-rag-eval-generator-") as temp_dir:
             command = self._codex_command(codex_path, temp_dir, schema_path, model)
+            if text_only:
+                options = ["--ignore-rules", "--config", 'web_search="disabled"']
+                for feature in (
+                    "shell_tool", "unified_exec", "hooks", "apps", "plugins",
+                    "multi_agent", "multi_agent_v2", "in_app_browser", "in_app_local_automation",
+                ):
+                    options.extend(["--config", f"features.{feature}=false"])
+                command[-1:-1] = options
             try:
                 completed = self.command_runner(
                     command,
@@ -243,11 +269,4 @@ class CodexRunner:
                 ),
                 502,
             )
-        try:
-            return json.loads(completed.stdout), model
-        except json.JSONDecodeError as exc:
-            raise CodexRunnerError(
-                "INVALID_CODEX_OUTPUT",
-                "Codex returned output that was not valid JSON.",
-                502,
-            ) from exc
+        return completed.stdout, capability["version"]

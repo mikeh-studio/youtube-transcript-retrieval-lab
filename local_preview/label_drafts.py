@@ -6,8 +6,8 @@ import hashlib
 import json
 import logging
 import math
+import os
 import re
-import tempfile
 import threading
 import uuid
 from copy import deepcopy
@@ -16,7 +16,10 @@ from pathlib import Path
 from typing import Callable
 
 from local_preview.codex_runner import CodexRunnerError
-from local_preview.transcript_lines import format_lines, numbered_lines
+from evals.summary.predictions import record_sha256
+from local_preview.judge_audit import validate_sample
+from local_preview.local_files import json_bytes as _json_bytes, write_atomic as _write_atomic
+from local_preview.transcript_lines import fingerprint_lines, format_lines, numbered_lines
 
 
 MAX_CONTEXT_CHARS = 150_000
@@ -44,25 +47,8 @@ class LabelTask:
     edit: Callable[[dict, dict, dict], dict]
 
 
-def _json_bytes(payload):
-    return (json.dumps(payload, ensure_ascii=False, allow_nan=False) + "\n").encode()
-
-
 def _sha256(payload):
     return hashlib.sha256(payload).hexdigest()
-
-
-def _write_atomic(path, content):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as temp:
-        temp_path = Path(temp.name)
-        try:
-            temp_path.chmod(0o600)
-            temp.write(content)
-            temp.close()
-            temp_path.replace(path)
-        finally:
-            temp_path.unlink(missing_ok=True)
 
 
 def _sample_lines(lines, budget):
@@ -141,7 +127,7 @@ def _keypoints(generated, sources):
     candidates = generated.get("key_points") if isinstance(generated, dict) else None
     if not isinstance(candidates, list) or not 5 <= len(candidates) <= 8:
         raise LabelDraftError(
-            "INVALID_CODEX_OUTPUT", "Codex must propose 5 to 8 key points.", 502
+            "INVALID_DRAFTER_OUTPUT", "The drafter must propose 5 to 8 key points.", 502
         )
     source = sources[0]
     line_map = {line["line"]: line for line in source["sample"]}
@@ -186,7 +172,7 @@ def _keypoints(generated, sources):
         )
     if not items:
         raise LabelDraftError(
-            "NO_VALID_ITEMS", "Codex returned no valid key points.", 502
+            "NO_VALID_ITEMS", "The drafter returned no valid key points.", 502
         )
     return items, _text(generated.get("notes"))[:MAX_LABEL_TEXT]
 
@@ -220,13 +206,13 @@ class LabelDraftService:
     """Store draft proposals, owner decisions, and immutable label datasets."""
 
     def __init__(
-        self, root_dir, runtime_dir, eval_dir, source_getter, codex_runner, clock
+        self, root_dir, runtime_dir, eval_dir, source_getter, drafter, clock
     ):
         self.schema_dir = Path(root_dir) / "local_preview" / "schemas"
         self.draft_dir = Path(runtime_dir) / "label_drafts" / "drafts"
         self.labels_dir = Path(eval_dir) / "labels"
         self.source_getter = source_getter
-        self.codex_runner = codex_runner
+        self.drafter = drafter
         self.clock = clock
         self._lock = threading.Lock()
         self._jobs = {}
@@ -242,7 +228,10 @@ class LabelDraftService:
                 "max_sources": task.max_sources,
             }
             for key, task in TASKS.items()
-        ]
+        ] + [{
+            "task": "judge_audit", "title": "Judge audit", "input": "judge_audit_sample",
+            "min_sources": 0, "max_sources": 0,
+        }]
 
     def _source(self, source_id):
         source = self.source_getter(source_id)
@@ -266,7 +255,7 @@ class LabelDraftService:
                 source.get("url") or f"https://www.youtube.com/watch?v={source_id}"
             ),
             "duration": duration,
-            "source_fingerprint": _sha256(_json_bytes(lines)),
+            "source_fingerprint": fingerprint_lines(lines),
         }
         return metadata, lines
 
@@ -346,9 +335,24 @@ class LabelDraftService:
             for source_id in job["source_ids"]:
                 metadata, lines = self._source(source_id)
                 sources.append({**metadata, "sample": _sample_lines(lines, budget)})
-            generated, model = self.codex_runner.run(
-                spec.prompt(sources, job["language"]), self.schema_dir / spec.schema
+            provider = (os.environ.get("YT_RAG_LABEL_DRAFTER") or "claude_cli").strip()
+            if provider not in ("codex_cli", "claude_cli"):
+                raise LabelDraftError("INVALID_DRAFTER", "Choose codex_cli or claude_cli.")
+            model = os.environ.get("YT_RAG_LABEL_DRAFTER_MODEL") or (
+                "opus" if provider == "claude_cli" else None
             )
+            response = self.drafter(
+                provider=provider, model=model,
+                system_prompt="Draft evidence labels in the supplied JSON schema.",
+                user_message=spec.prompt(sources, job["language"]),
+                schema_path=self.schema_dir / spec.schema,
+            )
+            try:
+                generated = json.loads(response["text"])
+            except ValueError as exc:
+                raise LabelDraftError(
+                    "INVALID_DRAFTER_OUTPUT", "The drafter returned invalid JSON.", 502
+                ) from exc
             items, notes = spec.canonicalize(generated, sources)
             draft_id = f"draft_{uuid.uuid4().hex}"
             timestamp = self.clock()
@@ -365,8 +369,11 @@ class LabelDraftService:
                 ],
                 "notes": notes,
                 "label_provenance": {
-                    "drafter": "codex_cli",
-                    "model_override": model,
+                    "drafter": response["provider"],
+                    "model_override": response["model"],
+                    "provider": response["provider"],
+                    "model": response["model"],
+                    "cli_version": response.get("cli_version"),
                     "system_under_test_used": False,
                 },
                 "items": [
@@ -389,6 +396,41 @@ class LabelDraftService:
             with self._lock:
                 self._jobs[job_id].update(result, completed_at=self.clock())
                 self._active_job = None
+
+    def import_judge_audit(self, rows):
+        """Import the report's local audit sample without running a model."""
+        try:
+            fingerprints = validate_sample(rows)
+        except ValueError as exc:
+            raise LabelDraftError("INVALID_AUDIT_SAMPLE", str(exc)) from exc
+        sample_hash = record_sha256(rows)
+        draft_id = f"draft_{sample_hash[:32]}"
+        now = self.clock()
+        languages = {row["language"] for row in rows}
+        draft = {
+            "version": 1,
+            "draft_id": draft_id,
+            "task": "judge_audit",
+            "language": next(iter(languages)) if len(languages) == 1 else "mixed",
+            "created_at": now,
+            "updated_at": now,
+            "sources": [
+                {"source_id": source_id, "title": source_id, "source_fingerprint": fingerprint}
+                for source_id, fingerprint in fingerprints.items()
+            ],
+            "notes": "",
+            "label_provenance": {"audit_sample_sha256": sample_hash},
+            "items": [
+                {"id": f"item_{index}", "source_id": row["source_id"],
+                 "review": None, "judgment": row}
+                for index, row in enumerate(rows, start=1)
+            ],
+        }
+        with self._lock:
+            if self._draft_path(draft_id).exists():
+                return self._with_status(self._load_draft(draft_id))
+            _write_atomic(self._draft_path(draft_id), _json_bytes(draft))
+            return self._with_status(draft)
 
     def _draft_path(self, draft_id):
         if not re.fullmatch(r"draft_[a-f0-9]{32}", draft_id):
@@ -420,6 +462,8 @@ class LabelDraftService:
             "dataset_id": manifest.name.removesuffix(".manifest.json")
             if finalized
             else None,
+            **({"agreement_rate": json.loads(manifest.read_bytes())["agreement_rate"]}
+               if finalized and draft["task"] == "judge_audit" else {}),
         }
 
     def get_draft(self, draft_id):
@@ -462,6 +506,15 @@ class LabelDraftService:
             raise LabelDraftError(
                 "ITEM_NOT_FOUND", "Label draft item was not found.", 404
             )
+        if draft["task"] == "judge_audit":
+            judgment = item["judgment"]
+            return {
+                "item_id": item_id,
+                "source_id": item["source_id"],
+                "start": judgment["start"],
+                "end": judgment["end"],
+                "lines": judgment.get("window", []),
+            }
         source = next(
             source
             for source in draft["sources"]
@@ -503,7 +556,7 @@ class LabelDraftService:
                 )
             items = {item["id"]: item for item in draft["items"]}
             sources = {source["source_id"]: source for source in draft["sources"]}
-            spec = TASKS[draft["task"]]
+            audit = draft["task"] == "judge_audit"
             seen = set()
             for row in decisions:
                 item_id = row.get("id") if isinstance(row, dict) else None
@@ -524,9 +577,18 @@ class LabelDraftService:
                     )
                 item = items[item_id]
                 review = {"decision": decision}
+                if audit and decision == "edited":
+                    raise LabelDraftError("INVALID_REVIEW", "Choose agree or disagree.")
+                if audit and "note" in row:
+                    note = row["note"]
+                    if decision != "rejected" or not isinstance(note, str) or len(note) > MAX_LABEL_TEXT:
+                        raise LabelDraftError(
+                            "INVALID_REVIEW", "A disagreement note may contain up to 4000 characters."
+                        )
+                    review["note"] = note.strip()
                 if decision == "edited":
                     try:
-                        review["edits"] = spec.edit(
+                        review["edits"] = TASKS[draft["task"]].edit(
                             item, row.get("edits"), sources[item["source_id"]]
                         )
                     except ValueError as exc:
@@ -556,6 +618,7 @@ class LabelDraftService:
                 raise LabelDraftError(
                     "REVIEW_INCOMPLETE", "Decide every item before finalizing.", 409
                 )
+            audit = draft["task"] == "judge_audit"
             counts = dict.fromkeys(DECISIONS, 0)
             rows = []
             fingerprints = {
@@ -566,7 +629,7 @@ class LabelDraftService:
                 review = item["review"]
                 decision = review["decision"]
                 counts[decision] += 1
-                if decision == "rejected":
+                if decision == "rejected" and not audit:
                     continue
                 fields = {
                     key: value
@@ -578,6 +641,7 @@ class LabelDraftService:
                         **fields,
                         **review.get("edits", {}),
                         "review_decision": decision,
+                        **({"review_note": review["note"]} if "note" in review else {}),
                         "task": draft["task"],
                         "language": draft["language"],
                         "source_fingerprint": fingerprints[item["source_id"]],
@@ -604,6 +668,8 @@ class LabelDraftService:
                 "review_counts": counts,
                 "label_provenance": draft["label_provenance"],
             }
+            if audit:
+                manifest["agreement_rate"] = counts["approved"] / len(rows)
             encoded_manifest = _json_bytes(manifest)
             _write_atomic(data_path, content)
             _write_atomic(manifest_path, encoded_manifest)
@@ -613,7 +679,7 @@ class LabelDraftService:
         with self._lock:
             manifests = [
                 json.loads(path.read_bytes())
-                for task in TASKS
+                for task in (*TASKS, "judge_audit")
                 for path in (self.labels_dir / task).glob("dataset_*.manifest.json")
             ]
         return sorted(manifests, key=lambda row: row["created_at"], reverse=True)

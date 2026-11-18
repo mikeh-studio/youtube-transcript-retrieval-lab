@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import math
+from hashlib import sha256
+
+from local_preview.local_files import json_bytes
 
 
 def numbered_lines(segments):
@@ -47,3 +50,8 @@ def seconds_to_line(lines, seconds):
         default=None,
     )
     return row["line"] if row is not None else None
+
+
+def fingerprint_lines(lines):
+    """Hash the numbered transcript representation used for label review."""
+    return sha256(json_bytes(lines)).hexdigest()

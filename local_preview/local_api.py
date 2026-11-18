@@ -54,6 +54,7 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+_SKIP_GLOBAL_SERVICE = os.environ.get("YT_RAG_SKIP_GLOBAL_SERVICE", "").strip().lower()
 if load_dotenv is not None:
     load_dotenv(ROOT_DIR / ".env")
     load_dotenv(ROOT_DIR / ".env.local", override=True)
@@ -109,7 +110,8 @@ from grounded_answer import (  # noqa: E402
     normalize_grounded_answer_payload,
 )
 from eval_generator import EvalGeneratorError, EvalGeneratorService  # noqa: E402
-from local_preview.codex_runner import CodexRunner  # noqa: E402
+from local_preview.cli_llm import CLI_LLM, CLI_MODELS, resolve_cli_model  # noqa: E402
+from local_preview.codex_runner import CodexRunnerError  # noqa: E402
 from local_preview.label_drafts import LabelDraftError, LabelDraftService  # noqa: E402
 
 
@@ -139,7 +141,7 @@ HYBRID_OPTIMIZED_WEIGHTS = {
 }
 REVIEW_LABELS = {"relevant", "not_relevant"}
 TITLE_PLACEHOLDER_RE = re.compile(r"^Video [a-zA-Z0-9_-]{11}$")
-ASK_PROVIDERS = {"chatgpt", "claude", "sakana"}
+ASK_PROVIDERS = {"chatgpt", "claude", "sakana"} | CLI_MODELS.keys()
 DEFAULT_ASK_PROVIDER = "chatgpt"
 SAKANA_DEFAULT_MODEL = "fugu"
 SAKANA_DEFAULT_BASE_URL = "https://api.sakana.ai/v1"
@@ -626,9 +628,9 @@ class LocalVideoOCRJob:
 
 
 class LocalRAGService:
-    def __init__(self):
+    def __init__(self, *, engine=None):
         self.lock = threading.Lock()
-        self.engine = RAGEngine()
+        self.engine = RAGEngine() if engine is None else engine
         self.openai_model = (
             str(os.environ.get("OPENAI_MODEL") or "gpt-5.4-mini").strip()
             or "gpt-5.4-mini"
@@ -673,7 +675,7 @@ class LocalRAGService:
         # Pre-warm the cross-encoder off the request path when reranking is
         # enabled globally, so the first reranked request doesn't stall on a
         # model download.
-        if self._default_reranker_mode() == "cross_encoder":
+        if engine is None and self._default_reranker_mode() == "cross_encoder":
             threading.Thread(
                 target=lambda: self._get_reranker()._ensure_score_fn(),
                 daemon=True,
@@ -867,7 +869,7 @@ class LocalRAGService:
                     runtime_dir=self.runtime_data_dir,
                     eval_dir=ROOT_DIR / "data" / "evaluation",
                     source_getter=lambda source_id: self.engine.library.videos.get(source_id),
-                    codex_runner=CodexRunner(),
+                    drafter=CLI_LLM.text_response,
                     clock=now_iso,
                 )
                 self.label_drafts = service
@@ -3823,6 +3825,8 @@ class LocalRAGService:
 
     def _resolve_llm_model(self, provider: str, model: Optional[str]) -> str:
         scoped_provider = str(provider or DEFAULT_ASK_PROVIDER).strip().lower()
+        if scoped_provider in CLI_MODELS:
+            return resolve_cli_model(scoped_provider, model)
         if scoped_provider not in ASK_PROVIDERS:
             raise ValueError(_provider_error_message())
         if scoped_provider == "claude":
@@ -3857,6 +3861,11 @@ class LocalRAGService:
         if scoped_provider not in ASK_PROVIDERS:
             raise ValueError(_provider_error_message())
         resolved_model = self._resolve_llm_model(scoped_provider, model)
+        if scoped_provider in CLI_MODELS:
+            return CLI_LLM.text_response(
+                provider=scoped_provider, system_prompt=system_prompt,
+                user_message=user_message, model=resolved_model,
+            )
         supports_temperature = _model_supports_temperature(
             scoped_provider, resolved_model
         )
@@ -4505,9 +4514,12 @@ class LocalRAGService:
                 return {
                     "provider": llm["provider"],
                     "model": llm["model"],
+                    "cli_version": llm.get("cli_version"),
                     "items": items,
                     "attempt_count": attempt,
                 }
+            except CodexRunnerError:
+                raise
             except Exception as exc:
                 last_error = exc
                 if isinstance(exc, _NON_RETRYABLE_LLM_ERRORS):
@@ -4557,6 +4569,7 @@ class LocalRAGService:
         return {
             "provider": result["provider"],
             "model": result["model"],
+            "cli_version": result.get("cli_version"),
             "items": result["items"],
             "strategy": "single_pass",
             "total_windows": 1,
@@ -4604,6 +4617,7 @@ class LocalRAGService:
         return {
             "provider": result["provider"],
             "model": result["model"],
+            "cli_version": result.get("cli_version"),
             "items": result["items"],
             "strategy": "compact_single_pass",
             "total_windows": 1,
@@ -4707,6 +4721,7 @@ class LocalRAGService:
         return {
             "provider": resolved_provider,
             "model": resolved_model,
+            "cli_version": final_result.get("cli_version"),
             "items": final_result["items"],
             "strategy": "map_reduce",
             "total_windows": len(windows),
@@ -5064,6 +5079,8 @@ class LocalRAGService:
                     "anchor_text": str(item.get("anchor_text") or "").strip(),
                     "start": start,
                     "end": end,
+                    "timestamp_source": resolved_timestamp["source"],
+                    "segment_index": resolved_segment_index,
                     "url": f"https://www.youtube.com/watch?v={scoped_video_id}&t={int(start)}s",
                 }
             )
@@ -5103,6 +5120,8 @@ class LocalRAGService:
                 "retry_count": int(summary_result.get("retry_count", 0)),
             },
         }
+        if summary_result.get("cli_version"):
+            response["cli_version"] = summary_result["cli_version"]
         self._put_summary_cache(
             video_id=scoped_video_id,
             video=video,
@@ -5141,6 +5160,8 @@ class LocalRAGService:
 
     def _study_provider_available(self, provider: str) -> bool:
         scoped_provider = str(provider or DEFAULT_ASK_PROVIDER).strip().lower()
+        if scoped_provider in CLI_MODELS:
+            return scoped_provider in CLI_LLM.installed()
         if scoped_provider == "chatgpt":
             return OpenAI is not None and bool(
                 str(os.environ.get("OPENAI_API_KEY") or "").strip()
@@ -7954,8 +7975,8 @@ class LocalRAGService:
 
 SERVICE = (
     None
-    if str(os.environ.get("YT_RAG_SKIP_GLOBAL_SERVICE", "0")).strip().lower()
-    in {"1", "true", "yes", "on"}
+    if {_SKIP_GLOBAL_SERVICE, os.environ.get("YT_RAG_SKIP_GLOBAL_SERVICE", "").strip().lower()}
+    & {"1", "true", "yes", "on"}
     else LocalRAGService()
 )
 WEB_DIR = Path(__file__).resolve().parent / "web"
@@ -8187,7 +8208,8 @@ class Handler(BrowserBoundary, BaseHTTPRequestHandler):
 
             if path == "/v1/llm-options":
                 providers = {}
-                for provider_id, options in LLM_MODEL_OPTIONS.items():
+                model_options = {**LLM_MODEL_OPTIONS, **dict.fromkeys(CLI_LLM.installed(), ())}
+                for provider_id, options in model_options.items():
                     default_model = SERVICE._resolve_llm_model(provider_id, None)
                     models = list(options)
                     if default_model not in {row["id"] for row in models}:
@@ -8537,7 +8559,7 @@ class Handler(BrowserBoundary, BaseHTTPRequestHandler):
         path = parsed.path
 
         try:
-            if path == "/v1/evaluation/reports" and int(self.headers.get("Content-Length", "0") or "0") > 10_000_000:
+            if path in {"/v1/evaluation/reports", "/v1/labels/judge-audits"} and int(self.headers.get("Content-Length", "0") or "0") > 10_000_000:
                 raise ValueError("Report exceeds the 10 MB limit")
             if path.startswith("/v1/evidence/") and int(self.headers.get("Content-Length", "0") or "0") > 2_500_000:
                 raise ValueError("Evidence request is too large")
@@ -8581,6 +8603,13 @@ class Handler(BrowserBoundary, BaseHTTPRequestHandler):
                     "job", SERVICE._label_draft_service().start_job,
                     body.get("task"), body.get("source_ids"), body.get("language"),
                     status=202,
+                )
+                return
+
+            if path == "/v1/labels/judge-audits":
+                self._label_json(
+                    "draft", SERVICE._label_draft_service().import_judge_audit,
+                    body.get("judgments"), status=201,
                 )
                 return
 
@@ -8664,13 +8693,20 @@ class Handler(BrowserBoundary, BaseHTTPRequestHandler):
                 if max_points not in SUMMARY_ALLOWED_POINTS:
                     raise ValueError("max_points must be 5")
 
-                result = SERVICE.summarize_video_transcript(
-                    video_id=video_id,
-                    language=language,
-                    provider=provider,
-                    max_points=max_points,
-                    model=str(body.get("model") or "").strip() or None,
-                )
+                try:
+                    result = SERVICE.summarize_video_transcript(
+                        video_id=video_id,
+                        language=language,
+                        provider=provider,
+                        max_points=max_points,
+                        model=str(body.get("model") or "").strip() or None,
+                    )
+                except CodexRunnerError as exc:
+                    self._json(
+                        {"ok": False, "error": {"code": exc.code, "message": str(exc)}},
+                        exc.status,
+                    )
+                    return
                 self._json({"ok": True, **result})
                 return
 
