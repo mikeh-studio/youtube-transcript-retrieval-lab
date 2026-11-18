@@ -67,6 +67,32 @@ need network access.
 
 Each switch can also be set per request; see the [retrieval guide](retrieval.md).
 
+## Audio ingestion
+
+Install the optional dependencies with `python -m pip install -r requirements-audio.txt`.
+The default engine, `faster_whisper`, transcribes on this machine. Its first run
+may download model weights. Budget several GB of free disk space for the model
+cache, or set `YT_RAG_STT_MODEL` to a compatible model directory for offline use.
+The `openai` engine requires `OPENAI_API_KEY` and sends 16 kHz mono WAV chunks of
+up to ten minutes to OpenAI. Choose it only for audio you are permitted to send.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `YT_RAG_STT_ENGINE` | `faster_whisper` | Default engine. A request can select `faster_whisper` or `openai`. |
+| `YT_RAG_STT_MODEL` | `large-v3-turbo` | Local model name or directory. |
+| `YT_RAG_STT_COMPUTE_TYPE` | `int8` | faster-whisper compute type. |
+| `YT_RAG_STT_DEVICE` | `auto` | faster-whisper device, such as `cpu` or `cuda`. |
+| `YT_RAG_STT_OPENAI_MODEL` | `whisper-1` | OpenAI model supporting verbose JSON and timestamp granularities. |
+| `YT_RAG_STT_WORD_TIMESTAMPS` | `1` | Use `0` to request segment timestamps only. |
+| `YT_RAG_AUDIO_MAX_MB` | `500` | Maximum input size in MiB for each enclosure download or local file. |
+| `YT_RAG_KEEP_AUDIO` | `1` | Keep an exact playback copy under `data/media/`. Use `0` to discard the copy after indexing. |
+
+Keep audio when citations must replay the indexed version of a podcast.
+Dynamically inserted ads can move timestamps between downloads of the same
+enclosure URL. With retention disabled, RSS citations use the enclosure URL
+and local-file sources have no playback URL. The app leaves the original local
+file alone. YouTube audio is never downloaded.
+
 ## Catalog
 
 | Variable                      | Purpose                                                                                            |

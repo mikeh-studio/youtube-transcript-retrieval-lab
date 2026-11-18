@@ -68,6 +68,46 @@ For an end-to-end ingestion check, capture:
 
 Static hosting or mocked `/v1/*` responses are not valid ingestion verification.
 
+## Podcast and local audio ingestion
+
+Install the optional audio dependencies and start the local app. Audio
+ingestion is available through the JSON API. See the engine setup and retention
+settings in [Audio ingestion](../docs/configuration.md#audio-ingestion).
+
+- `GET /v1/stt/capabilities` returns the configured engine, models, device,
+  compute type and word-timestamp setting, plus package and key availability.
+- `POST /v1/feeds/preview` accepts `{"url":"https://radio.example/feed.xml"}`.
+  It returns the feed title, link, language and items without subscribing. An
+  item includes `external_id`, title, publication time, link, enclosure URL,
+  MIME type, byte length (`media_length_bytes`), and duration when available.
+- `POST /v1/ingest/audio` queues one of the requests below and returns HTTP 202
+  with a `job`. The language is `en` or `ja`. Optional `engine` selects the
+  adapter for this job. Use `"force":true` to transcribe an existing source again.
+
+```json
+{"kind":"rss_episode","feed_url":"https://radio.example/feed.xml","guid":"episode-1","language":"en"}
+```
+
+```json
+{"kind":"local_file","path":"recordings/episode.wav","language":"en"}
+```
+
+Use the preview item's `external_id` as the RSS request's `guid`. Local files may
+use a repository-relative or absolute path. Supported audio extensions are
+`.mp3`, `.m4a`, `.aac`, `.wav`, `.flac`, `.ogg`, and `.opus`. The local video
+formats listed below can also be transcribed when they contain an audio stream.
+Send JSON POSTs with the same-origin session cookie and the `X-CSRF-Token`
+from `GET /browser-session`.
+
+Poll `GET /v1/ingest/jobs/{job_id}` for `status`, `step`, `progress` (0 to 1),
+and the source ID in `video_id`. Jobs run one at a time in memory. Completed
+sources appear in `GET /v1/videos` alongside other indexed transcripts.
+`GET /v1/sources/{id}/media` serves a retained copy and supports a single
+byte range for seeking. When word timestamps are enabled, the library stores
+them in `data/library/videos/{id}/stt_words.json` with second offsets and word
+text grouped by segment. YouTube feed entries can be previewed as metadata.
+YouTube audio is never downloaded.
+
 ## Video-first Ask routing
 
 `POST /v1/ask` can shortlist relevant videos before searching transcript chunks:

@@ -24,6 +24,7 @@ LocalRAGService = local_api.LocalRAGService
 
 def _make_service(enabled=True):
     service = LocalRAGService.__new__(LocalRAGService)
+    service.library_write_lock = threading.RLock()
     service.feedback = {}
     service.feedback_index = {}
     service.feedback_lock = threading.Lock()

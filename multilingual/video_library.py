@@ -226,7 +226,7 @@ class VideoLibrary:
         print(f"Added video: {title} ({video_id}) [{language}] - {len(chunks)} chunks")
         return video_id
 
-    def add_transcribed_source(self, source_id, segments, *, language, title, source):
+    def add_transcribed_source(self, source_id, segments, *, language, title, source, persist=False):
         """Index an already-transcribed audio source using the current chunking."""
         if not isinstance(source_id, str) or not SOURCE_ID_RE.fullmatch(source_id):
             raise ValueError("Invalid source ID.")
@@ -267,6 +267,7 @@ class VideoLibrary:
                 "full_transcript": self._build_full_transcript(lines),
             },
             lines,
+            persist=persist,
         )
         return source_id
 

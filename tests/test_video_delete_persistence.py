@@ -1,6 +1,7 @@
 """Deleting through the service must survive a library reload."""
 
 import sys
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -30,6 +31,7 @@ def test_delete_survives_restart(tmp_path):
         "ABCDEFGHIJK" in VideoLibrary(str(tmp_path), processor=EmptyProcessor()).videos
     )
     service = LocalRAGService.__new__(LocalRAGService)
+    service.library_write_lock = threading.RLock()
     service.engine = SimpleNamespace(library=library)
     service._mark_video_router_stale = Mock()
     service._delete_ask_history = Mock()
