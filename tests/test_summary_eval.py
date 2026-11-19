@@ -70,10 +70,10 @@ def test_judged_scores_use_semantic_matches_even_outside_span(inputs):
     gold, predictions = inputs
     judgments = load_judgments(JUDGMENTS, gold, predictions)
     assert {
-        row["window_policy"]
+        (row["window_policy"], row["prompt_version"])
         for decisions in judgments.values()
         for row in decisions["faithfulness"].values()
-    } == {"anchor_only_v1"}
+    } == {("anchor_only_v1", "lenient_v1")}
     result = score(gold, predictions, judgments)
     assert result["timestamp_pairing"] == "judge"
     system = result["systems"]["synthetic"]
@@ -92,6 +92,7 @@ def test_judged_scores_use_semantic_matches_even_outside_span(inputs):
             "faithfulness_rate": 3 / 7,
             "partial_rate": 2 / 7,
             "window_policy": "anchor_only_v1",
+            "prompt_version": "lenient_v1",
         }
     )
     assert system["judge"]["model"] == "fake-judge"
@@ -209,6 +210,18 @@ def test_judge_sends_separate_windows_and_validates_all_decisions(inputs, reply_
     assert len(calls) == 4 and len(rows) == 14
     assert all("untrusted data" in prompt for prompt, _ in calls)
     assert all("window" not in item for item in calls[0][1]["predictions"])
+    faithfulness_prompt = calls[1][0]
+    assert (
+        "Check each substantive claim against all supplied lines" in faithfulness_prompt
+    )
+    assert (
+        "If any substantive claim is not stated in the supplied lines, the decision "
+        "is at most partial" in faithfulness_prompt
+    )
+    assert "Do not use outside knowledge" in faithfulness_prompt
+    assert "Who said something is not a substantive claim" in faithfulness_prompt
+    assert "Ignore speaker or cast attribution" in faithfulness_prompt
+    assert "Ignore minor spelling or transcription variants" in faithfulness_prompt
     first, unmatched, _, distant_match = calls[1][1]["predictions"]
     assert [line["start"] for line in first["window"]] == [0, 20, 30, 60, 80]
     assert [line["start"] for line in unmatched["window"]] == [0, 20, 30, 60, 80]
@@ -271,16 +284,26 @@ def test_judge_still_rejects_supported_with_an_empty_window(inputs):
         judge(gold, predictions, sources, fake_llm([]))
 
 
-@pytest.mark.parametrize("policy", ["unknown", None, []])
-def test_validate_judgments_rejects_unknown_window_policy(inputs, policy):
+@pytest.mark.parametrize("field", ["window_policy", "prompt_version"])
+@pytest.mark.parametrize("value", ["unknown", None, []])
+def test_validate_judgments_rejects_unknown_faithfulness_provenance(inputs, field, value):
     gold, predictions = inputs
     rows = read_jsonl(JUDGMENTS)
-    next(row for row in rows if row["kind"] == "faithfulness")["window_policy"] = policy
-    with pytest.raises(ContractError, match="Unknown faithfulness window_policy"):
+    next(row for row in rows if row["kind"] == "faithfulness")[field] = value
+    with pytest.raises(ContractError, match=f"Unknown faithfulness {field}"):
         validate_judgments(rows, gold, predictions)
 
 
-def test_score_rejects_mixed_window_policies_across_systems(inputs):
+@pytest.mark.parametrize(
+    ("field", "current_value", "error"),
+    [
+        ("window_policy", "anchor_plus_matched_gold_v1", "window policies"),
+        ("prompt_version", "strict_claims_v2", "prompt versions"),
+    ],
+)
+def test_score_rejects_mixed_faithfulness_provenance_across_systems(
+    inputs, field, current_value, error
+):
     gold, predictions = inputs
     source_id = "synthetic_ja"
     other = predictions.pop(("synthetic", source_id))
@@ -291,10 +314,10 @@ def test_score_rejects_mixed_window_policies_across_systems(inputs):
         if row["source_id"] == source_id:
             row.update(system="another-system", prediction_sha256=record_sha256(other))
             if row["kind"] == "faithfulness":
-                row["window_policy"] = "anchor_plus_matched_gold_v1"
+                row[field] = current_value
     judgments = validate_judgments(rows, gold, predictions)
     with pytest.raises(
-        ContractError, match="Cannot score mixed faithfulness window policies"
+        ContractError, match=f"Cannot score mixed faithfulness {error}"
     ):
         score(gold, predictions, judgments)
 
@@ -348,6 +371,7 @@ def test_score_report_cli_is_offline_and_refuses_overwrite(
     summary = (out / "summary.md").read_text()
     assert "0.85" in summary
     assert "`window_policy` `anchor_only_v1`" in summary
+    assert "`prompt_version` `lenient_v1`" in summary
     sample = out / "judge_audit_sample.jsonl"
     assert len(read_jsonl(sample)) == 14
     runner.main(cli_args("report", tmp_path / "repeat") + flags)
@@ -413,16 +437,25 @@ def test_generate_and_explicit_judge_cli_use_injected_service(monkeypatch, tmp_p
     for row in rows:
         if row["kind"] == "faithfulness":
             assert row["window_policy"] == "anchor_plus_matched_gold_v1"
+            assert row["prompt_version"] == "strict_claims_v2"
         else:
             assert "window_policy" not in row
+            assert "prompt_version" not in row
 
     report = tmp_path / "report"
     runner.main(cli_args("report", report) + ["--judgments", str(out)])
     result = json.loads((report / "results.json").read_text())
-    metrics = result["systems"]["synthetic"]["aggregate"]["metrics"]
+    system = result["systems"]["synthetic"]
+    metrics = system["aggregate"]["metrics"]
     assert metrics["window_policy"] == "anchor_plus_matched_gold_v1"
+    assert metrics["prompt_version"] == "strict_claims_v2"
+    assert (
+        system["sources"]["synthetic_en"]["metrics"]["prompt_version"]
+        == "strict_claims_v2"
+    )
     summary = (report / "summary.md").read_text()
     assert "`window_policy` `anchor_plus_matched_gold_v1`" in summary
+    assert "`prompt_version` `strict_claims_v2`" in summary
 
 
 def test_audit_sampler_caps_at_20_and_is_seeded(inputs):

@@ -121,7 +121,7 @@ def _write_run(out, result, sample):
                 for metric, value in entry["aggregate"]["metrics"].items():
                     if value is None:
                         rendered = "unavailable"
-                    elif metric == "window_policy":
+                    elif metric in ("window_policy", "prompt_version"):
                         rendered = f"`{value}`"
                     else:
                         rendered = f"{value:.4f}"

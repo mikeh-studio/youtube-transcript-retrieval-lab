@@ -16,6 +16,8 @@ WINDOW_SECONDS = 45
 GOLD_WINDOW_CAP_SECONDS = 600
 LEGACY_WINDOW_POLICY = "anchor_only_v1"
 WINDOW_POLICY = "anchor_plus_matched_gold_v1"
+LEGACY_FAITHFULNESS_PROMPT_VERSION = "lenient_v1"
+FAITHFULNESS_PROMPT_VERSION = "strict_claims_v2"
 
 MATCH_TASK = (
     "Match each prediction to the single gold point whose substantive claim it conveys, "
@@ -28,7 +30,14 @@ MATCH_TASK = (
 FAITHFULNESS_TASK = (
     "Grade every prediction solely against its own supplied transcript window. "
     "The window may contain excerpts from different parts of the episode. "
-    "Grade against all supplied lines. "
+    "Check each substantive claim against all supplied lines, including claims about "
+    "named people, works, products, numbers, scores, events, causes, and comparisons. "
+    "If any substantive claim is not stated in the supplied lines, the decision is at most "
+    "partial, even if the claim is plausible or might be true elsewhere in the episode. "
+    "Do not use outside knowledge. "
+    "Who said something is not a substantive claim. Ignore speaker or cast attribution. "
+    "Do not reward or penalize speaker names used for attribution. "
+    "Ignore minor spelling or transcription variants of a name otherwise present in the lines. "
     "Use supported if the window establishes all substantive claims, partial if it "
     "establishes some but leaves others unsupported, and unsupported if it establishes "
     "none or contradicts the central claim. An empty window is unsupported. "
@@ -196,7 +205,11 @@ def judge(gold, predictions, sources, llm):
                         "prediction_sha256": prediction_hash,
                         "gold_sha256": gold_hash,
                         **(
-                            {"window": windows[item_id], "window_policy": WINDOW_POLICY}
+                            {
+                                "window": windows[item_id],
+                                "window_policy": WINDOW_POLICY,
+                                "prompt_version": FAITHFULNESS_PROMPT_VERSION,
+                            }
                             if kind == "faithfulness"
                             else {}
                         ),
@@ -207,7 +220,7 @@ def judge(gold, predictions, sources, llm):
 
 
 def validate_judgments(rows, gold, predictions):
-    """Check input binding, decision coverage, matching, and window policy."""
+    """Check input binding, decision coverage, matching, and faithfulness provenance."""
     grouped = {}
     identities = {}
     gold_hashes = {
@@ -253,10 +266,16 @@ def validate_judgments(rows, gold, predictions):
             policy = row.get("window_policy", LEGACY_WINDOW_POLICY)
             if policy not in (LEGACY_WINDOW_POLICY, WINDOW_POLICY):
                 raise ContractError(f"Unknown faithfulness window_policy: {policy!r}")
+            version = row.get("prompt_version", LEGACY_FAITHFULNESS_PROMPT_VERSION)
+            if version not in (
+                LEGACY_FAITHFULNESS_PROMPT_VERSION,
+                FAITHFULNESS_PROMPT_VERSION,
+            ):
+                raise ContractError(f"Unknown faithfulness prompt_version: {version!r}")
             window = validate_window(row.get("window"))
             if not window and row.get("decision") != "unsupported":
                 raise ContractError("An empty evidence window requires unsupported")
-            row = {**row, "window_policy": policy}
+            row = {**row, "window_policy": policy, "prompt_version": version}
         grouped.setdefault((*key, kind), []).append(row)
     indexed = {}
     for (system, source_id), prediction in predictions.items():

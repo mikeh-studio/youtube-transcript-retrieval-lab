@@ -117,7 +117,7 @@ def _counts(gold, prediction, decisions):
     return counts
 
 
-def _metrics(counts, judged, window_policy):
+def _metrics(counts, judged, window_policy, prompt_version):
     def rate(numerator, denominator):
         return counts[numerator] / counts[denominator] if counts[denominator] else None
 
@@ -138,6 +138,7 @@ def _metrics(counts, judged, window_policy):
                 "faithfulness_rate": rate("supported", "predictions"),
                 "partial_rate": rate("partial", "predictions"),
                 "window_policy": window_policy,
+                "prompt_version": prompt_version,
             }
         )
     return result
@@ -146,16 +147,22 @@ def _metrics(counts, judged, window_policy):
 def score(gold, predictions, judgments=None):
     """Score validated inputs with per-source counts and micro totals."""
     judged = judgments is not None
-    policies = {
-        row["window_policy"]
-        for decisions in (judgments or {}).values()
-        for row in decisions["faithfulness"].values()
-    }
+    policies = set()
+    versions = set()
+    for decisions in (judgments or {}).values():
+        for row in decisions["faithfulness"].values():
+            policies.add(row["window_policy"])
+            versions.add(row["prompt_version"])
     if len(policies) > 1:
         raise ContractError(
             f"Cannot score mixed faithfulness window policies: {', '.join(sorted(policies))}"
         )
+    if len(versions) > 1:
+        raise ContractError(
+            f"Cannot score mixed faithfulness prompt versions: {', '.join(sorted(versions))}"
+        )
     window_policy = next(iter(policies), None)
+    prompt_version = next(iter(versions), None)
     systems = {}
     totals = {}
     for (system, source_id), prediction in sorted(predictions.items()):
@@ -169,7 +176,7 @@ def score(gold, predictions, judgments=None):
                 for key in ("provider", "model", "cache_hit", "language", "cli_version")
             },
             "counts": dict(counts),
-            "metrics": _metrics(counts, judged, window_policy),
+            "metrics": _metrics(counts, judged, window_policy, prompt_version),
         }
         if judged and decisions["match"]:
             current["judge"] = next(iter(decisions["match"].values()))["judge"]
@@ -177,7 +184,7 @@ def score(gold, predictions, judgments=None):
     for system, result in systems.items():
         result["aggregate"] = {
             "counts": dict(totals[system]),
-            "metrics": _metrics(totals[system], judged, window_policy),
+            "metrics": _metrics(totals[system], judged, window_policy, prompt_version),
         }
     return {
         "schema": "summary-results/v1",
