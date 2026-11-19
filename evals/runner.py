@@ -35,6 +35,7 @@ from evals.scoring import (  # noqa: E402
     METRIC_RECALL_1,
     METRIC_RECALL_5,
     METRIC_RECALL_10,
+    SCORING_VERSION,
     aggregate_query_scores,
     evaluate_thresholds,
     score_query_results,
@@ -484,6 +485,7 @@ def run_one_config(
 
     return {
         "name": name,
+        "scoring_version": SCORING_VERSION,
         "strategy": strategy,
         "retrieval_mode": mode,
         "retrieval_profile": profile,
@@ -677,16 +679,19 @@ def run_benchmark(dataset_path: Path, config_path: Path, out_dir: Path) -> dict:
 
     result = {
         "dataset": _display_path(dataset_path),
+        "scoring_version": SCORING_VERSION,
         "config": _display_path(config_path),
         "query_count": len(dataset),
         "latency_repetitions": latency_repetitions,
         "baseline_run": {
             "name": baseline_run["name"],
+            "scoring_version": baseline_run["scoring_version"],
             "metrics": baseline_run["metrics"],
         },
         "selected_run": (
             {
                 "name": selected_run["name"],
+                "scoring_version": selected_run["scoring_version"],
                 "strategy": selected_run.get("strategy") or "retrieval",
                 "retrieval_mode": selected_run["retrieval_mode"],
                 "retrieval_profile": selected_run.get("retrieval_profile"),

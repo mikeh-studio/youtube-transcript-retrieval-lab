@@ -265,12 +265,18 @@ test("offline benchmark compares recorded methods without semantic claims", asyn
         id: "Retrieval methods",
         arms: {
           hybrid_baseline: {
+            scoring_version: "span_overlap_v1",
             ranking: { initial_retrieval: { ndcg_at_10: 0.8 } },
           },
           optimized_hybrid: {
+            scoring_version: "span_overlap_v1",
             ranking: { initial_retrieval: { ndcg_at_10: 0.9 } },
           },
           dense: { ranking: { initial_retrieval: { ndcg_at_10: 0.6 } } },
+          lexical: {
+            scoring_version: "chunk_index_v1",
+            ranking: { initial_retrieval: { ndcg_at_10: 0.7 } },
+          },
         },
       },
     ],
@@ -293,11 +299,20 @@ test("offline benchmark compares recorded methods without semantic claims", asyn
   });
   await expect(ndcg).toContainText("0.8");
   await expect(ndcg).toContainText("0.9");
+  await expect(ndcg.getByRole("cell").last()).toHaveText("0.1");
+  const scoringNote = page.getByText("The scoring rule changed.", { exact: false });
+  await expect(scoringNote).toHaveCount(0);
   await expect(page.getByText("Δ (B − A)")).toBeVisible();
   await expect(page.getByText("Δ (MCP − Direct)")).toHaveCount(0);
   await expect(page.getByText("Awaiting grades")).toHaveCount(0);
   await page.getByLabel("Method B").selectOption("dense");
   await expect(ndcg).toContainText("0.6");
+  await expect(ndcg.getByRole("cell").last()).not.toHaveText("—");
+  await expect(scoringNote).toHaveCount(0);
+  await page.getByLabel("Method B").selectOption("lexical");
+  await expect(ndcg).toContainText("0.7");
+  await expect(ndcg.getByRole("cell").last()).toHaveText("—");
+  await expect(scoringNote).toBeVisible();
 });
 
 test("scoped contributors, evidence, failure detail and keyboard focus", async ({

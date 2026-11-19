@@ -12,6 +12,8 @@ from typing import Dict, Iterable, List, Optional, Sequence
 from evals.evidence_spans import chunking_version, normalize_gold_evidence, span_matches
 
 
+SCORING_VERSION = "span_overlap_v1"
+
 METRIC_PRECISION_1 = "Precision@1"
 METRIC_PRECISION_5 = "Precision@5"
 METRIC_PRECISION_10 = "Precision@10"

@@ -1,5 +1,6 @@
 """Tests for the offline benchmark runner."""
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -18,7 +19,10 @@ def test_runner_writes_reports_and_selects_optimized_config(tmp_path):
         tmp_path / "latest",
     )
 
-    assert (tmp_path / "latest" / "results.json").exists()
+    saved = json.loads((tmp_path / "latest" / "results.json").read_text())
+    for report in (result, saved):
+        assert report["scoring_version"] == "span_overlap_v1"
+        assert {run["scoring_version"] for run in report["runs"]} == {"span_overlap_v1"}
     assert (tmp_path / "latest" / "leaderboard.md").exists()
     assert (tmp_path / "latest" / "failures.md").exists()
     assert (tmp_path / "latest" / "per_query_results.jsonl").exists()

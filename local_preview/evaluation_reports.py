@@ -14,7 +14,7 @@ import re
 # Fields deliberately supported by the review contract, at any nesting level.
 _FIELDS = frozenset(
     """schema_version run_id title name source source_type status model effort profile profiles id arms direct mcp workflow parent_run_id continuation_of corpus_hash queryset_hash criteria_hash dataset_hash stage cutoff created_at completed_at reviewed_at review_duration changes cases question query question_id case_id answer text evidence citations url timestamp timestamp_seconds video_id video_title passage_id rank score grade grades metrics ranking initial_retrieval final_evidence precision_at_1 precision_at_5 precision_at_10 recall_at_1 recall_at_5 recall_at_10 mrr_at_10 ndcg_at_10 auc auc_contract answer_quality supporting_passage_recall citation_relevance citation_completeness exact_quote_fidelity timestamp_authenticity unnecessary_clarification attribution_errors video_selection assumption_first_handling value numerator denominator graded total accepted failed unattempted attempted failures error message trace tool_calls tool_name summary usage input_tokens output_tokens reasoning_output_tokens cached_input_tokens latency_ms cost api_equivalent_usd billed_usd raw_total_usd missing_usage_jobs usage_complete cost_basis includes_failed reason provenance metadata versions description original_text target count direct_label mcp_label reviewer source_gate_pass underspec_gate_pass supporting_passage covered citation_support citation_complete quote_required_fulfilled blocking_clarification reviewer reviewed_at reviewer graded_status review_method notes quality citation_support caveats critical material_claims supported_claims checks exact_quote timestamp_url_matches declared semantic_support grading_note cost_note workflow_note gates source_selection underspecification minimum_passes pricing_kind generated_at started_at finished_at assessed relevant supported citation_edge_support validation_rejections validation_failure attempted_output citation_ids retrieval_payloads hits document_id version_id source_id canonical_url references reference timestamp_url source_title title quote contributors contributor_ids case_ids question_ids requests uncached_usd estimated_api_equivalent_usd completed not_attempted source_run duration elapsed_ms answer_status claims kind missing_parts refinement_hint reasoning_tokens good partial poor Good Partial Poor distribution""".split()
-)
+) | {"scoring_version"}
 _METRIC_KEYS = {
     "Precision@1": "precision_at_1",
     "Precision@5": "precision_at_5",
@@ -436,6 +436,7 @@ def _adapt_benchmark(raw):
         metrics = run["metrics"]
         arms[name] = {
             **_identity(run),
+            "scoring_version": run.get("scoring_version"),
             "total": raw.get("query_count"),
             "failed": metrics.get("failed_query_count"),
             "ranking": {"initial_retrieval": metrics},
@@ -449,6 +450,7 @@ def _adapt_benchmark(raw):
         "run_id": raw.get("run_id") or "Offline retrieval benchmark",
         **_identity(raw),
         "source": "Offline retrieval benchmark",
+        "scoring_version": raw.get("scoring_version"),
         "stage": raw.get("stage", "initial_retrieval"),
         "description": description,
         "profiles": [{"id": "Retrieval methods", "arms": arms}],

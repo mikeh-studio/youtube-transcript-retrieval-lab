@@ -63,6 +63,8 @@ compares dense, lexical, baseline hybrid, optimized hybrid, and agentic retrieva
 and writes a leaderboard, per-query results, and failures to the gitignored
 `evals/reports/`.
 
+Offline benchmark runs record `scoring_version: span_overlap_v1`, and the Evaluation dashboard shows deltas only for runs with matching, recorded scoring versions.
+
 | Run                         | Precision@5 | Recall@5 | MRR@10 | nDCG@10 |
 | --------------------------- | ----------: | -------: | -----: | ------: |
 | `dense`                     |      0.2000 |   1.0000 | 0.4896 |  0.6193 |
