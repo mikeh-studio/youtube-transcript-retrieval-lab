@@ -2320,6 +2320,76 @@ def test_normalize_summary_items_preserves_importance_order():
     ]
 
 
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("0:00", 0),
+        ("2:04", 124),
+        ("46:37", 2797),
+        ("214:26", 12866),
+        ("1:02:03", 3723),
+        (0, 0),
+        (32, 32),
+        (46.37, 46.37),
+        (" 46.37 ", 46.37),
+        ("2e1", 20),
+    ],
+)
+def test_parse_summary_timestamp_accepts_clock_strings_and_seconds(value, expected):
+    assert local_api.parse_summary_timestamp(value) == expected
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        None,
+        True,
+        [],
+        -1,
+        float("nan"),
+        float("inf"),
+        10**400,
+        "",
+        "-1",
+        "NaN",
+        "inf",
+        "1e999",
+        "1_000",
+        "46:60",
+        "4:6",
+        "1:60:00",
+        "1:2:03",
+        "-1:00",
+        "46:37-46:42",
+        "[0412]",
+        "9" * 400 + ":00",
+    ],
+)
+def test_parse_summary_timestamp_rejects_invalid_values(value):
+    assert local_api.parse_summary_timestamp(value) is None
+
+
+def test_normalize_summary_items_keeps_only_valid_model_timestamps():
+    service = _make_service(enabled=False)
+    items = service._normalize_summary_items(
+        items=[
+            {
+                "tldr": "Garden layout",
+                "timestamp_start": "46:37",
+                "timestamp_end": "46:42",
+            },
+            {"tldr": "Paths between beds", "start": "46:88", "end": -1},
+        ],
+        segments=[{"text": "Raised planters", "start": 12, "end": 3000}],
+        language="en",
+    )
+
+    assert [(item["start"], item["end"]) for item in items] == [
+        (2797, 2802),
+        (None, None),
+    ]
+
+
 def test_summary_items_match_language_detects_non_english_output():
     service = _make_service(enabled=False)
     assert (
@@ -2392,7 +2462,8 @@ def test_resolve_theme_anchor_timestamp_prefers_anchor_match():
     assert resolved["start"] == 90.0
 
 
-def test_resolve_theme_anchor_timestamp_uses_model_start_for_ambiguous_anchor():
+@pytest.mark.parametrize("start", [95.0, "1:35"])
+def test_resolve_theme_anchor_timestamp_uses_model_start_for_ambiguous_anchor(start):
     service = _make_service(enabled=False)
     segments = [
         {"text": "repeated anchor text", "start": 10.0, "end": 20.0},
@@ -2401,12 +2472,71 @@ def test_resolve_theme_anchor_timestamp_uses_model_start_for_ambiguous_anchor():
     ]
 
     resolved = service._resolve_theme_anchor_timestamp(
-        item={"anchor_text": "repeated anchor text", "start": 95.0},
+        item={"anchor_text": "repeated anchor text", "start": start},
         segments=segments,
     )
 
     assert resolved["source"] == "anchor_match"
     assert resolved["start"] == 90.0
+
+
+def test_resolve_theme_anchor_timestamp_falls_back_to_clock_string():
+    service = _make_service(enabled=False)
+    resolved = service._resolve_theme_anchor_timestamp(
+        item={"anchor_text": "the garden gate", "start": "46:37", "end": "46:42"},
+        segments=[
+            {"text": "Intro setup", "start": 0, "end": 8},
+            {"text": "Raised planters", "start": 3000, "end": 3020},
+        ],
+    )
+
+    assert resolved == {"start": 2797, "end": 2802, "source": "model_fallback"}
+
+
+def test_summary_reduce_can_copy_timestamp_string_from_map_candidate(monkeypatch):
+    service = _make_service(enabled=False)
+    segments = [
+        {"text": "Place seeds in trays.", "start": 0, "end": 5},
+        {"text": "Leave a gap between planters.", "start": 2797, "end": 2810},
+    ]
+    monkeypatch.setattr(local_api, "SUMMARY_WINDOW_MAX_CHARS", 60)
+    calls = []
+
+    def fake_llm(*, system_prompt, user_message, **kwargs):
+        calls.append(user_message)
+        assert '"start": "12:34"' in system_prompt
+        if len(calls) == 1:
+            item = {
+                "title": "Planting",
+                "tldr": "Fill the trays. Add seeds. Water them. Check for sprouts.",
+            }
+        elif len(calls) == 2:
+            assert "46:37-46:50" in user_message
+            item = {
+                "title": "Garden paths",
+                "tldr": "Set up the beds. Leave space. Mark the path. Keep it clear.",
+                "anchor_text": "Leave a gap between planters",
+                "start": "46:37",
+            }
+        else:
+            payload = user_message.split("Candidates:\n", 1)[1].split("\n\n", 1)[0]
+            candidates = json.loads(payload)["items"]
+            assert "start" not in candidates[0]
+            assert candidates[1]["start"] == "46:37"
+            item = candidates[1]
+        return {
+            "provider": "chatgpt",
+            "model": "gpt-5.4-mini",
+            "text": json.dumps({"items": [item]}),
+        }
+
+    monkeypatch.setattr(service, "_llm_text_response", fake_llm)
+    result = service._summarize_transcript_map_reduce(
+        segments=segments, language="en", provider="chatgpt", max_points=1
+    )
+
+    assert len(calls) == 3
+    assert result["items"][0]["start"] == 2797
 
 
 def test_resolve_theme_anchor_timestamp_penalizes_reused_segment():
@@ -2787,6 +2917,10 @@ def test_summary_prompt_requests_descriptive_speaker_aware_themes():
     assert "Make each theme title concrete and descriptive" in prompt
     assert "who is speaking" in prompt
     assert "never guess" in prompt
+    assert 'timestamp string exactly as shown' in prompt
+    assert 'm:ss, e.g. "46:37"' in prompt
+    assert '"start": "12:34"' in prompt
+    assert "otherwise you may omit it" in prompt
 
 
 def test_ingest_persists_library_and_initializes_summary_cache():
@@ -3117,6 +3251,34 @@ def test_summary_cache_key_includes_model():
     )
     assert key_a != key_b
     assert key_a.endswith(":claude-sonnet-4-6")
+
+
+def test_summary_cache_ignores_rows_from_before_the_prompt_version():
+    service = _make_service(enabled=False)
+    context = {
+        "video_id": "garden",
+        "video": {},
+        "source_fingerprint": "garden-transcript",
+    }
+    options = {
+        "language": "en",
+        "provider": "chatgpt",
+        "max_points": 5,
+        "model": "gpt-5.4-mini",
+    }
+    summary = [{"title": "Raised planters", "start": 46.0}]
+    legacy_key = "en:chatgpt:5:gpt-5.4-mini"
+    service._put_summary_cache(
+        **context, **options, cache_key=legacy_key, response_payload={"summary": summary}
+    )
+
+    cache_key = service._summary_cache_key(**options)
+    assert cache_key == f"prompt-{local_api.SUMMARY_PROMPT_VERSION}:{legacy_key}"
+    assert service._get_summary_cache(**context, cache_key=cache_key) is None
+    assert service._study_cached_summary_bundle(context=context, language="en") is None
+    assert legacy_key in service._load_summary_cache_rows(
+        video_id=context["video_id"], video=context["video"]
+    )
 
 
 @pytest.mark.parametrize("installed", [[], ["codex_cli", "claude_cli"]])

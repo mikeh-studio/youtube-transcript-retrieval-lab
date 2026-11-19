@@ -62,6 +62,7 @@ if load_dotenv is not None:
 from browser_boundary import BrowserBoundary  # noqa: E402
 from local_preview.lexical_index import LexicalIndex  # noqa: E402
 from local_preview.retrieval_diagnostics import has_retrieval_failure  # noqa: E402
+from local_preview.summary_timestamps import parse_summary_timestamp  # noqa: E402
 
 _LEXICAL_INDEX_LOCK = threading.Lock()
 
@@ -220,6 +221,8 @@ SUMMARY_RELAXED_MAX_SENTENCES = 6
 SUMMARY_ANCHOR_MIN_CHARS = 8
 SUMMARY_ANCHOR_TOKEN_MATCH_THRESHOLD = 0.55
 SUMMARY_CACHE_VERSION = 2
+SUMMARY_PROMPT_VERSION = "2"
+SUMMARY_CACHE_KEY_PREFIX = f"prompt-{SUMMARY_PROMPT_VERSION}:"
 STUDY_MODES = {"flashcards", "topics", "quality"}
 STUDY_TOPIC_DETAIL_LEVELS = {"brief", "explain"}
 STUDY_CARD_COUNT_MIN = 4
@@ -4113,16 +4116,14 @@ class LocalRAGService:
             ).strip()
             if not tldr:
                 continue
-            try:
-                start = float(raw.get("start", raw.get("timestamp_start", min_start)))
-            except Exception:
-                start = min_start
-            try:
-                end = float(raw.get("end", raw.get("timestamp_end", start)))
-            except Exception:
-                end = start
-            start = max(min_start, min(start, max_end))
-            end = max(start, min(end, max_end))
+            start = parse_summary_timestamp(
+                raw.get("start", raw.get("timestamp_start"))
+            )
+            end = parse_summary_timestamp(raw.get("end", raw.get("timestamp_end")))
+            if start is not None:
+                start = max(min_start, min(start, max_end))
+            if end is not None:
+                end = max(min_start if start is None else start, min(end, max_end))
 
             rank = None
             try:
@@ -4203,10 +4204,7 @@ class LocalRAGService:
         max_end = float(normalized_segments[-1].get("end", min_start))
         used_counts = used_segment_counts or {}
 
-        try:
-            target_start = float(item.get("start"))
-        except Exception:
-            target_start = None
+        target_start = parse_summary_timestamp(item.get("start"))
         if target_start is not None:
             target_start = max(min_start, min(target_start, max_end))
 
@@ -4278,16 +4276,9 @@ class LocalRAGService:
                             "segment_index": best_idx,
                         }
 
-        try:
-            start = float(item.get("start", min_start))
-        except Exception:
-            start = min_start
-        try:
-            end = float(item.get("end", start))
-        except Exception:
-            end = start
-        start = max(min_start, min(start, max_end))
-        end = max(start, min(end, max_end))
+        start = min_start if target_start is None else target_start
+        end = parse_summary_timestamp(item.get("end"))
+        end = start if end is None else max(start, min(end, max_end))
         return {
             "start": start,
             "end": end,
@@ -4311,13 +4302,14 @@ class LocalRAGService:
             "Only mention speaker names or character roles when the transcript supports them; never guess.\n"
             "Each item must include an anchor_text phrase from where the theme first appears in the transcript.\n"
             "Use distinct anchor_text values across items whenever possible.\n"
-            "The start timestamp should match the anchor_text location.\n"
+            'For "start", copy the starting timestamp string exactly as shown on '
+            'the transcript line where anchor_text appears (m:ss, e.g. "46:37").\n'
             "Include a start timestamp only if you are confident; otherwise you may omit it.\n"
             "Return strict JSON only, with no markdown.\n"
             "Use this schema:\n"
             "{\n"
             '  "items": [\n'
-            '    {"title": "string", "tldr": "string", "anchor_text": "string", "start": 0.0}\n'
+            '    {"title": "string", "tldr": "string", "anchor_text": "string", "start": "12:34"}\n'
             "  ]\n"
             "}\n"
             f"Return exactly {max_points} ranked items in descending importance.\n"
@@ -4688,7 +4680,12 @@ class LocalRAGService:
             resolved_provider = map_result["provider"]
             resolved_model = map_result["model"]
             retries += max(0, int(map_result.get("attempt_count", 1)) - 1)
-            map_items.extend(map_result["items"])
+            for item in map_result["items"]:
+                candidate = dict(item)
+                start = candidate.pop("start", None)
+                if start is not None:
+                    candidate["start"] = self._format_timestamp_for_prompt(start)
+                map_items.append(candidate)
 
         reduce_prompt = self._summary_system_prompt(
             language=language, max_points=max_points
@@ -4697,6 +4694,8 @@ class LocalRAGService:
         reduce_message = (
             "Merge the candidate highlights below into a final, non-redundant summary.\n"
             "Make sure the final highlights represent the full transcript timeline.\n"
+            'Copy the "start" timestamp string from the candidate for the chosen '
+            "anchor_text when available.\n"
             "Candidates:\n"
             f"{reduce_payload}\n\n"
             "Return strict JSON using the required schema."
@@ -4777,7 +4776,8 @@ class LocalRAGService:
         *, language: str, provider: str, max_points: int, model: str
     ) -> str:
         return (
-            f"{str(language).strip().lower()}:{str(provider).strip().lower()}"
+            f"{SUMMARY_CACHE_KEY_PREFIX}{str(language).strip().lower()}"
+            f":{str(provider).strip().lower()}"
             f":{int(max_points)}:{str(model).strip().lower()}"
         )
 
@@ -5393,6 +5393,8 @@ class LocalRAGService:
         )
         candidates = []
         for cache_key, entry in cache_rows.items():
+            if not str(cache_key).startswith(SUMMARY_CACHE_KEY_PREFIX):
+                continue
             if not isinstance(entry, dict):
                 continue
             if int(entry.get("version") or 0) != SUMMARY_CACHE_VERSION:
