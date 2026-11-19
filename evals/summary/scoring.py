@@ -4,6 +4,8 @@ import re
 from collections import Counter
 from math import fsum
 
+from evals.contracts import ContractError
+
 
 JP_SCRIPT = re.compile(r"[\u3041-\u30fa\u3400-\u4dbf\u4e00-\u9fff\uff66-\uff9d]")
 LATIN = re.compile(r"[a-zA-Z]")
@@ -115,7 +117,7 @@ def _counts(gold, prediction, decisions):
     return counts
 
 
-def _metrics(counts, judged):
+def _metrics(counts, judged, window_policy):
     def rate(numerator, denominator):
         return counts[numerator] / counts[denominator] if counts[denominator] else None
 
@@ -135,6 +137,7 @@ def _metrics(counts, judged):
                 "keypoint_precision": rate("timestamp_pairs", "predictions"),
                 "faithfulness_rate": rate("supported", "predictions"),
                 "partial_rate": rate("partial", "predictions"),
+                "window_policy": window_policy,
             }
         )
     return result
@@ -143,6 +146,16 @@ def _metrics(counts, judged):
 def score(gold, predictions, judgments=None):
     """Score validated inputs with per-source counts and micro totals."""
     judged = judgments is not None
+    policies = {
+        row["window_policy"]
+        for decisions in (judgments or {}).values()
+        for row in decisions["faithfulness"].values()
+    }
+    if len(policies) > 1:
+        raise ContractError(
+            f"Cannot score mixed faithfulness window policies: {', '.join(sorted(policies))}"
+        )
+    window_policy = next(iter(policies), None)
     systems = {}
     totals = {}
     for (system, source_id), prediction in sorted(predictions.items()):
@@ -156,7 +169,7 @@ def score(gold, predictions, judgments=None):
                 for key in ("provider", "model", "cache_hit", "language", "cli_version")
             },
             "counts": dict(counts),
-            "metrics": _metrics(counts, judged),
+            "metrics": _metrics(counts, judged, window_policy),
         }
         if judged and decisions["match"]:
             current["judge"] = next(iter(decisions["match"].values()))["judge"]
@@ -164,7 +177,7 @@ def score(gold, predictions, judgments=None):
     for system, result in systems.items():
         result["aggregate"] = {
             "counts": dict(totals[system]),
-            "metrics": _metrics(totals[system], judged),
+            "metrics": _metrics(totals[system], judged, window_policy),
         }
     return {
         "schema": "summary-results/v1",

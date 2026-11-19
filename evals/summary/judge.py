@@ -13,6 +13,9 @@ from pipelines.export_library import parse_json
 FAITHFULNESS_LABELS = ("supported", "partial", "unsupported")
 KINDS = ("match", "faithfulness")
 WINDOW_SECONDS = 45
+GOLD_WINDOW_CAP_SECONDS = 600
+LEGACY_WINDOW_POLICY = "anchor_only_v1"
+WINDOW_POLICY = "anchor_plus_matched_gold_v1"
 
 MATCH_TASK = (
     "Match each prediction to the single gold point whose substantive claim it conveys, "
@@ -24,6 +27,8 @@ MATCH_TASK = (
 )
 FAITHFULNESS_TASK = (
     "Grade every prediction solely against its own supplied transcript window. "
+    "The window may contain excerpts from different parts of the episode. "
+    "Grade against all supplied lines. "
     "Use supported if the window establishes all substantive claims, partial if it "
     "establishes some but leaves others unsupported, and unsupported if it establishes "
     "none or contradicts the central claim. An empty window is unsupported. "
@@ -77,62 +82,100 @@ def _decisions(rows, item_ids, gold_ids, kind):
     return decisions
 
 
-def _window(item, lines):
+def _window(item, lines, matched_point=None):
     anchor_end = (
         item["end"] if item.get("timestamp_source") == "anchor_match" else item["start"]
     )
-    start = max(0, item["start"] - WINDOW_SECONDS)
-    end = anchor_end + WINDOW_SECONDS
-    return [line for line in lines if line["end"] >= start and line["start"] <= end]
+    ranges = [(max(0, item["start"] - WINDOW_SECONDS), anchor_end + WINDOW_SECONDS)]
+    if matched_point is not None:
+        spans = matched_point["spans"]
+        cap = min(span["start"] for span in spans) + GOLD_WINDOW_CAP_SECONDS
+        ranges.extend(
+            (span["start"], min(span["end"], cap))
+            for span in spans
+            if span["start"] <= cap
+        )
+    return sorted(
+        (
+            line
+            for line in lines
+            if any(
+                line["end"] >= start and line["start"] <= end for start, end in ranges
+            )
+        ),
+        key=lambda line: (line["start"], line["line"]),
+    )
+
+
+def _judge_batch(llm, kind, task, payload, item_ids, gold_ids):
+    response = llm(
+        system_prompt=DATA_RULE + task,
+        user_message=json.dumps(payload, ensure_ascii=False),
+    )
+    try:
+        decoded = decode_judge_reply(response["text"])
+    except ValueError as exc:
+        raise ContractError(f"Judge {kind} did not return valid JSON") from exc
+    decisions = _decisions(
+        decoded.get("decisions") if isinstance(decoded, dict) else None,
+        item_ids,
+        gold_ids,
+        kind,
+    )
+    provenance = {
+        key: response.get(key) for key in ("provider", "model", "cli_version")
+    }
+    return decisions, provenance
 
 
 def judge(gold, predictions, sources, llm):
-    """Call an injected LLM for two independent decisions per prediction."""
+    """Match predictions to gold points, then grade their transcript evidence."""
     judgments = []
     for (system, source_id), row in sorted(predictions.items()):
         items = row["items"]
         if not items:
             continue
         source = gold[source_id]
+        points_by_id = {point["id"]: point for point in source["key_points"]}
         points = [
-            {"id": point["id"], "text": point["text"]} for point in source["key_points"]
+            {"id": point["id"], "text": point["text"]} for point in points_by_id.values()
         ]
         lines = numbered_lines(sources[source_id]["full_transcript"]["segments"])
-        windows = {item["id"]: _window(item, lines) for item in items}
         claims = [{"item_id": item["id"], "text": item["text"]} for item in items]
-        tasks = [
-            ("match", MATCH_TASK, {"predictions": claims, "gold": points}),
-            (
-                "faithfulness",
-                FAITHFULNESS_TASK,
-                {
-                    "predictions": [
-                        {**claim, "window": windows[claim["item_id"]]}
-                        for claim in claims
-                    ]
-                },
-            ),
-        ]
-        for kind, task, payload in tasks:
-            response = llm(
-                system_prompt=DATA_RULE + task,
-                user_message=json.dumps(payload, ensure_ascii=False),
+        item_ids = {item["id"] for item in items}
+        gold_ids = points_by_id.keys()
+        matches, match_provenance = _judge_batch(
+            llm,
+            "match",
+            MATCH_TASK,
+            {"predictions": claims, "gold": points},
+            item_ids,
+            gold_ids,
+        )
+        windows = {
+            item["id"]: _window(
+                item, lines, points_by_id.get(matches[item["id"]]["decision"])
             )
-            try:
-                decoded = decode_judge_reply(response["text"])
-            except ValueError as exc:
-                raise ContractError(f"Judge {kind} did not return valid JSON") from exc
-            decisions = _decisions(
-                decoded.get("decisions") if isinstance(decoded, dict) else None,
-                {item["id"] for item in items},
-                {point["id"] for point in points},
-                kind,
-            )
-            provenance = {
-                key: response.get(key) for key in ("provider", "model", "cli_version")
-            }
-            prediction_hash = record_sha256(row)
-            gold_hash = record_sha256(source)
+            for item in items
+        }
+        grades, grade_provenance = _judge_batch(
+            llm,
+            "faithfulness",
+            FAITHFULNESS_TASK,
+            {
+                "predictions": [
+                    {**claim, "window": windows[claim["item_id"]]} for claim in claims
+                ]
+            },
+            item_ids,
+            gold_ids,
+        )
+        prediction_hash = record_sha256(row)
+        gold_hash = record_sha256(source)
+        for kind, decisions, provenance in (
+            ("match", matches, match_provenance),
+            ("faithfulness", grades, grade_provenance),
+        ):
             for item in items:
                 item_id = item["id"]
                 decision = decisions[item_id]["decision"]
@@ -153,7 +196,7 @@ def judge(gold, predictions, sources, llm):
                         "prediction_sha256": prediction_hash,
                         "gold_sha256": gold_hash,
                         **(
-                            {"window": windows[item_id]}
+                            {"window": windows[item_id], "window_policy": WINDOW_POLICY}
                             if kind == "faithfulness"
                             else {}
                         ),
@@ -164,7 +207,7 @@ def judge(gold, predictions, sources, llm):
 
 
 def validate_judgments(rows, gold, predictions):
-    """Check exact input binding, decision coverage, and one-to-one matching."""
+    """Check input binding, decision coverage, matching, and window policy."""
     grouped = {}
     identities = {}
     gold_hashes = {
@@ -207,9 +250,13 @@ def validate_judgments(rows, gold, predictions):
         if identities.setdefault(system, provenance) != provenance:
             raise ContractError("Use one judge identity per prediction system")
         if kind == "faithfulness":
+            policy = row.get("window_policy", LEGACY_WINDOW_POLICY)
+            if policy not in (LEGACY_WINDOW_POLICY, WINDOW_POLICY):
+                raise ContractError(f"Unknown faithfulness window_policy: {policy!r}")
             window = validate_window(row.get("window"))
             if not window and row.get("decision") != "unsupported":
                 raise ContractError("An empty evidence window requires unsupported")
+            row = {**row, "window_policy": policy}
         grouped.setdefault((*key, kind), []).append(row)
     indexed = {}
     for (system, source_id), prediction in predictions.items():

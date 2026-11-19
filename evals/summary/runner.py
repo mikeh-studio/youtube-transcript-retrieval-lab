@@ -119,7 +119,12 @@ def _write_run(out, result, sample):
                 fence = "`" * (1 + max(map(len, re.findall(r"`+", name)), default=0))
                 lines += ["", f"## {fence} {name} {fence}", ""]
                 for metric, value in entry["aggregate"]["metrics"].items():
-                    rendered = "unavailable" if value is None else f"{value:.4f}"
+                    if value is None:
+                        rendered = "unavailable"
+                    elif metric == "window_policy":
+                        rendered = f"`{value}`"
+                    else:
+                        rendered = f"{value:.4f}"
                     lines.append(f"- `{metric}` {rendered}")
             if result["timestamp_pairing"] == "judge":
                 lines += [

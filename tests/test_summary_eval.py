@@ -68,7 +68,13 @@ def test_literal_proxy_scores(inputs):
 
 def test_judged_scores_use_semantic_matches_even_outside_span(inputs):
     gold, predictions = inputs
-    result = score(gold, predictions, load_judgments(JUDGMENTS, gold, predictions))
+    judgments = load_judgments(JUDGMENTS, gold, predictions)
+    assert {
+        row["window_policy"]
+        for decisions in judgments.values()
+        for row in decisions["faithfulness"].values()
+    } == {"anchor_only_v1"}
+    result = score(gold, predictions, judgments)
     assert result["timestamp_pairing"] == "judge"
     system = result["systems"]["synthetic"]
     metrics = system["aggregate"]["metrics"]
@@ -85,6 +91,7 @@ def test_judged_scores_use_semantic_matches_even_outside_span(inputs):
             "keypoint_precision": 5 / 7,
             "faithfulness_rate": 3 / 7,
             "partial_rate": 2 / 7,
+            "window_policy": "anchor_only_v1",
         }
     )
     assert system["judge"]["model"] == "fake-judge"
@@ -202,9 +209,13 @@ def test_judge_sends_separate_windows_and_validates_all_decisions(inputs, reply_
     assert len(calls) == 4 and len(rows) == 14
     assert all("untrusted data" in prompt for prompt, _ in calls)
     assert all("window" not in item for item in calls[0][1]["predictions"])
-    first, _, _, legacy = calls[1][1]["predictions"]
+    first, unmatched, _, distant_match = calls[1][1]["predictions"]
     assert [line["start"] for line in first["window"]] == [0, 20, 30, 60, 80]
-    assert 300 not in {line["start"] for line in legacy["window"]}
+    assert [line["start"] for line in unmatched["window"]] == [0, 20, 30, 60, 80]
+    assert [line["start"] for line in distant_match["window"]] == [
+        200, 220, 240, 260, 280, 300
+    ]
+    assert rows[7]["window"] == distant_match["window"]
     assert rows[0]["judge"]["cli_version"] == "fixture-cli 1"
     with pytest.raises(ContractError, match="exactly once"):
         validate_judgments(rows[1:], gold, predictions)
@@ -214,6 +225,78 @@ def test_judge_sends_separate_windows_and_validates_all_decisions(inputs, reply_
     predictions["synthetic", "synthetic_en"]["items"][0]["text"] += " Drift."
     with pytest.raises(ContractError, match="does not match"):
         validate_judgments(rows, gold, predictions)
+
+
+def test_judge_caps_only_gold_ranges_and_sends_each_line_in_timeline_order(inputs):
+    gold, predictions = inputs
+    key = ("synthetic", "synthetic_en")
+    source = gold[key[1]]
+    source["duration_s"] = 1200
+    point = source["key_points"][2]
+    point["onset"] = 110
+    point["spans"] = [
+        {"start": 800, "end": 850},
+        {"start": 500, "end": 750},
+        {"start": 640, "end": 660},
+        {"start": 100, "end": 130},
+    ]
+    row = predictions[key]
+    item = {**row["items"][3], "start": 1000, "end": 1010}
+    predictions = {key: {**row, "items": [item]}}
+    segments = [
+        {"start": 1010, "end": 1011, "text": "The log is still on the shelf."},
+        {"start": 701, "end": 705, "text": "The shelf has three hooks."},
+        {"start": 95, "end": 101, "text": "They pick up the log."},
+        {"start": 400, "end": 405, "text": "The lamp is on."},
+        {"start": 699, "end": 703, "text": "The shelf can be reached."},
+        {"start": 645, "end": 649, "text": "They lower the shelf."},
+        {"start": 810, "end": 820, "text": "They count the books."},
+    ]
+    sources = {key[1]: {"full_transcript": {"segments": segments}}}
+    calls = []
+    judge(gold, predictions, sources, fake_llm(calls))
+    assert [line["start"] for line in calls[1][1]["predictions"][0]["window"]] == [
+        95, 645, 699, 1010
+    ]
+
+
+def test_judge_still_rejects_supported_with_an_empty_window(inputs):
+    gold, predictions = inputs
+    sources = load_sources(gold, data_dir=None, transcripts=TRANSCRIPTS)
+    unmatched = predictions["synthetic", "synthetic_en"]["items"][1]
+    unmatched.update(start=500, end=510)
+    with pytest.raises(
+        ContractError, match="An empty evidence window requires unsupported"
+    ):
+        judge(gold, predictions, sources, fake_llm([]))
+
+
+@pytest.mark.parametrize("policy", ["unknown", None, []])
+def test_validate_judgments_rejects_unknown_window_policy(inputs, policy):
+    gold, predictions = inputs
+    rows = read_jsonl(JUDGMENTS)
+    next(row for row in rows if row["kind"] == "faithfulness")["window_policy"] = policy
+    with pytest.raises(ContractError, match="Unknown faithfulness window_policy"):
+        validate_judgments(rows, gold, predictions)
+
+
+def test_score_rejects_mixed_window_policies_across_systems(inputs):
+    gold, predictions = inputs
+    source_id = "synthetic_ja"
+    other = predictions.pop(("synthetic", source_id))
+    other["system"] = "another-system"
+    predictions["another-system", source_id] = other
+    rows = read_jsonl(JUDGMENTS)
+    for row in rows:
+        if row["source_id"] == source_id:
+            row.update(system="another-system", prediction_sha256=record_sha256(other))
+            if row["kind"] == "faithfulness":
+                row["window_policy"] = "anchor_plus_matched_gold_v1"
+    judgments = validate_judgments(rows, gold, predictions)
+    with pytest.raises(
+        ContractError, match="Cannot score mixed faithfulness window policies"
+    ):
+        score(gold, predictions, judgments)
 
 
 @pytest.mark.parametrize(
@@ -262,7 +345,9 @@ def test_score_report_cli_is_offline_and_refuses_overwrite(
     runner.main(cli_args("report", out) + flags)
     results = out / "results.json"
     assert json.loads(results.read_text())["audit_sample"]["count"] == 14
-    assert "0.85" in (out / "summary.md").read_text()
+    summary = (out / "summary.md").read_text()
+    assert "0.85" in summary
+    assert "`window_policy` `anchor_only_v1`" in summary
     sample = out / "judge_audit_sample.jsonl"
     assert len(read_jsonl(sample)) == 14
     runner.main(cli_args("report", tmp_path / "repeat") + flags)
@@ -323,7 +408,21 @@ def test_generate_and_explicit_judge_cli_use_injected_service(monkeypatch, tmp_p
             str(TRANSCRIPTS),
         ]
     )
-    assert len(read_jsonl(out)) == 14 and len(calls) == 4
+    rows = read_jsonl(out)
+    assert len(rows) == 14 and len(calls) == 4
+    for row in rows:
+        if row["kind"] == "faithfulness":
+            assert row["window_policy"] == "anchor_plus_matched_gold_v1"
+        else:
+            assert "window_policy" not in row
+
+    report = tmp_path / "report"
+    runner.main(cli_args("report", report) + ["--judgments", str(out)])
+    result = json.loads((report / "results.json").read_text())
+    metrics = result["systems"]["synthetic"]["aggregate"]["metrics"]
+    assert metrics["window_policy"] == "anchor_plus_matched_gold_v1"
+    summary = (report / "summary.md").read_text()
+    assert "`window_policy` `anchor_plus_matched_gold_v1`" in summary
 
 
 def test_audit_sampler_caps_at_20_and_is_seeded(inputs):
