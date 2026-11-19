@@ -2923,6 +2923,20 @@ def test_summary_prompt_requests_descriptive_speaker_aware_themes():
     assert "otherwise you may omit it" in prompt
 
 
+def test_summary_prompt_anchors_each_theme_at_the_start_of_its_main_discussion():
+    service = _make_service(enabled=False)
+
+    prompt = service._summary_system_prompt(language="en", max_points=5)
+
+    assert (
+        "anchor_text phrase from the transcript line where the main discussion of the theme begins"
+        in prompt
+    )
+    assert "speakers start discussing the theme substantively" in prompt
+    assert "Skip earlier passing mentions, teasers, and intro previews" in prompt
+    assert "first appears" not in prompt
+
+
 def test_ingest_persists_library_and_initializes_summary_cache():
     class DummyLibrary:
         def __init__(self):
@@ -3253,7 +3267,8 @@ def test_summary_cache_key_includes_model():
     assert key_a.endswith(":claude-sonnet-4-6")
 
 
-def test_summary_cache_ignores_rows_from_before_the_prompt_version():
+@pytest.mark.parametrize("old_prefix", ["", "prompt-2:"])
+def test_summary_cache_ignores_rows_from_before_the_prompt_version(old_prefix):
     service = _make_service(enabled=False)
     context = {
         "video_id": "garden",
@@ -3267,16 +3282,17 @@ def test_summary_cache_ignores_rows_from_before_the_prompt_version():
         "model": "gpt-5.4-mini",
     }
     summary = [{"title": "Raised planters", "start": 46.0}]
-    legacy_key = "en:chatgpt:5:gpt-5.4-mini"
+    key_suffix = "en:chatgpt:5:gpt-5.4-mini"
+    old_key = f"{old_prefix}{key_suffix}"
     service._put_summary_cache(
-        **context, **options, cache_key=legacy_key, response_payload={"summary": summary}
+        **context, **options, cache_key=old_key, response_payload={"summary": summary}
     )
 
     cache_key = service._summary_cache_key(**options)
-    assert cache_key == f"prompt-{local_api.SUMMARY_PROMPT_VERSION}:{legacy_key}"
+    assert cache_key == f"prompt-3:{key_suffix}"
     assert service._get_summary_cache(**context, cache_key=cache_key) is None
     assert service._study_cached_summary_bundle(context=context, language="en") is None
-    assert legacy_key in service._load_summary_cache_rows(
+    assert old_key in service._load_summary_cache_rows(
         video_id=context["video_id"], video=context["video"]
     )
 

@@ -221,7 +221,7 @@ SUMMARY_RELAXED_MAX_SENTENCES = 6
 SUMMARY_ANCHOR_MIN_CHARS = 8
 SUMMARY_ANCHOR_TOKEN_MATCH_THRESHOLD = 0.55
 SUMMARY_CACHE_VERSION = 2
-SUMMARY_PROMPT_VERSION = "2"
+SUMMARY_PROMPT_VERSION = "3"
 SUMMARY_CACHE_KEY_PREFIX = f"prompt-{SUMMARY_PROMPT_VERSION}:"
 STUDY_MODES = {"flashcards", "topics", "quality"}
 STUDY_TOPIC_DETAIL_LEVELS = {"brief", "explain"}
@@ -4300,7 +4300,10 @@ class LocalRAGService:
             "Make each theme title concrete and descriptive, not generic.\n"
             "When the transcript clearly identifies who is speaking, being discussed, or which character/persona they are playing, include that detail in the title or tldr.\n"
             "Only mention speaker names or character roles when the transcript supports them; never guess.\n"
-            "Each item must include an anchor_text phrase from where the theme first appears in the transcript.\n"
+            "Each item must include an anchor_text phrase from the transcript line "
+            "where the main discussion of the theme begins.\n"
+            "Choose the line where the speakers start discussing the theme substantively. "
+            "Skip earlier passing mentions, teasers, and intro previews.\n"
             "Use distinct anchor_text values across items whenever possible.\n"
             'For "start", copy the starting timestamp string exactly as shown on '
             'the transcript line where anchor_text appears (m:ss, e.g. "46:37").\n'
