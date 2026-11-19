@@ -44,10 +44,17 @@ def engine_name(name=None):
 
 
 def _settings():
+    try:
+        cpu_threads = int(os.environ.get("YT_RAG_STT_CPU_THREADS", "4"))
+    except ValueError:
+        raise ValueError("YT_RAG_STT_CPU_THREADS must be a positive integer.") from None
+    if cpu_threads < 1:
+        raise ValueError("YT_RAG_STT_CPU_THREADS must be a positive integer.")
     return {
         "model": os.environ.get("YT_RAG_STT_MODEL", "large-v3-turbo"),
         "compute_type": os.environ.get("YT_RAG_STT_COMPUTE_TYPE", "int8"),
         "device": os.environ.get("YT_RAG_STT_DEVICE", "auto"),
+        "cpu_threads": cpu_threads,
         "openai_model": os.environ.get("YT_RAG_STT_OPENAI_MODEL", "whisper-1"),
         "word_timestamps": os.environ.get("YT_RAG_STT_WORD_TIMESTAMPS", "1") == "1",
     }
@@ -75,6 +82,7 @@ def get_engine(name=None):
             model=settings["model"],
             device=settings["device"],
             compute_type=settings["compute_type"],
+            cpu_threads=settings["cpu_threads"],
             word_timestamps=settings["word_timestamps"],
         )
 

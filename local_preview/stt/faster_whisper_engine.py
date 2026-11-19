@@ -7,26 +7,27 @@ from .base import TranscriptionResult, TranscriptionSegment
 
 
 @lru_cache(maxsize=None)
-def _whisper_model(model, device, compute_type):
+def _whisper_model(model, device, compute_type, cpu_threads):
     try:
         from faster_whisper import WhisperModel
     except ImportError as exc:
         raise RuntimeError("Install requirements-audio.txt to use faster-whisper.") from exc
-    return WhisperModel(model, device=device, compute_type=compute_type)
+    return WhisperModel(model, device=device, compute_type=compute_type, cpu_threads=cpu_threads)
 
 
 class FasterWhisperEngine:
-    def __init__(self, *, model, device, compute_type, word_timestamps):
+    def __init__(self, *, model, device, compute_type, cpu_threads, word_timestamps):
         self.model = model
         self.device = device
         self.compute_type = compute_type
+        self.cpu_threads = cpu_threads
         self.word_timestamps = word_timestamps
 
     def transcribe(self, path, language):
         # Check that the input is standalone before passing its path to the decoder.
         with open_audio(path):
             pass
-        model = _whisper_model(self.model, self.device, self.compute_type)
+        model = _whisper_model(self.model, self.device, self.compute_type, self.cpu_threads)
         segments, info = model.transcribe(
             str(path), language=language, vad_filter=True, word_timestamps=self.word_timestamps
         )

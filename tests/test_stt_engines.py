@@ -16,7 +16,9 @@ from local_preview.stt import openai_engine
 
 
 def test_default_and_configured_capabilities(monkeypatch):
-    for setting in ("ENGINE", "MODEL", "DEVICE", "COMPUTE_TYPE", "OPENAI_MODEL", "WORD_TIMESTAMPS"):
+    for setting in (
+        "ENGINE", "MODEL", "DEVICE", "COMPUTE_TYPE", "CPU_THREADS", "OPENAI_MODEL", "WORD_TIMESTAMPS"
+    ):
         monkeypatch.delenv("YT_RAG_STT_" + setting, raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.setitem(sys.modules, "faster_whisper", None)
@@ -25,6 +27,7 @@ def test_default_and_configured_capabilities(monkeypatch):
     assert default["model"] == "large-v3-turbo"
     assert default["device"] == "auto"
     assert default["compute_type"] == "int8"
+    assert default["cpu_threads"] == 4
     assert default["word_timestamps"] is True
     assert not default["faster_whisper_importable"]
     assert not default["openai_key_present"]
@@ -32,14 +35,26 @@ def test_default_and_configured_capabilities(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "synthetic-key")
     monkeypatch.setenv("YT_RAG_STT_ENGINE", "openai")
     monkeypatch.setenv("YT_RAG_STT_OPENAI_MODEL", "test-whisper")
+    monkeypatch.setenv("YT_RAG_STT_CPU_THREADS", "2")
     monkeypatch.setenv("YT_RAG_STT_WORD_TIMESTAMPS", "0")
     assert capabilities()["openai_key_present"]
+    assert capabilities()["cpu_threads"] == 2
     assert "synthetic-key" not in str(capabilities())
     assert get_engine().model == "test-whisper"
     assert get_engine().word_timestamps is False
     assert get_engine("faster_whisper").model == "large-v3-turbo"
     with pytest.raises(ValueError, match="STT engine"):
         get_engine("unknown")
+
+
+@pytest.mark.parametrize("value", ["", "many", "1.5", "0", "-1"])
+def test_invalid_cpu_threads(monkeypatch, value):
+    monkeypatch.setenv("YT_RAG_STT_CPU_THREADS", value)
+    message = "YT_RAG_STT_CPU_THREADS must be a positive integer"
+    with pytest.raises(ValueError, match=message):
+        capabilities()
+    with pytest.raises(ValueError, match=message):
+        get_engine("faster_whisper")
 
 
 def test_missing_optional_dependencies(monkeypatch):
@@ -73,11 +88,14 @@ def test_faster_whisper_caches_per_configuration(monkeypatch, tmp_path):
     monkeypatch.setenv("YT_RAG_STT_MODEL", "cache-fixture")
     monkeypatch.setenv("YT_RAG_STT_COMPUTE_TYPE", "int8")
     monkeypatch.setenv("YT_RAG_STT_DEVICE", "cpu")
+    monkeypatch.delenv("YT_RAG_STT_CPU_THREADS", raising=False)
     monkeypatch.setenv("YT_RAG_STT_WORD_TIMESTAMPS", "1")
     try:
         for _ in range(2):
             result = get_engine("faster_whisper").transcribe(source, "en")
-        constructor.assert_called_once_with("cache-fixture", device="cpu", compute_type="int8")
+        constructor.assert_called_once_with(
+            "cache-fixture", device="cpu", compute_type="int8", cpu_threads=4
+        )
         model.transcribe.assert_called_with(
             str(source), language="en", vad_filter=True, word_timestamps=True
         )
@@ -87,9 +105,15 @@ def test_faster_whisper_caches_per_configuration(monkeypatch, tmp_path):
         with pytest.raises(ValueError, match="single local input"):
             options["io_open"]("https://radio.example/nested.wav", 0, {})
         assert result.segments[0].words == [{"start": 1.25, "end": 1.5, "word": "Pear"}]
-        monkeypatch.setenv("YT_RAG_STT_COMPUTE_TYPE", "float32")
+        monkeypatch.setenv("YT_RAG_STT_CPU_THREADS", "2")
         get_engine("faster_whisper").transcribe(source, "en")
         assert constructor.call_count == 2
+        constructor.assert_called_with(
+            "cache-fixture", device="cpu", compute_type="int8", cpu_threads=2
+        )
+        monkeypatch.setenv("YT_RAG_STT_COMPUTE_TYPE", "float32")
+        get_engine("faster_whisper").transcribe(source, "en")
+        assert constructor.call_count == 3
     finally:
         _whisper_model.cache_clear()
 

@@ -82,6 +82,7 @@ up to ten minutes to OpenAI. Choose it only for audio you are permitted to send.
 | `YT_RAG_STT_MODEL` | `large-v3-turbo` | Local model name or directory. |
 | `YT_RAG_STT_COMPUTE_TYPE` | `int8` | faster-whisper compute type. |
 | `YT_RAG_STT_DEVICE` | `auto` | faster-whisper device, such as `cpu` or `cuda`. |
+| `YT_RAG_STT_CPU_THREADS` | `4` | Set a positive integer so faster-whisper uses an explicit CPU thread count despite the server's `OMP_NUM_THREADS=1` setting for retrieval. |
 | `YT_RAG_STT_OPENAI_MODEL` | `whisper-1` | OpenAI model supporting verbose JSON and timestamp granularities. |
 | `YT_RAG_STT_WORD_TIMESTAMPS` | `1` | Use `0` to request segment timestamps only. |
 | `YT_RAG_AUDIO_MAX_MB` | `500` | Maximum input size in MiB for each enclosure download or local file. |
