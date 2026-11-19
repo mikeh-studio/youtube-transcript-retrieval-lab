@@ -9,13 +9,14 @@ import re
 import sys
 import threading
 import uuid
-from contextlib import contextmanager, nullcontext, redirect_stdout
+from contextlib import ExitStack, contextmanager, nullcontext, redirect_stdout
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from time import sleep
 
 from local_preview import feeds
 from local_preview.local_files import json_bytes, write_atomic
+from local_preview.subscription_patterns import compile_title_pattern
 from multilingual.youtube_metadata import YOUTUBE_INGEST_PAUSE_SECONDS
 
 RUNTIME_DIR = Path(__file__).resolve().parents[1] / "data" / "runtime"
@@ -25,6 +26,7 @@ EDITABLE = {
     "url", "kind", "language", "auto_ingest", "title_include",
     "title_exclude", "min_duration_s", "domain_tag",
 }
+TITLE_FILTERS = ("title_include", "title_exclude")
 
 
 class SubscriptionNotFound(KeyError):
@@ -93,24 +95,17 @@ def _subscription_fields(payload, previous=None):
     duration = fields["min_duration_s"]
     if type(duration) is not int or duration < 0:
         raise ValueError("min_duration_s must be a non-negative integer.")
-    for key in ("title_include", "title_exclude"):
-        pattern = fields[key]
-        if pattern is not None:
-            if not isinstance(pattern, str):
-                raise ValueError(f"{key} must be a regex string or null.")
-            try:
-                re.compile(pattern)
-            except re.error as exc:
-                raise ValueError(f"Invalid {key} regex: {exc}") from exc
+    for key in TITLE_FILTERS:
+        compile_title_pattern(key, fields[key])
     return fields
 
 
-def _skip_reason(subscription, item):
-    title = item["title"] or ""
-    include, exclude = subscription["title_include"], subscription["title_exclude"]
-    if include is not None and not re.search(include, title):
+def _skip_reason(subscription, item, patterns):
+    title = (item["title"] or "")[:300]
+    include, exclude = patterns
+    if include is not None and not include.search(title):
         return "title_include"
-    if exclude is not None and re.search(exclude, title):
+    if exclude is not None and exclude.search(title):
         return "title_exclude"
     if subscription["kind"] == "youtube" and not VIDEO_ID.fullmatch(item["external_id"]):
         return "invalid_video_id"
@@ -128,7 +123,7 @@ class SubscriptionStore:
 
     def __init__(
         self, runtime_dir=RUNTIME_DIR, *, fetch=None, ingest_youtube=None,
-        ingest_podcast=None, clock=None, pause=sleep,
+        ingest_podcast=None, podcast_status=None, clock=None, pause=sleep,
     ):
         root = Path(runtime_dir)
         self.subscriptions_path = root / "subscriptions.json"
@@ -137,6 +132,7 @@ class SubscriptionStore:
         self.fetch = feeds.safe_fetch if fetch is None else fetch
         self.ingest_youtube = ingest_youtube
         self.ingest_podcast = ingest_podcast
+        self.podcast_status = podcast_status
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.pause = pause
 
@@ -218,13 +214,59 @@ class SubscriptionStore:
             if cutoff is None or _utc_date(row["updated_at"]) >= cutoff
         ]
 
+    def reconcile(self, *, blocking=True):
+        """Refresh podcast release statuses from existing jobs without fetching feeds.
+
+        With blocking=False, return False instead of waiting when a poll holds the lock.
+        """
+        with ExitStack() as stack:
+            try:
+                stack.enter_context(_file_lock(self.lock_path, blocking=blocking))
+            except RuntimeError:
+                if blocking:
+                    raise
+                return False
+            state = self._state()
+            self._reconcile_jobs(state["subscriptions"], self._releases())
+            return True
+
+    def _reconcile_jobs(self, subscriptions, releases):
+        changed = []
+        if self.podcast_status is None:
+            return changed
+        for (subscription_id, _), row in releases.items():
+            subscription = subscriptions.get(subscription_id)
+            if subscription is None or row["status"] != "ingesting":
+                continue
+            outcome = self.podcast_status(subscription, row["item"], row["job_id"])
+            if outcome is not None:
+                if outcome["reason"] == "job_lost":
+                    outcome = {**outcome, "job_id": None}
+                self._apply_outcome(row, outcome)
+                changed.append(row)
+        if changed:
+            self._save_releases(releases)
+        return changed
+
+    def _apply_outcome(self, row, outcome):
+        row.update({
+            key: outcome[key]
+            for key in ("status", "reason", "source_id", "duration_seconds", "job_id")
+            if key in outcome
+        }, updated_at=self.clock().isoformat())
+
     def poll(self, subscription_id, *, dry_run=False):
         """Fetch a feed and process up to five eligible releases, including deferred items."""
         with nullcontext() if dry_run else _file_lock(self.lock_path):
             state = self._state()
             subscription = self._get(state, subscription_id)
+            try:
+                patterns = tuple(compile_title_pattern(key, subscription.get(key)) for key in TITLE_FILTERS)
+            except ValueError as exc:
+                raise FeedPollError(str(exc)) from exc
             releases = self._releases()
-            result, discovered = self._discover(subscription, releases)
+            reconciled = [] if dry_run else self._reconcile_jobs({subscription_id: subscription}, releases)
+            result, discovered = self._discover(subscription, releases, patterns)
             if not dry_run:
                 if discovered:
                     self._save_releases(releases)
@@ -236,13 +278,16 @@ class SubscriptionStore:
                 subscription["last_polled_at"] = self.clock().isoformat()
                 self._save_state(state)
 
-            pending = [
+            rows = [
                 row for (sub_id, _), row in releases.items()
-                if sub_id == subscription_id and row["status"] == "pending"
+                if sub_id == subscription_id
             ]
-            attempted, changed = self._drain(state, subscription, releases, pending, dry_run)
-            new_ids = {row["external_id"] for row in discovered}
-            reported = discovered + [row for row in changed if row["external_id"] not in new_ids]
+            in_flight = sum(row["status"] == "ingesting" for row in rows)
+            pending = [row for row in rows if row["status"] == "pending"]
+            attempted, changed = self._drain(
+                state, subscription, releases, pending, dry_run, patterns, MAX_AUTO_INGESTS - in_flight,
+            )
+            reported = {row["external_id"]: row for row in discovered + reconciled + changed}
             backoff = state["youtube_backoff"] if subscription["kind"] == "youtube" else None
             retry_at = backoff["until"] if backoff and _utc_date(backoff["until"]) > self.clock() else None
             return {
@@ -252,11 +297,12 @@ class SubscriptionStore:
                 "new_count": len(discovered),
                 "attempted_count": attempted,
                 "pending_count": sum(row["status"] == "pending" for row in pending),
+                "ingesting_count": sum(row["status"] == "ingesting" for row in rows),
                 "retry_at": retry_at,
-                "releases": [_public_release(row) for row in reported],
+                "releases": [_public_release(row) for row in reported.values()],
             }
 
-    def _discover(self, subscription, releases):
+    def _discover(self, subscription, releases, patterns):
         headers = {
             header: subscription[key] for header, key in (
                 ("If-None-Match", "etag"), ("If-Modified-Since", "last_modified")
@@ -276,13 +322,19 @@ class SubscriptionStore:
         discovered = []
         now = self.clock().isoformat()
         show = {key: feed[key] for key in ("title", "link")}
+        first_poll = subscription["last_polled_at"] is None
+        created_at = _utc_date(subscription["created_at"]) if first_poll else None
         for item in feed["items"]:
             external_id = item["external_id"]
             key = subscription["id"], external_id
             if not external_id or key in releases:
                 continue
-            reason = _skip_reason(subscription, item)
+            reason = _skip_reason(subscription, item, patterns)
             status = "skipped" if reason else ("pending" if subscription["auto_ingest"] else "discovered")
+            if status == "pending" and first_poll and (
+                not item["published_at"] or _utc_date(item["published_at"]) < created_at
+            ):
+                status, reason = "discovered", "backlog"
             row = {
                 "subscription_id": subscription["id"],
                 **{key: item[key] for key in ("external_id", "title", "published_at", "link")},
@@ -293,7 +345,7 @@ class SubscriptionStore:
             discovered.append(row)
         return result, discovered
 
-    def _drain(self, state, subscription, releases, pending, dry_run):
+    def _drain(self, state, subscription, releases, pending, dry_run, patterns, capacity):
         attempted, changed = 0, []
         if dry_run or not subscription["auto_ingest"]:
             return attempted, changed
@@ -301,12 +353,12 @@ class SubscriptionStore:
         youtube = subscription["kind"] == "youtube"
         ingest = self.ingest_youtube if youtube else self.ingest_podcast
         for row in pending:
-            reason = _skip_reason(subscription, row["item"])
+            reason = _skip_reason(subscription, row["item"], patterns)
             if reason:
                 outcome = {"status": "skipped", "reason": reason}
             else:
                 backoff = state["youtube_backoff"] if youtube else None
-                if attempted == MAX_AUTO_INGESTS or (
+                if attempted >= capacity or (
                     backoff and _utc_date(backoff["until"]) > self.clock()
                 ):
                     break
@@ -328,10 +380,7 @@ class SubscriptionStore:
                 elif backoff:
                     state["youtube_backoff"] = None
                     self._save_state(state)
-            row.update({
-                key: outcome[key] for key in ("status", "reason", "source_id", "duration_seconds")
-                if key in outcome
-            }, updated_at=self.clock().isoformat())
+            self._apply_outcome(row, outcome)
             self._save_releases(releases)
             changed.append(row)
             if row["reason"] in {"rate_limited", "request_blocked"}:
@@ -392,20 +441,21 @@ def main(argv=None):
             print(json.dumps(store.list(), ensure_ascii=False, indent=2))
             return 0
 
-        # Construct the library only when a release actually needs ingestion.
+        # Construct the library only when a release needs ingestion or reconciliation.
         service_store = None
 
-        def ingest(kind, *values):
+        def call_service(method, *values):
             nonlocal service_store
             with redirect_stdout(sys.stderr):
                 if service_store is None:
                     from local_preview import local_api
                     service = local_api.SERVICE or local_api.LocalRAGService()
-                    service_store = service.subscription_store()
-                return getattr(service_store, kind)(*values)
+                    service_store = service.subscription_store(wait_for_audio=True)
+                return getattr(service_store, method)(*values)
 
-        store.ingest_youtube = lambda *values: ingest("ingest_youtube", *values)
-        store.ingest_podcast = lambda *values: ingest("ingest_podcast", *values)
+        store.ingest_youtube = lambda *values: call_service("ingest_youtube", *values)
+        store.ingest_podcast = lambda *values: call_service("ingest_podcast", *values)
+        store.podcast_status = lambda *values: call_service("podcast_status", *values)
         with nullcontext() if args.dry_run else library_writer():
             result = (
                 store.poll(args.sub, dry_run=args.dry_run) if args.sub

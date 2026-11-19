@@ -3,7 +3,7 @@
 import json
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from email.message import Message
 from types import SimpleNamespace
 from urllib.error import HTTPError
@@ -29,7 +29,8 @@ PUBLISHED = "2026-11-17T12:00:00+00:00"
 
 
 class Clock:
-    now = datetime(2026, 11, 18, 12, tzinfo=timezone.utc)
+    def __init__(self, now="2026-11-18T12:00:00+00:00"):
+        self.now = datetime.fromisoformat(now)
 
     def __call__(self):
         return self.now
@@ -38,10 +39,11 @@ class Clock:
         self.now += timedelta(seconds=seconds)
 
 
-def _rss(*items):
+def _rss(*items, dated=True):
+    pub_date = "<pubDate>Tue, 17 Nov 2026 12:00:00 GMT</pubDate>" if dated else ""
     entries = "".join(
         f"""<item><title>{escape(title)}</title><guid>{guid}</guid>
-        <pubDate>Tue, 17 Nov 2026 12:00:00 GMT</pubDate>
+        {pub_date}
         <itunes:duration>{duration}</itunes:duration>
         <enclosure url="https://radio.example/{guid}.mp3" type="audio/mpeg"/></item>"""
         for guid, title, duration in items
@@ -105,7 +107,7 @@ def test_filters_and_dry_run_do_not_ingest_or_mutate(tmp_path):
         ("main", "Fold a Boat", 40),
     )))
     ingest = Mock(side_effect=_success)
-    store = SubscriptionStore(tmp_path, fetch=fetch, ingest_podcast=ingest, clock=Clock())
+    store = SubscriptionStore(tmp_path, fetch=fetch, ingest_podcast=ingest, clock=Clock(PUBLISHED))
     subscription = store.create({
         "url": PODCAST, "auto_ingest": True, "title_include": "^Fold", "title_exclude": "preview$",
     })
@@ -124,6 +126,80 @@ def test_filters_and_dry_run_do_not_ingest_or_mutate(tmp_path):
     assert [row["status"] for row in actual["releases"]] == ["skipped", "skipped", "ingested"]
 
 
+def test_first_poll_does_not_queue_backlog_but_later_polls_can(tmp_path):
+    old = [(f"fold-{n}", "Fold a Boat", 800) for n in range(30)]
+    later = [(f"later-{n}", "Fold a Duck", 800) for n in range(6)]
+    fetch = Mock(side_effect=[_fetched(_rss(*old)), _fetched(_rss(*old)), _fetched(_rss(*later))])
+    ingest = Mock(side_effect=_success)
+    store = SubscriptionStore(tmp_path, fetch=fetch, ingest_podcast=ingest, clock=Clock())
+    sub = store.create({"url": PODCAST, "auto_ingest": True})
+
+    dry = store.poll(sub["id"], dry_run=True)
+    assert not store.releases_path.exists()
+    assert store.get(sub["id"]) == sub
+    first = store.poll(sub["id"])
+    assert first["releases"] == dry["releases"]
+    assert (first["new_count"], first["attempted_count"], first["pending_count"]) == (30, 0, 0)
+    assert {(row["status"], row["reason"]) for row in store.list_releases()} == {("discovered", "backlog")}
+    ingest.assert_not_called()
+
+    second = store.poll(sub["id"])
+    assert second["attempted_count"] == 5
+    assert second["pending_count"] == 1
+    assert second["releases"][-1]["status"] == "pending"
+
+
+@pytest.mark.parametrize("dated, status, reason", [
+    (True, "ingested", None),
+    (False, "discovered", "backlog"),
+])
+def test_first_poll_queues_only_releases_dated_since_creation(tmp_path, dated, status, reason):
+    fetch = Mock(return_value=_fetched(_rss(("fold", "Fold a Boat", 800), dated=dated)))
+    store = SubscriptionStore(
+        tmp_path, fetch=fetch, ingest_podcast=_success, clock=Clock("2026-11-16T12:00:00+00:00"),
+    )
+    sub = store.create({"url": PODCAST, "auto_ingest": True})
+    (row,) = store.poll(sub["id"])["releases"]
+    assert (row["status"], row["reason"]) == (status, reason)
+
+
+@pytest.mark.parametrize("pattern", [r"(a+)+$", r"(a|aa)*$", r"(.*)*x", r"(\w+\s?)+$"])
+def test_rejects_complex_title_patterns_on_create_and_update(tmp_path, pattern):
+    store = SubscriptionStore(tmp_path)
+    with pytest.raises(ValueError, match="title_include is too complex; avoid nested repetition"):
+        store.create({"url": PODCAST, "title_include": pattern})
+    sub = store.create({"url": PODCAST})
+    with pytest.raises(ValueError, match="title_exclude is too complex; avoid nested repetition"):
+        store.update(sub["id"], {"title_exclude": pattern})
+
+
+@pytest.mark.parametrize("pattern", [r"^Fold", r"preview$", r"ep(isode)?\s*\d+", r"(?i)trailer|teaser", r"(ab|cd)+$"])
+def test_accepts_title_patterns(tmp_path, pattern):
+    store = SubscriptionStore(tmp_path)
+    sub = store.create({"url": PODCAST, "title_include": pattern})
+    assert sub["title_include"] == pattern
+
+
+def test_title_filter_lengths_and_legacy_pattern_guard(tmp_path):
+    fetch = Mock(return_value=_fetched(_rss(("fold", "X" * 300 + " Fold", 800))))
+    store = SubscriptionStore(tmp_path, fetch=fetch, clock=Clock())
+    with pytest.raises(ValueError, match="title_include must be at most 200 characters"):
+        store.create({"url": PODCAST, "title_include": "X" * 201})
+    sub = store.create({"url": PODCAST, "title_include": "Fold"})
+    (row,) = store.poll(sub["id"])["releases"]
+    assert row["status"] == "skipped" and row["reason"] == "title_include"
+    assert len(row["title"]) > 300
+
+    state = json.loads(store.subscriptions_path.read_text())
+    state["subscriptions"][sub["id"]]["title_exclude"] = r"(a|aa)*$"
+    store.subscriptions_path.write_text(json.dumps(state))
+    fetch.reset_mock()
+    for dry_run in (False, True):
+        with pytest.raises(FeedPollError, match="title_exclude is too complex"):
+            store.poll(sub["id"], dry_run=dry_run)
+    fetch.assert_not_called()
+
+
 def test_update_domain_tag_on_legacy_subscription(tmp_path):
     store = SubscriptionStore(tmp_path)
     sub_id = store.create({"url": PODCAST})["id"]
@@ -140,7 +216,7 @@ def test_update_domain_tag_on_legacy_subscription(tmp_path):
 
 
 def test_thirty_clip_flood_cap_counts_skips_and_drains_after_304(tmp_path):
-    clock = Clock()
+    clock = Clock(PUBLISHED)
     ids = [f"synthetic{i:02}" for i in range(30)]
     url = "https://www.youtube.com/feeds/videos.xml?channel_id=first"
     fetch = Mock(side_effect=[
@@ -171,7 +247,7 @@ def test_thirty_clip_flood_cap_counts_skips_and_drains_after_304(tmp_path):
 
 
 def test_throttle_is_persistent_and_shared_across_youtube_feeds(tmp_path):
-    clock = Clock()
+    clock = Clock(PUBLISHED)
     fetch = Mock(side_effect=lambda url, **kwargs: _fetched(_atom("synthetic00", "synthetic01"), url=url))
     paused = {"status": "pending", "reason": "rate_limited", "retry_after": 90}
     outcomes = iter([paused, paused])
@@ -217,7 +293,7 @@ def test_feed_failure_keeps_validators_and_poll_all_continues(tmp_path):
 
 def test_overlapping_polls_serialize_discovery_and_ingestion(tmp_path):
     entered, release, started = threading.Event(), threading.Event(), threading.Event()
-    clock = Clock()
+    clock = Clock(PUBLISHED)
     fetch = Mock(return_value=_fetched(_rss(("fold", "Fold a Boat", 800))))
 
     def wait_then_ingest(*args):
@@ -293,9 +369,13 @@ def test_podcast_duration_comes_from_stt_and_short_source_leaves_no_artifacts(au
     ])
     monkeypatch.setattr(subscriptions.feeds, "safe_fetch", fetch)
     store = app.service.subscription_store()
+    store.clock = Clock(PUBLISHED)
     sub = store.create({"url": PODCAST, "auto_ingest": True})
 
-    (short,) = store.poll(sub["id"])["releases"]
+    assert store.poll(sub["id"])["ingesting_count"] == 1
+    app.service._audio_queue().pending.join()
+    store.reconcile()
+    (short,) = store.list_releases()
     assert (short["status"], short["reason"], short["duration_seconds"]) == (
         "skipped", "min_duration_s", 3,
     )
@@ -304,7 +384,11 @@ def test_podcast_duration_comes_from_stt_and_short_source_leaves_no_artifacts(au
     assert not list(app.library.data_dir.glob("library/videos/*"))
 
     app.engine.result = TranscriptionResult([SEGMENT], "en", 750, "fake", "fixture", True)
-    (long,) = store.poll(sub["id"])["releases"]
+    store.poll(sub["id"])
+    assert app.done.wait(5)
+    status, _, body = _request("GET", "/v1/releases")
+    assert status == 200
+    _, long = json.loads(body)["releases"]
     assert long["status"] == "ingested" and long["duration_seconds"] == 750
     source_id = make_rss_source_id(PODCAST, "long")
     assert long["source_id"] == source_id
@@ -313,6 +397,94 @@ def test_podcast_duration_comes_from_stt_and_short_source_leaves_no_artifacts(au
     assert source["published_at"] == PUBLISHED
     assert source["stt"]["audio_duration_seconds"] == 750
     app.feed.assert_not_called()
+
+
+def test_podcast_poll_returns_while_transcribing_and_caps_in_flight_jobs(audio_app, monkeypatch):
+    app = audio_app
+    app.service.runtime_data_dir = app.root / "runtime"
+    items = [(f"fold-{n}", "Fold a boat", 800) for n in range(6)]
+    fetch = Mock(side_effect=[_fetched(_rss(*items)), _fetched(status=304), _fetched(status=304)])
+    monkeypatch.setattr(subscriptions.feeds, "safe_fetch", fetch)
+    entered, finish = threading.Event(), threading.Event()
+    transcribe = app.engine.transcribe
+    app.engine.result = TranscriptionResult([SEGMENT], "en", 750, "fake", "fixture", True)
+
+    def held_transcription(*args):
+        entered.set()
+        assert finish.wait(10)
+        return transcribe(*args)
+
+    monkeypatch.setattr(app.engine, "transcribe", held_transcription)
+    store = app.service.subscription_store()
+    store.clock = Clock(PUBLISHED)
+    sub = store.create({"url": PODCAST, "auto_ingest": True})
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        try:
+            first = pool.submit(store.poll, sub["id"]).result(timeout=5)
+            assert entered.wait(5)
+            assert (first["attempted_count"], first["ingesting_count"], first["pending_count"]) == (5, 5, 1)
+            job_ids = [row["job_id"] for row in first["releases"] if row["status"] == "ingesting"]
+            assert len(job_ids) == 5 and app.service.get_job(job_ids[0]).status == "running"
+            second = store.poll(sub["id"])
+            assert (second["attempted_count"], second["ingesting_count"], second["pending_count"]) == (0, 5, 1)
+            assert len(app.service.list_jobs()) == 5
+        finally:
+            finish.set()
+
+    app.service._audio_queue().pending.join()
+    third = store.poll(sub["id"])
+    assert (third["attempted_count"], third["ingesting_count"], third["pending_count"]) == (1, 1, 0)
+    completed = [row for row in third["releases"] if row["status"] == "ingested"]
+    assert len(completed) == 5
+    assert {row["duration_seconds"] for row in completed} == {750}
+    app.service._audio_queue().pending.join()
+
+
+@pytest.mark.parametrize("reconcile_first", [False, True])
+def test_lost_podcast_job_is_cleared_and_resubmitted(audio_app, monkeypatch, reconcile_first):
+    app = audio_app
+    app.service.runtime_data_dir = app.root / "runtime"
+    fetch = Mock(side_effect=[_fetched(_rss(("fold", "Fold a boat", 800))), _fetched(status=304)])
+    monkeypatch.setattr(subscriptions.feeds, "safe_fetch", fetch)
+    queue = Mock()
+    queue.submit.side_effect = [SimpleNamespace(job_id="job_before"), SimpleNamespace(job_id="job_after")]
+    monkeypatch.setattr(app.service, "_audio_queue", lambda: queue)
+    store = app.service.subscription_store()
+    store.clock = Clock(PUBLISHED)
+    sub = store.create({"url": PODCAST, "auto_ingest": True})
+    (first,) = store.poll(sub["id"])["releases"]
+    assert first["job_id"] == "job_before" and first["status"] == "ingesting"
+    if reconcile_first:
+        store.reconcile()
+        (lost,) = store.list_releases()
+        assert (lost["status"], lost["reason"], lost["job_id"]) == ("pending", "job_lost", None)
+        assert fetch.call_count == 1
+    result = store.poll(sub["id"])
+    (retried,) = result["releases"]
+    assert result["not_modified"] and result["attempted_count"] == 1
+    assert (retried["status"], retried["reason"], retried["job_id"]) == ("ingesting", None, "job_after")
+
+
+def test_cli_waits_for_podcast_job(audio_app, monkeypatch, capsys):
+    from local_preview import local_api as cli_api
+
+    app = audio_app
+    monkeypatch.setattr(cli_api, "SERVICE", app.service)
+    app.service.runtime_data_dir = app.root / "runtime"
+    app.engine.result = TranscriptionResult([SEGMENT], "en", 750, "fake", "fixture", True)
+    fetch = Mock(return_value=_fetched(_rss(("fold", "Fold a boat", 800))))
+    store = SubscriptionStore(app.service.runtime_data_dir, fetch=fetch, clock=Clock(PUBLISHED))
+    sub = store.create({"url": PODCAST, "auto_ingest": True})
+    writer = subscriptions.library_writer
+    monkeypatch.setattr(subscriptions, "library_writer", lambda: writer(app.service.runtime_data_dir))
+    monkeypatch.setattr(subscriptions, "SubscriptionStore", lambda *args, **kwargs: store)
+    monkeypatch.setattr(app.service, "subscription_store", Mock(wraps=app.service.subscription_store))
+    assert subscriptions.main(["poll", "--sub", sub["id"]]) == 0
+    app.service.subscription_store.assert_called_once_with(wait_for_audio=True)
+    result = json.loads(capsys.readouterr().out)
+    (completed,) = result["releases"]
+    assert result["ingesting_count"] == 0
+    assert (completed["status"], completed["duration_seconds"]) == ("ingested", 750)
 
 
 def _youtube_service(tmp_path, monkeypatch):
@@ -338,6 +510,7 @@ def test_youtube_single_ingest_persists_date_and_removes_new_short_source(tmp_pa
     monkeypatch.setattr(library, "_fetch_transcript", transcript)
     store = service.subscription_store()
     store.pause = Mock()
+    store.clock = Clock(PUBLISHED)
     sub = store.create({"url": YOUTUBE, "auto_ingest": True})
     short, long = store.poll(sub["id"])["releases"]
     assert (short["status"], short["reason"], short["duration_seconds"]) == ("skipped", "min_duration_s", 5)
@@ -364,6 +537,7 @@ def test_youtube_provider_throttle_stops_before_fallback(tmp_path, monkeypatch, 
     ))
     store = service.subscription_store()
     store.pause = Mock()
+    store.clock = Clock(PUBLISHED)
     sub = store.create({"url": YOUTUBE, "auto_ingest": True})
     first, second = store.poll(sub["id"])["releases"]
     assert (first["status"], first["reason"]) == (status, reason)
@@ -422,3 +596,21 @@ def test_periodic_poller_uses_interval_and_defaults_to_off(monkeypatch):
     thread.call_args.kwargs["target"]()
     assert [call.args for call in event.wait.call_args_list] == [(150,), (150,)]
     store.poll_all.assert_called_once()
+
+
+def test_nonblocking_reconcile_skips_while_a_poll_holds_the_lock(tmp_path):
+    status = Mock(return_value=None)
+    store = SubscriptionStore(tmp_path, podcast_status=status, clock=Clock())
+    with subscriptions._file_lock(store.lock_path):
+        holder_done = threading.Event()
+        result = {}
+
+        def other_process():
+            # flock is per open file description, so a second open contends like another process.
+            result["value"] = store.reconcile(blocking=False)
+            holder_done.set()
+
+        threading.Thread(target=other_process).start()
+        assert holder_done.wait(5)
+    assert result["value"] is False
+    assert store.reconcile(blocking=False) is True

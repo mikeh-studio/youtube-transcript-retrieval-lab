@@ -46,12 +46,17 @@ test("adds both subscription types and refreshes release statuses after Check no
   const releases = [
     {
       subscription_id: "feed-1", external_id: "first-fold", title: releaseTitle,
-      link: "https://paper.example/boats", status: "ingested", reason: null,
+      link: "https://paper.example/boats", status: "ingesting", reason: null,
       source_id: releaseId, published_at: date, updated_at: date,
     },
     {
       subscription_id: "feed-1", external_id: "glue-preview", title: "Paper Glue Preview",
       link: "javascript:alert(1)", status: "skipped", reason: "title_exclude",
+      source_id: null, published_at: date, updated_at: date,
+    },
+    {
+      subscription_id: "feed-1", external_id: "old-origami", title: "Earlier Origami",
+      link: null, status: "discovered", reason: "backlog",
       source_id: null, published_at: date, updated_at: date,
     },
   ];
@@ -63,7 +68,10 @@ test("adds both subscription types and refreshes release statuses after Check no
     polled = true;
     return route.fulfill({
       json: {
-        ok: true, poll: { subscription_id: "feed-1", new_count: 2, attempted_count: 1, pending_count: 0, releases },
+        ok: true, poll: {
+          subscription_id: "feed-1", new_count: 3, attempted_count: 1, pending_count: 0,
+          ingesting_count: 1, releases,
+        },
       },
     });
   });
@@ -99,9 +107,13 @@ test("adds both subscription types and refreshes release statuses after Check no
   });
 
   await podcast.getByRole("button", { name: "Check now" }).click();
-  await expect(feeds.getByText("Check complete. 2 new, 1 attempted, 0 pending.")).toBeVisible();
+  await expect(feeds.getByText("Check complete. 3 new, 1 attempted, 0 pending, 1 ingesting.")).toBeVisible();
   const history = page.getByRole("region", { name: "Release history" });
-  await expect(history.getByRole("row", { name: /Paper Boat Workshop/ })).toContainText("ingested");
+  const episode = history.getByRole("row", { name: /Paper Boat Workshop/ });
+  await expect(episode).toContainText("ingesting");
+  releases[0].status = "ingested";
+  await expect(episode).toContainText("ingested");
+  await expect(history.getByRole("row", { name: /Earlier Origami/ })).toContainText("Published before subscription or undated");
   const skipped = history.getByRole("row", { name: /Paper Glue Preview/ });
   await expect(skipped).toContainText("skipped");
   await expect(skipped).toContainText("Title matched the exclude filter");

@@ -20,6 +20,8 @@ const RELEASE_REASONS = {
   request_blocked: "YouTube blocked the request",
   ingest_failed: "Ingestion failed",
   source_missing: "Indexed source unavailable",
+  backlog: "Published before subscription or undated",
+  job_lost: "Audio job unavailable. Check again to retry.",
 };
 const HIGHLIGHT_GROUPS = [
   ["new", "New to you"],
@@ -27,7 +29,7 @@ const HIGHLIGHT_GROUPS = [
   ["extends", "Extends"],
 ];
 
-function useRows(path, field) {
+function useRows(path, field, subscriptions) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -46,6 +48,14 @@ function useRows(path, field) {
     });
     return () => { cancelled = true; };
   }, [path, field, revision]);
+
+  useEffect(() => {
+    if (!subscriptions || loading || error || !rows.some((row) =>
+      row.status === "ingesting" && subscriptions.some((sub) => sub.id === row.subscription_id)
+    )) return;
+    const timer = setTimeout(() => setRevision((value) => value + 1), 3000);
+    return () => clearTimeout(timer);
+  }, [subscriptions, rows, loading, error]);
 
   return { rows, loading, error, refresh: () => setRevision((value) => value + 1) };
 }
@@ -142,7 +152,7 @@ function Subscriptions({ subscriptions, refreshReleases }) {
         method: "POST", body: {},
       });
       const retry = result.retry_at ? ` YouTube retry after ${new Date(result.retry_at).toLocaleString()}.` : "";
-      setNotice(`Check complete. ${result.new_count} new, ${result.attempted_count} attempted, ${result.pending_count} pending.${retry}`);
+      setNotice(`Check complete. ${result.new_count} new, ${result.attempted_count} attempted, ${result.pending_count} pending, ${result.ingesting_count} ingesting.${retry}`);
     } catch (failure) {
       setError(failure);
     } finally {
@@ -435,7 +445,7 @@ function Digest() {
 
 export function WhatsNewPage() {
   const subscriptions = useRows("/v1/subscriptions", "subscriptions");
-  const releases = useRows("/v1/releases", "releases");
+  const releases = useRows("/v1/releases", "releases", subscriptions.rows);
   return (
     <div className="whats-new-page">
       <h1>What's new</h1>

@@ -73,12 +73,13 @@ from local_preview.digest import DigestNotFound, DigestService  # noqa: E402
 from local_preview.novelty import NoveltyError  # noqa: E402
 from local_preview.lexical_index import LexicalIndex  # noqa: E402
 from local_preview.retrieval_diagnostics import has_retrieval_failure  # noqa: E402
-from local_preview.summary_timestamps import parse_summary_timestamp  # noqa: E402
 from local_preview.stt.base import capabilities as stt_capabilities  # noqa: E402
+from local_preview.summary_timestamps import parse_summary_timestamp  # noqa: E402
 from local_preview.subscription_ingest import (  # noqa: E402
     SubscriptionSourceSkipped,
     ingest_podcast,
     ingest_youtube,
+    podcast_job_outcome,
 )
 from local_preview.subscriptions import (  # noqa: E402
     FeedPollError,
@@ -781,7 +782,7 @@ class LocalRAGService:
                 )
             return self._audio_ingest
 
-    def subscription_store(self):
+    def subscription_store(self, *, wait_for_audio=False):
         """Bind feed polling to the same library and ingest jobs as the API."""
         return SubscriptionStore(
             self.runtime_data_dir,
@@ -791,7 +792,11 @@ class LocalRAGService:
             ),
             ingest_podcast=lambda *args: ingest_podcast(
                 *args, library=self.engine.library, write_lock=self.library_write_lock,
-                get_queue=self._audio_queue, get_job=self.get_job,
+                get_queue=self._audio_queue, get_job=self.get_job, wait=wait_for_audio,
+            ),
+            podcast_status=lambda *args: podcast_job_outcome(
+                *args, library=self.engine.library, write_lock=self.library_write_lock,
+                get_job=self.get_job,
             ),
         )
 
@@ -8318,7 +8323,10 @@ class Handler(BrowserBoundary, BaseHTTPRequestHandler):
             if path == "/v1/releases":
                 since = parse_qs(parsed.query, keep_blank_values=True).get("since", [None])[0]
                 try:
-                    releases = SERVICE.subscription_store().list_releases(since)
+                    store = SERVICE.subscription_store()
+                    # Never make a page load wait behind a running poll.
+                    store.reconcile(blocking=False)
+                    releases = store.list_releases(since)
                 except ValueError as exc:
                     self._json({"ok": False, "error": {"code": "INVALID_INPUT", "message": str(exc)}}, 400)
                 else:
