@@ -214,6 +214,37 @@ test("imports a judge audit and records a disagreement with a note", async ({ pa
   ]);
 });
 
+test("opens retained podcast audio at the label onset and omits legacy enclosure links", async ({ page }) => {
+  const enclosure = "https://radio.example/boat.mp3";
+  const mediaPath = "/v1/sources/pod_0123456789abcdef/media";
+  const saved = [
+    { ...makeDraft(), draft_id: "draft_podcast", sources: [{
+      ...source, url: enclosure, playback: { kind: "media", url: mediaPath },
+    }] },
+    { ...makeDraft(), draft_id: "draft_legacy", sources: [{ ...source, url: enclosure }] },
+  ];
+  await page.route("**/v1/videos", (route) => route.fulfill({ json: { videos: [] } }));
+  await page.route("**/v1/labels/tasks", (route) => route.fulfill({ json: { tasks: [] } }));
+  await page.route("**/v1/labels/drafts", (route) => route.fulfill({ json: {
+    drafts: saved.map((draft) => ({ ...draft, item_count: draft.items.length, decided_count: 0 })),
+  } }));
+  await page.route("**/v1/labels/drafts/*", (route) => {
+    const id = new URL(route.request().url()).pathname.split("/").pop();
+    return route.fulfill({ json: { draft: saved.find((draft) => draft.draft_id === id) } });
+  });
+  await page.route("**/v1/labels/drafts/*/context?*", (route) => route.fulfill({ json: {
+    context: { lines: [{ line: 12, start: 25.5, end: 26, text: transcript }] },
+  } }));
+
+  await page.goto("/labels.html");
+  const link = page.getByRole("link", { name: "Open at timestamp" });
+  await page.locator("#drafts").selectOption("draft_podcast");
+  await expect(link).toHaveAttribute("href", new URL(`${mediaPath}#t=25`, page.url()).href);
+  await page.locator("#drafts").selectOption("draft_legacy");
+  await expect(page.getByText(proposal, { exact: true })).toBeVisible();
+  await expect(link).toBeHidden();
+});
+
 test("reviews episode sections and saves boundary seconds", async ({ page }) => {
   const title = "<b>Opening drum check</b>";
   const draft = {

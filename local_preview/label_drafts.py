@@ -21,6 +21,7 @@ from local_preview import audio_labels, cross_source_labels
 from local_preview.judge_audit import validate_sample
 from local_preview.local_files import json_bytes as _json_bytes, write_atomic as _write_atomic
 from local_preview.transcript_lines import fingerprint_lines, format_lines, numbered_lines
+from multilingual.source_model import canonical_url, playback_target
 
 
 MAX_CONTEXT_CHARS = 150_000
@@ -363,12 +364,12 @@ class LabelDraftService:
         declared_duration = source.get("duration_seconds")
         if type(declared_duration) in (int, float) and 0 < declared_duration < math.inf:
             duration = declared_duration
+        record = {**(source.get("source") or {}), "video_id": source_id}
         metadata = {
             "source_id": source_id,
             "title": str(source.get("title") or source_id),
-            "url": str(
-                source.get("url") or f"https://www.youtube.com/watch?v={source_id}"
-            ),
+            "url": str(source.get("url") or canonical_url(record)),
+            "playback": playback_target(record),
             "duration": duration,
             "source_fingerprint": fingerprint_lines(lines),
         }
@@ -577,7 +578,8 @@ class LabelDraftService:
             "created_at": now,
             "updated_at": now,
             "sources": [
-                {"source_id": source_id, "title": source_id, "source_fingerprint": fingerprint}
+                {"source_id": source_id, "title": source_id, "source_fingerprint": fingerprint,
+                 "playback": None}
                 for source_id, fingerprint in fingerprints.items()
             ],
             "notes": "",

@@ -51,10 +51,21 @@ function timecode(seconds, precision = false) {
 }
 
 function timestampUrl(source, onset) {
+  const playback = source.playback === undefined ? { kind: "youtube", url: source.url } : source.playback;
+  if (!playback?.url) return "";
   try {
-    const url = new URL(source);
+    const url = playback.kind === "media" ? new URL(playback.url, location.origin) : new URL(playback.url);
     if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) return "";
-    url.searchParams.set("t", `${Math.floor(onset)}s`);
+    const seconds = Math.max(0, Math.floor(onset));
+    if (playback.kind === "media") {
+      url.hash = `t=${seconds}`;
+    } else if (playback.kind === "youtube" && (
+      url.hostname === "youtube.com" || url.hostname.endsWith(".youtube.com") || url.hostname === "youtu.be"
+    )) {
+      url.searchParams.set("t", `${seconds}s`);
+    } else {
+      return "";
+    }
     return url.href;
   } catch {
     return "";
@@ -185,7 +196,7 @@ function renderCrossSourceDetails(label) {
   for (const { source_id, start, end } of label.gold_spans) {
     const source = draftSource(source_id);
     const row = document.createElement("li");
-    const url = timestampUrl(source.url, start);
+    const url = timestampUrl(source, start);
     const evidence = document.createElement(url ? "a" : "span");
     evidence.textContent = `${source.title} · ${timecode(start, true)}–${timecode(end, true)}`;
     if (url) {
@@ -286,7 +297,7 @@ function renderItem() {
   $("reviewKeys").hidden = audit;
   $("notes").textContent = draft.notes ? `Draft notes · ${draft.notes}` : "";
   $("notes").hidden = !draft.notes;
-  const url = audio || audit || !source ? "" : timestampUrl(source.url, section ? label.start : label.onset);
+  const url = audio || audit || !source ? "" : timestampUrl(source, section ? label.start : label.onset);
   $("timestamp").hidden = !url;
   if (url) $("timestamp").href = url;
   else $("timestamp").removeAttribute("href");

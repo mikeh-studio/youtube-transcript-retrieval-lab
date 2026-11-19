@@ -117,6 +117,19 @@ def decide(item, decision, **extra):
     return {"id": item["id"], "decision": decision, **extra}
 
 
+@pytest.mark.parametrize("source_meta, url, expected", [
+    ({"platform": "youtube"}, "https://youtu.be/test-orchard",
+     {"kind": "youtube", "url": "https://www.youtube.com/watch?v=test-orchard"}),
+    ({"platform": "podcast_rss", "local_media_path": "media/boat.mp3"},
+     "https://radio.example/boat.mp3", {"kind": "media", "url": "/v1/sources/test-orchard/media"}),
+])
+def test_draft_source_records_playback_target(workflow, source_meta, url, expected):
+    service, _, source = workflow
+    source.update(source=source_meta, url=url)
+    (metadata,) = make_draft(service)["sources"]
+    assert metadata["playback"] == expected
+
+
 def test_transcript_lines_normalize_and_map_timestamps(workflow):
     _, _, source = workflow
     lines = numbered_lines(

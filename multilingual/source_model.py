@@ -8,7 +8,6 @@ from urllib.parse import quote, urlsplit
 from multilingual.youtube_metadata import (
     canonical_youtube_url,
     normalize_youtube_source,
-    youtube_timestamp_url,
 )
 
 
@@ -105,13 +104,24 @@ def canonical_url(record):
     return record.get("url") or _audio_playback_url(record)
 
 
+def playback_target(record):
+    """Return the platform's base playback URL, preferring retained audio."""
+    if is_youtube(record):
+        return {"kind": "youtube", "url": canonical_youtube_url(record["video_id"])}
+    media_url = _audio_playback_url(record)
+    return {"kind": "media", "url": media_url} if media_url else None
+
+
 def timestamp_url(record, seconds):
     """Link to the whole-second offset on the platform's playback surface."""
     start = max(0, int(float(seconds)))
-    if is_youtube(record):
-        return youtube_timestamp_url(record["video_id"], start)
-    media_url = _audio_playback_url(record)
-    return f"{media_url.split('#', 1)[0]}#t={start}" if media_url else ""
+    target = playback_target(record)
+    if target is None:
+        return ""
+    url = target["url"]
+    if target["kind"] == "youtube":
+        return f"{url}&t={start}s"
+    return f"{url.split('#', 1)[0]}#t={start}"
 
 
 def make_rss_source_id(feed_url, guid):
