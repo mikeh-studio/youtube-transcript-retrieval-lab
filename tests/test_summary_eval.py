@@ -168,7 +168,7 @@ def test_generate_preserves_legacy_cache_and_records_model_provenance(inputs):
     assert rows[0]["items"][1]["evidence"] == [{"start": 20, "end": 25}]
 
 
-def fake_llm(llm_calls):
+def fake_llm(llm_calls, reply_format="{body}"):
     fixture = {
         (row["kind"], row["item_id"]): row["decision"] for row in read_jsonl(JUDGMENTS)
     }
@@ -182,7 +182,7 @@ def fake_llm(llm_calls):
             for item in payload["predictions"]
         ]
         return {
-            "text": json.dumps({"decisions": decisions}),
+            "text": reply_format.format(body=json.dumps({"decisions": decisions})),
             "provider": "codex_cli",
             "model": "fixture-judge",
             "cli_version": "fixture-cli 1",
@@ -191,11 +191,14 @@ def fake_llm(llm_calls):
     return llm
 
 
-def test_judge_sends_separate_windows_and_validates_all_decisions(inputs):
+@pytest.mark.parametrize(
+    "reply_format", ["{body}", " \n```json\n{body}\n```\n ", "```\r\n{body}\r\n```"]
+)
+def test_judge_sends_separate_windows_and_validates_all_decisions(inputs, reply_format):
     gold, predictions = inputs
     sources = load_sources(gold, data_dir=None, transcripts=TRANSCRIPTS)
     calls = []
-    rows = judge(gold, predictions, sources, fake_llm(calls))
+    rows = judge(gold, predictions, sources, fake_llm(calls, reply_format))
     assert len(calls) == 4 and len(rows) == 14
     assert all("untrusted data" in prompt for prompt, _ in calls)
     assert all("window" not in item for item in calls[0][1]["predictions"])
@@ -211,6 +214,35 @@ def test_judge_sends_separate_windows_and_validates_all_decisions(inputs):
     predictions["synthetic", "synthetic_en"]["items"][0]["text"] += " Drift."
     with pytest.raises(ContractError, match="does not match"):
         validate_judgments(rows, gold, predictions)
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        'Here is the JSON.\n```json\n{"decisions": []}\n```',
+        '```json\n{"decisions": []}\n```\nDone.',
+        '```json\n{"decisions": []}\n```\n```\n{}\n```',
+        '```json\n{"decisions": []}',
+        '```json\n{"decisions": [], "decisions": []}\n```',
+        '```json\n{"decisions": [], "score": NaN}\n```',
+        '```json\n{"decisions": [], "score": Infinity}\n```',
+    ],
+)
+def test_judge_rejects_invalid_json_replies(inputs, reply):
+    gold, predictions = inputs
+    sources = load_sources(gold, data_dir=None, transcripts=TRANSCRIPTS)
+    llm = fake_llm([])
+
+    def invalid_faithfulness_reply(**request):
+        response = llm(**request)
+        if "gold" not in json.loads(request["user_message"]):
+            response["text"] = reply
+        return response
+
+    with pytest.raises(
+        ContractError, match="^Judge faithfulness did not return valid JSON$"
+    ):
+        judge(gold, predictions, sources, invalid_faithfulness_reply)
 
 
 def test_score_report_cli_is_offline_and_refuses_overwrite(
