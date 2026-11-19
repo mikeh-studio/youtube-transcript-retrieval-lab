@@ -189,11 +189,19 @@ timestamp provenance. Use `--data-dir` to select the stored library or
 
 Use `judge --gold … --manifest … --predictions … --judge claude_cli --out judgments.jsonl`
 to opt into semantic judging. The other judge choices are `codex_cli`,
-`claude` and `chatgpt`. Each run makes separate requests for one-to-one
-semantic matches and faithfulness against the anchored segment plus 45 seconds
-on either side. A fallback timestamp uses a window centered on its start.
-Judgment rows bind to the exact gold and prediction rows and record judge
-provenance and the excerpts used for faithfulness.
+`claude` and `chatgpt`. Each run first makes one-to-one semantic matches,
+then grades faithfulness. The faithfulness window is the anchored segment plus
+45 seconds on either side. A fallback timestamp uses a window centered on its
+start. For a matched prediction, the window also includes the transcript lines
+of the matched gold point's spans, capped at 600 seconds from the first span
+start (`window_policy: anchor_plus_matched_gold_v1`). The judge checks each
+substantive claim against the supplied lines. A claim missing from those lines
+caps the item at partial, even if the episode states it elsewhere
+(`prompt_version: strict_claims_v2`). Speaker attribution and minor
+transcription variants of a name are not graded. Judgment rows bind to the
+exact gold and prediction rows and record judge provenance, the window policy,
+the prompt version and the excerpts used for faithfulness. Scoring rejects
+judgments that mix window policies or prompt versions.
 
 The CLI providers use existing local subscription logins. The Codex default
 model is `gpt-6-luna` (`YT_RAG_CODEX_LLM_MODEL`) and the Claude default is
@@ -226,6 +234,38 @@ review**, choose **Judge audit**, and import that JSONL file. Mark every decisio
 rate. Publish judged numbers only if owner agreement on the audit sample is
 at least **0.85**. The sample contains only machine decisions and their review
 inputs until an owner records their judgments.
+
+### Summary baseline
+
+The owner approved this baseline and its regression floors on 2026-11-19. A
+later run on the same gold that scores below a floor counts as a regression.
+The gold, predictions and judgments stay private. The digests identify the
+exact files.
+
+| Item | Value |
+| --- | --- |
+| Gold | 9 owner-reviewed sources (6 English, 3 Japanese, 10.6 hours), 71 key points (48 English, 23 Japanese). SHA-256 `70c5118f0075f9b515fef30b4ea19d3e114ecd6711293f5e371f35ef185082d2` |
+| System | `codex_cli:gpt-6-luna` (codex-cli 0.166.0), 5 items per source, 45 items. Predictions SHA-256 `0e413bb4c6d5204f52c0158e7e243cb92940bc22fe5ccef4402d1d22207aa415` |
+| Judge | `claude_cli:sonnet` (Claude Code 2.1.283), `anchor_plus_matched_gold_v1`, `strict_claims_v2`. Judgments SHA-256 `80b2a40f5e63361063dba8b67a4da4898f55fe281e55f6885d962b75bdf01877` |
+| Judge audit | The owner agreed with 18 of 20 sampled decisions (0.90): 10 of 10 matches and 8 of 10 faithfulness grades. In both disagreements, the judge graded an item supported when some of its claims were absent from the supplied lines. The strict prompt was written in response. On the same sample it agrees with all 20 owner decisions, but that recheck is not an independent estimate. |
+
+| Metric | Baseline | Regression floor | Goal |
+| --- | ---: | ---: | ---: |
+| `faithfulness_rate` | 0.556 | 0.50 | 0.90 |
+| `ts_hit@30s` | 0.581 | 0.50 | 0.80 |
+| `keypoint_recall_w` | 0.634 | 0.58 | — |
+| `keypoint_precision` | 0.956 | 0.90 | — |
+| `anchor_resolution_rate` | 0.733 | 0.70 | — |
+| `ts_hit@15s` | 0.488 | — | — |
+| `ts_mae_s` | 382 | — | — |
+| `keypoint_span_recall@30s` | 0.606 | — | — |
+| `partial_rate` | 0.422 | — | — |
+| `duplicate_anchor_rate` | 0.000 | — | — |
+| `language_match_rate` | 1.000 | — | — |
+
+The floors sit a few points below the baseline. One item out of 45 moves a
+rate by about 0.02, and repeated generations vary. The goals are targets, not
+gates.
 
 ## Assisted labeling
 
