@@ -6,8 +6,7 @@ import math
 from evals.contracts import ContractError
 from evals.evidence_spans import normalize_gold_evidence, span_matches, validate_overlap_ratio
 from evals.summary.dataset import by_key, objects
-from evals.summary.judge import DATA_RULE
-from pipelines.export_library import parse_json
+from evals.summary.judge import DATA_RULE, decode_judge_reply
 
 
 JUDGE_TASK = """Match each predicted theme to the gold theme with the same substantive
@@ -170,7 +169,7 @@ def _semantic_scores(gold, claims, llm):
         }, ensure_ascii=False),
     )
     try:
-        decoded = parse_json(response["text"])
+        decoded = decode_judge_reply(response["text"])
     except (KeyError, TypeError, ValueError) as exc:
         raise ContractError("Cross-source judge must return valid JSON") from exc
     if not isinstance(decoded, dict):

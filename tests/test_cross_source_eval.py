@@ -73,7 +73,10 @@ def _judge_decisions():
     }
 
 
-def test_collection_scope_and_semantic_judge_are_independent(fixture):
+@pytest.mark.parametrize(
+    "reply_format", ["{body}", "```json\n{body}\n```", "```\n{body}\n```"]
+)
+def test_collection_scope_and_semantic_judge_are_independent(fixture, reply_format):
     gold = fixture["qa"]["gold_spans"]
     prediction = fixture["collection"]
     assert score_collection(prediction, gold_spans=gold) == {
@@ -95,13 +98,32 @@ def test_collection_scope_and_semantic_judge_are_independent(fixture):
         assert second["evidence"] == third["evidence"] == []
         decisions = _judge_decisions()
         decisions["stances"].append({"id": "T1.P3", "supported": False})
-        return {"text": json.dumps(decisions)}
+        return {"text": reply_format.format(body=json.dumps(decisions))}
 
     assert score_collection(prediction, gold_spans=gold, gold_themes=fixture["gold_themes"],
                             judge_llm=judge) == {
         "answer_source_coverage": 1 / 3, "answer_span_recall": 1 / 3,
         "theme_recall": 0.5, "stance_source_precision": 1 / 3,
     }
+
+
+@pytest.mark.parametrize(
+    "reply_format",
+    [
+        "Here is the JSON.\n```json\n{body}\n```",
+        "```json\n{body}\n```\nDone.",
+        "```json\n{body}\n```\n```\n{{}}\n```",
+        "```json\n{body}",
+        '```json\n{{"theme_matches": [], "theme_matches": []}}\n```',
+    ],
+)
+def test_collection_judge_rejects_invalid_json_replies(fixture, reply_format):
+    reply = reply_format.format(body=json.dumps(_judge_decisions()))
+    with pytest.raises(ContractError, match="^Cross-source judge must return valid JSON$"):
+        score_collection(
+            fixture["collection"], gold_themes=fixture["gold_themes"],
+            judge_llm=lambda **_: {"text": reply},
+        )
 
 
 @pytest.mark.parametrize("field", ["stances", "theme_matches"])
