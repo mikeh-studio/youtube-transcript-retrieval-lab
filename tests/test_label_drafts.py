@@ -390,10 +390,26 @@ def test_shared_runner_caches_probes_and_hides_new_job_diagnostics(monkeypatch):
     assert "OPENAI_API_KEY" not in kwargs["env"]
 
 
+@pytest.mark.parametrize("provider, model, expected", [
+    ("claude_cli", None, ("claude_cli", "opus")),
+    ("claude_cli", "sonnet", ("claude_cli", "sonnet")),
+    ("codex_cli", "configured-model", ("codex_cli", "configured-model")),
+])
+def test_section_draft_uses_an_explicitly_configured_drafter(
+    workflow, monkeypatch, provider, model, expected
+):
+    service, codex, _ = workflow
+    monkeypatch.setenv("YT_RAG_LABEL_DRAFTER", provider)
+    if model:
+        monkeypatch.setenv("YT_RAG_LABEL_DRAFTER_MODEL", model)
+    codex.output = {"sections": [{"title": "Whole lesson", "start_line": 1, "end_line": 5}]}
+    job = service.start_job("sections", [SOURCE_ID], "en")
+    assert wait_for_job(service, job["job_id"])["status"] == "completed"
+    assert codex.selection == expected
+
+
 def test_section_draft_resolves_lines_and_publishes_reviewed_boundary_seconds(workflow, monkeypatch):
     service, codex, source = workflow
-    monkeypatch.setenv("YT_RAG_LABEL_DRAFTER", "claude_cli")
-    monkeypatch.setenv("YT_RAG_LABEL_DRAFTER_MODEL", "opus")
     codex.output = {
         "sections": [
             {"title": "Gate and cleanup", "start_line": 4, "end_line": 5},

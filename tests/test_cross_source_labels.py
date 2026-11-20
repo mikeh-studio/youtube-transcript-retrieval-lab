@@ -14,8 +14,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def _draft(task, tmp_path, monkeypatch, proposal):
-    monkeypatch.setenv("YT_RAG_LABEL_DRAFTER", "claude_cli")
-    monkeypatch.setenv("YT_RAG_LABEL_DRAFTER_MODEL", "unused-claude-model")
+    monkeypatch.delenv("YT_RAG_LABEL_DRAFTER", raising=False)
+    monkeypatch.delenv("YT_RAG_LABEL_DRAFTER_MODEL", raising=False)
     calls = []
 
     def drafter(**kwargs):

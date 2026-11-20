@@ -147,12 +147,14 @@ span timestamps in seconds. The matching manifest records the JSONL SHA-256
 and counts for each review decision. Use the manifest to identify completed
 datasets.
 
-Choose **Episode sections** to draft topic boundaries and titles with Codex
-from numbered transcript lines. The review form accepts title and boundary
-edits in seconds. Finalized rows under `data/evaluation/labels/sections/`
-contain `title`, `start` and `end` with the same source and review provenance.
-The Codex model uses its usual default unless a compatible
-`YT_RAG_LABEL_DRAFTER_MODEL` override is set.
+Choose **Episode sections** to draft topic boundaries and titles from numbered
+transcript lines. The review form accepts title and boundary edits in seconds.
+Finalized rows under `data/evaluation/labels/sections/` contain `title`, `start`
+and `end` with the same source and review provenance. Sections and the
+multi-source tasks default to `codex_cli` with its usual model. An explicit
+`YT_RAG_LABEL_DRAFTER` applies to them too, so `claude_cli` drafts with `opus`
+unless `YT_RAG_LABEL_DRAFTER_MODEL` names another model. To keep the gold
+independent, use a drafter that is not the system under evaluation.
 
 ### Episode key areas API
 
@@ -237,8 +239,8 @@ Reused transcripts have no timing sample.
 ### Cross-source labels and evaluation
 
 In **Label review**, choose **Multi-source questions** or **Collection themes**
-and select 2–12 sources. Codex drafts both tasks from numbered transcript
-excerpts. Finalized JSONL rows include `selected_source_ids`, source fingerprints,
+and select 2–12 sources. Both tasks are drafted from numbered transcript
+excerpts, by Codex unless `YT_RAG_LABEL_DRAFTER` selects another drafter. Finalized JSONL rows include `selected_source_ids`, source fingerprints,
 and owner review provenance. Question labels include `question`, `required_facts`,
 and timestamped `gold_spans` across two or more sources. Theme labels include
 `title` and `source_ids` for the sources that discuss the theme.

@@ -576,10 +576,11 @@ class LabelDraftService:
 
     def _model_labels(self, job, spec, sources):
         configured_provider = (os.environ.get("YT_RAG_LABEL_DRAFTER") or "").strip()
-        provider = (
+        # Sections and cross-source tasks default to Codex; an explicit setting applies to every task.
+        provider = configured_provider or (
             "codex_cli"
             if job["task"] == "sections" or spec.min_sources > 1
-            else configured_provider or "claude_cli"
+            else "claude_cli"
         )
         if provider not in ("codex_cli", "claude_cli"):
             raise LabelDraftError("INVALID_DRAFTER", "Choose codex_cli or claude_cli.")
