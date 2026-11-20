@@ -21,7 +21,9 @@ from local_preview import audio_labels, cross_source_labels
 from local_preview.digest import DigestNotFound, REVIEW_RELATIONS
 from local_preview.judge_audit import validate_sample
 from local_preview.local_files import json_bytes as _json_bytes, write_atomic as _write_atomic
-from local_preview.transcript_lines import fingerprint_lines, format_lines, numbered_lines
+from local_preview.transcript_lines import (
+    fingerprint_lines, format_lines, numbered_lines, transcript_line_map,
+)
 from multilingual.source_model import canonical_url, playback_target
 
 
@@ -133,7 +135,7 @@ def _keypoints(generated, sources):
             "INVALID_DRAFTER_OUTPUT", "The drafter must propose 5 to 8 key points.", 502
         )
     source = sources[0]
-    line_map = {line["line"]: line for line in source["sample"]}
+    line_map = transcript_line_map(source)
     seen = set()
     items = []
     for candidate in candidates:
@@ -240,7 +242,7 @@ def _sections(generated, sources):
             "INVALID_DRAFTER_OUTPUT", "The drafter must propose episode sections.", 502
         )
     source = sources[0]
-    line_map = {line["line"]: line for line in source["sample"]}
+    line_map = transcript_line_map(source)
     items = []
     seen = set()
     for row in candidates:
@@ -513,6 +515,8 @@ class LabelDraftService:
                 )
                 if not audio_task and digest is None:
                     metadata["sample"] = _sample_lines(lines, budget)
+                    # Resolve line IDs against the full transcript, not only the sampled lines.
+                    metadata["lines"] = lines
                 sources.append(metadata)
             if audio_task:
                 try:
@@ -539,7 +543,7 @@ class LabelDraftService:
                 "created_at": timestamp,
                 "updated_at": timestamp,
                 "sources": [
-                    {key: value for key, value in source.items() if key != "sample"}
+                    {key: value for key, value in source.items() if key not in ("sample", "lines")}
                     for source in sources
                 ],
                 "notes": notes,

@@ -408,6 +408,26 @@ def test_section_draft_uses_an_explicitly_configured_drafter(
     assert codex.selection == expected
 
 
+def test_section_draft_keeps_sections_on_lines_left_out_of_a_sampled_transcript(
+    workflow, monkeypatch
+):
+    service, codex, _ = workflow
+    # A budget this small keeps only some lines, as with a multi-hour episode.
+    monkeypatch.setattr("local_preview.label_drafts.MAX_CONTEXT_CHARS", 110)
+    codex.output = {"sections": [
+        {"title": "Lane and cart", "start_line": 1, "end_line": 2},
+        {"title": "Sorting and gate", "start_line": 3, "end_line": 4},
+    ]}
+    job = service.start_job("sections", [SOURCE_ID], "en")
+    finished = wait_for_job(service, job["job_id"])
+    assert finished["status"] == "completed", finished
+    prompt, _ = codex.calls[0]
+    assert "[0003]" in prompt and "[0002]" not in prompt and "[0004]" not in prompt
+    draft = service.get_draft(finished["draft_id"])
+    assert [(item["start"], item["end"]) for item in draft["items"]] == [(0.25, 34), (49, 90)]
+    assert all("lines" not in source and "sample" not in source for source in draft["sources"])
+
+
 def test_section_draft_resolves_lines_and_publishes_reviewed_boundary_seconds(workflow, monkeypatch):
     service, codex, source = workflow
     codex.output = {
