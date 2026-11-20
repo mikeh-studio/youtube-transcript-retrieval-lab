@@ -147,8 +147,11 @@ span timestamps in seconds. The matching manifest records the JSONL SHA-256
 and counts for each review decision. Use the manifest to identify completed
 datasets.
 
-Choose **Episode sections** to draft topic boundaries and titles from numbered
-transcript lines. The review form accepts title and boundary edits in seconds.
+Choose **Episode sections** to draft section boundaries and titles from numbered
+transcript lines. A section is a block the show itself treats as one unit, such
+as a game discussion, a team preview or a run of listener questions, so loosely
+structured shows and streams get as many sections as they have. Pieces under
+about 90 seconds join a neighbor, and ad reads are left out. The review form accepts title and boundary edits in seconds.
 Finalized rows under `data/evaluation/labels/sections/` contain `title`, `start`
 and `end` with the same source and review provenance. Sections and the
 multi-source tasks default to `codex_cli` with its usual model. An explicit

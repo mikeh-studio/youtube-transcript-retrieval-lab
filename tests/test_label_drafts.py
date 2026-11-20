@@ -423,6 +423,9 @@ def test_section_draft_resolves_lines_and_publishes_reviewed_boundary_seconds(wo
     assert finished["status"] == "completed"
     assert codex.selection == ("codex_cli", None)
     prompt, schema = codex.calls[0]
+    assert "blocks the show itself treats as one unit" in prompt
+    assert "There is no target number of sections" in prompt
+    assert "Leave ad reads out entirely" in prompt
     assert "[0004] 1:20 Swing the gate outward." in prompt
     assert source["title"] not in prompt and source["summary"] not in prompt
     assert schema.name == "label_sections.schema.json" and schema.is_file()
