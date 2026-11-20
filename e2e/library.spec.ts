@@ -56,7 +56,7 @@ test("lists indexed videos with corpus stats and catalog status", async ({ page 
   await page.goto("/index.html#/ingest");
 
   const stats = page.getByLabel("Library summary");
-  await expect(stats).toContainText("2Indexed videos");
+  await expect(stats).toContainText("2Indexed sources");
   await expect(stats).toContainText("163Searchable chunks");
   await expect(stats).toContainText("1 of 2Linked to catalog");
 
@@ -75,7 +75,7 @@ test("lists indexed videos with corpus stats and catalog status", async ({ page 
   await page.getByLabel("Filter by language").selectOption("en");
   await expect(page.locator("tbody tr")).toHaveCount(1);
   await page.getByLabel("Filter by language").selectOption("");
-  await page.getByLabel("Filter videos").fill("frieren");
+  await page.getByLabel("Filter sources").fill("frieren");
   await expect(page.locator("tbody tr")).toHaveCount(1);
 });
 

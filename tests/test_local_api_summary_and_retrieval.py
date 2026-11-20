@@ -24,6 +24,7 @@ LocalRAGService = local_api.LocalRAGService
 
 def _make_service(enabled=True):
     service = LocalRAGService.__new__(LocalRAGService)
+    service.library_write_lock = threading.RLock()
     service.feedback = {}
     service.feedback_index = {}
     service.feedback_lock = threading.Lock()
@@ -189,6 +190,7 @@ def test_list_videos_includes_chunking_metadata():
                 "metadata_provider": "legacy",
                 "fetched_at": None,
             },
+            "source_type": "youtube",
             "language": "en",
             "num_chunks": 1,
             "chunking_version": "time_v1_45s_15s",

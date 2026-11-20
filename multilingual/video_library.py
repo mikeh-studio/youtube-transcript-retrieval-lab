@@ -1,9 +1,9 @@
 """
 Multi-video library with persistent storage and multilingual support.
 
-Manages a collection of YouTube video transcripts with a unified FAISS index
-for cross-video semantic search. Each video has an associated language code
-that determines transcript fetching and tokenization.
+Manages a collection of transcripts with a unified FAISS index for cross-source
+semantic search. Each record has a language code that determines tokenization
+and, for YouTube, transcript fetching.
 """
 
 import json
@@ -23,19 +23,30 @@ except Exception:
     pass
 
 import faiss
+import math
 import re
+import tempfile
 import time
+from contextlib import contextmanager
 from html import unescape
+from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from urllib.request import Request, urlopen
 from youtube_transcript_api import YouTubeTranscriptApi
 
+from multilingual.source_model import (
+    SOURCE_ID_RE,
+    canonical_url,
+    is_youtube,
+    normalize_source,
+    timestamp_url,
+)
 from multilingual.text_processing import TextProcessor, LANGUAGE_CONFIG
 from multilingual.youtube_metadata import (
     YouTubeMetadataClient,
+    canonical_youtube_url,
     merge_youtube_sources,
-    normalize_youtube_source,
 )
 
 CHUNK_WINDOW_SECONDS = 60
@@ -52,12 +63,17 @@ LEGACY_EMBEDDING_METADATA = {
 }
 
 
-def _chmod_private(path: str) -> None:
-    """Best-effort chmod for locally persisted transcript metadata."""
+@contextmanager
+def _atomic_library_path(path):
+    """Write a mode-600 file beside its destination before replacing it."""
+    with tempfile.NamedTemporaryFile(dir=Path(path).parent, delete=False) as stream:
+        temporary = Path(stream.name)
     try:
-        os.chmod(path, 0o600)
-    except OSError:
-        pass
+        yield str(temporary)
+        temporary.chmod(0o600)
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 class VideoLibrary:
@@ -150,6 +166,8 @@ class VideoLibrary:
 
         existing_video = self.videos.get(video_id)
         if isinstance(existing_video, dict):
+            if not is_youtube(existing_video.get("source")):
+                raise ValueError(f"Source {video_id} is not a YouTube video.")
             existing_video.setdefault("summary_cache", {})
             if not self.video_chunking_is_stale(video_id):
                 print(f"Video {video_id} is already in the library.")
@@ -178,9 +196,9 @@ class VideoLibrary:
 
         # Fetch video title
         title = self._fetch_title(video_id)
-        source = normalize_youtube_source(video_id)
+        source = normalize_source(video_id)
         if isinstance(existing_video, dict):
-            source = normalize_youtube_source(
+            source = normalize_source(
                 video_id,
                 existing_video.get("source"),
             )
@@ -192,7 +210,7 @@ class VideoLibrary:
 
         # Store video data with language
         self.videos[video_id] = {
-            "url": f"https://www.youtube.com/watch?v={video_id}",
+            "url": canonical_url(source),
             "title": title,
             "source": source,
             "language": language,
@@ -207,6 +225,99 @@ class VideoLibrary:
 
         print(f"Added video: {title} ({video_id}) [{language}] - {len(chunks)} chunks")
         return video_id
+
+    def add_transcribed_source(self, source_id, segments, *, language, title, source, persist=False):
+        """Index an already-transcribed audio source using the current chunking."""
+        if not isinstance(source_id, str) or not SOURCE_ID_RE.fullmatch(source_id):
+            raise ValueError("Invalid source ID.")
+        source = normalize_source(source_id, source)
+        if is_youtube(source):
+            raise ValueError("A transcribed audio source must specify an audio platform.")
+        previous = self.videos.get(source_id)
+        if previous is not None and normalize_source(
+            source_id, previous.get("source")
+        )["platform"] != source["platform"]:
+            raise ValueError(f"Source {source_id} already belongs to another platform.")
+        if language not in LANGUAGE_CONFIG:
+            raise ValueError(f"Unsupported language '{language}'.")
+
+        transcript = []
+        for segment in segments:
+            start = float(segment["start"])
+            end = (
+                float(segment["end"])
+                if "end" in segment
+                else start + float(segment["duration"])
+            )
+            if not (0 <= start <= end < math.inf):
+                raise ValueError("Transcript segments must have finite, ordered timestamps.")
+            row = {"text": segment["text"], "start": start, "duration": end - start}
+            if "speaker" in segment:
+                row["speaker"] = segment["speaker"]
+            transcript.append(row)
+        transcript.sort(key=lambda row: row["start"])
+        lines = self.processor.process_transcript(transcript, language)
+        self._replace_transcribed_record(
+            source_id,
+            {
+                "url": canonical_url(source),
+                "title": title,
+                "source": source,
+                "language": language,
+                "full_transcript": self._build_full_transcript(lines),
+            },
+            lines,
+            persist=persist,
+        )
+        return source_id
+
+    def rechunk_from_transcript(self, source_id):
+        """Rebuild chunks and embeddings from the stored canonical segments."""
+        video = self.videos[source_id]
+        transcript = video.get("full_transcript")
+        if not isinstance(transcript, dict) or not transcript.get("segments"):
+            raise ValueError(f"Source {source_id} has no stored transcript segments.")
+        lines = self.processor.reconstruct_lines_from_transcript(
+            transcript, video["language"]
+        )
+        self._replace_transcribed_record(source_id, video, lines, persist=True)
+        return source_id
+
+    def _replace_transcribed_record(self, source_id, video, lines, *, persist=False):
+        chunks = self.processor.chunk_by_time_with_overlap(
+            lines, window=CHUNK_WINDOW_SECONDS, overlap=CHUNK_OVERLAP_SECONDS
+        )
+        if not chunks:
+            raise ValueError(f"Source {source_id} has no readable transcript chunks.")
+        previous = self.videos.get(source_id)
+        previous_index = (
+            self.index,
+            self.chunk_map,
+            self.index_embedding_metadata,
+            self._preserve_saved_index,
+        )
+        self.videos[source_id] = {
+            **video,
+            "chunks": chunks,
+            "summary_cache": {},
+            "chunking": self.current_chunking_metadata(),
+        }
+        try:
+            self._rebuild_index()
+            if persist:
+                self.save()
+        except Exception:
+            if previous is None:
+                del self.videos[source_id]
+            else:
+                self.videos[source_id] = previous
+            (
+                self.index,
+                self.chunk_map,
+                self.index_embedding_metadata,
+                self._preserve_saved_index,
+            ) = previous_index
+            raise
 
     @staticmethod
     def _derive_chunking_version(window_seconds, overlap_seconds):
@@ -292,13 +403,10 @@ class VideoLibrary:
             start = float(line.get("start", 0.0))
             duration = float(line.get("duration", 0.0))
             end = max(start, start + duration)
-            segments.append(
-                {
-                    "start": start,
-                    "end": end,
-                    "text": raw_text,
-                }
-            )
+            segment = {"start": start, "end": end, "text": raw_text}
+            if "speaker" in line:
+                segment["speaker"] = line["speaker"]
+            segments.append(segment)
 
         full_text = "\n".join(seg["text"] for seg in segments)
         return {
@@ -348,7 +456,7 @@ class VideoLibrary:
 
     def _fetch_transcript_from_watch_page(self, video_id, transcript_codes):
         """Fallback transcript extraction using ytInitialPlayerResponse + json3 captions."""
-        watch_url = f"https://www.youtube.com/watch?v={video_id}"
+        watch_url = canonical_youtube_url(video_id)
         req = Request(watch_url, headers={"User-Agent": "Mozilla/5.0"})
         with self._open_with_retry(req, timeout=20) as response:
             html = response.read().decode("utf-8", errors="ignore")
@@ -496,15 +604,13 @@ class VideoLibrary:
         """
         result = []
         for vid, data in self.videos.items():
+            source = normalize_source(vid, data.get("source"))
             result.append(
                 {
                     "video_id": vid,
                     "title": data["title"],
-                    "url": data["url"],
-                    "source": normalize_youtube_source(
-                        vid,
-                        data.get("source"),
-                    ),
+                    "url": data.get("url") or canonical_url(source),
+                    "source": source,
                     "language": data.get("language", "ja"),
                     "num_chunks": len(data["chunks"]),
                     "chunking_version": self.get_video_chunking_metadata(vid)[
@@ -517,30 +623,27 @@ class VideoLibrary:
 
     def _rebuild_index(self):
         """Rebuild the unified FAISS index from all video chunks."""
-        self.chunk_map = []
+        chunk_map = []
         all_chunks = []
 
         for video_id, data in self.videos.items():
             for chunk_idx, chunk in enumerate(data["chunks"]):
                 all_chunks.append(chunk)
-                self.chunk_map.append((video_id, chunk_idx))
+                chunk_map.append((video_id, chunk_idx))
 
-        if not all_chunks:
-            self.index = None
-            self.index_embedding_metadata = self.processor.embedding_metadata()
-            self._preserve_saved_index = False
-            return
-
-        print(f"Generating embeddings for {len(all_chunks)} total chunks...")
-        embeddings = self.processor.generate_embeddings(all_chunks)
-
-        faiss.omp_set_num_threads(1)
-        dim = embeddings.shape[1]
-        self.index = faiss.IndexFlatIP(dim)
-        self.index.add(embeddings)
+        index = None
+        if all_chunks:
+            print(f"Generating embeddings for {len(all_chunks)} total chunks...")
+            embeddings = self.processor.generate_embeddings(all_chunks)
+            faiss.omp_set_num_threads(1)
+            index = faiss.IndexFlatIP(embeddings.shape[1])
+            index.add(embeddings)
         self.index_embedding_metadata = self.processor.embedding_metadata()
+        self.index = index
+        self.chunk_map = chunk_map
         self._preserve_saved_index = False
-        print(f"FAISS index rebuilt with {self.index.ntotal} vectors")
+        if index is not None:
+            print(f"FAISS index rebuilt with {index.ntotal} vectors")
 
     def _dominant_language(self):
         """Return the most common language across stored videos, or None if empty."""
@@ -662,6 +765,7 @@ class VideoLibrary:
                 continue
             video_data = self.videos[video_id]
             chunk = video_data["chunks"][chunk_idx]
+            source = normalize_source(video_id, video_data.get("source"))
 
             results.append(
                 {
@@ -669,17 +773,14 @@ class VideoLibrary:
                     "score": float(score),
                     "video_id": video_id,
                     "video_title": video_data["title"],
-                    "video_url": video_data["url"],
-                    "source": normalize_youtube_source(
-                        video_id,
-                        video_data.get("source"),
-                    ),
+                    "video_url": video_data.get("url") or canonical_url(source),
+                    "source": source,
                     "language": video_data.get("language", "ja"),
                     "chunk_index": chunk_idx,
                     "text": chunk["raw_text"],
                     "start": chunk["start"],
                     "end": chunk["end"],
-                    "url": f"https://www.youtube.com/watch?v={video_id}&t={int(chunk['start'])}s",
+                    "url": timestamp_url(source, chunk["start"]),
                 }
             )
             if len(results) >= k:
@@ -694,13 +795,6 @@ class VideoLibrary:
         os.makedirs(self._videos_dir(), exist_ok=True)
         os.makedirs(self._index_dir(), exist_ok=True)
 
-        # Save FAISS index
-        index_path = self._index_path()
-        if self.index is not None:
-            faiss.write_index(self.index, index_path)
-        elif os.path.exists(index_path) and not self._preserve_saved_index:
-            os.remove(index_path)
-
         # Save library manifest
         manifest = {
             "format_version": LIBRARY_FORMAT_VERSION,
@@ -711,11 +805,6 @@ class VideoLibrary:
             },
             "videos": list(self.videos.keys()),
         }
-
-        manifest_path = self._manifest_path()
-        with open(manifest_path, "w", encoding="utf-8") as f:
-            json.dump(manifest, f, ensure_ascii=False, indent=2)
-        _chmod_private(manifest_path)
 
         existing_video_dirs = set()
         if os.path.isdir(self._videos_dir()):
@@ -728,23 +817,31 @@ class VideoLibrary:
         for vid, data in self.videos.items():
             video_dir = os.path.join(self._videos_dir(), vid)
             os.makedirs(video_dir, exist_ok=True)
+            source = normalize_source(vid, data.get("source"))
             record = {
-                "url": data["url"],
+                "url": data.get("url") or canonical_url(source),
                 "title": data["title"],
-                "source": normalize_youtube_source(
-                    vid,
-                    data.get("source"),
-                ),
+                "source": source,
                 "language": data.get("language", "ja"),
                 "chunks": data["chunks"],
                 "full_transcript": data.get("full_transcript"),
                 "chunking": self._normalize_chunking_metadata(data.get("chunking")),
             }
-            record_path = self._video_record_path(vid)
-            with open(record_path, "w", encoding="utf-8") as f:
-                json.dump(record, f, ensure_ascii=False, indent=2)
-            _chmod_private(record_path)
+            with _atomic_library_path(self._video_record_path(vid)) as temporary:
+                with open(temporary, "w", encoding="utf-8") as f:
+                    json.dump(record, f, ensure_ascii=False, indent=2)
             existing_video_dirs.discard(vid)
+
+        index_path = self._index_path()
+        if self.index is not None:
+            with _atomic_library_path(index_path) as temporary:
+                faiss.write_index(self.index, temporary)
+        elif os.path.exists(index_path) and not self._preserve_saved_index:
+            os.remove(index_path)
+
+        with _atomic_library_path(self._manifest_path()) as temporary:
+            with open(temporary, "w", encoding="utf-8") as f:
+                json.dump(manifest, f, ensure_ascii=False, indent=2)
 
         for stale_video_id in existing_video_dirs:
             record_path = self._video_record_path(stale_video_id)
@@ -928,14 +1025,15 @@ class VideoLibrary:
     def _normalize_video_record(
         self, video_id, data, *, fallback_chunking=None, include_summary_cache=False
     ):
+        source = normalize_source(
+            video_id,
+            data.get("source"),
+            legacy=not isinstance(data.get("source"), dict),
+        )
         normalized = {
-            "url": data.get("url", f"https://www.youtube.com/watch?v={video_id}"),
+            "url": data.get("url") or canonical_url(source),
             "title": data.get("title", f"Video {video_id}"),
-            "source": normalize_youtube_source(
-                video_id,
-                data.get("source"),
-                legacy=not isinstance(data.get("source"), dict),
-            ),
+            "source": source,
             "language": data.get("language", "ja"),
             "chunks": data.get("chunks", []),
             "summary_cache": {},
@@ -976,10 +1074,10 @@ class VideoLibrary:
 
         candidates = []
         for video_id in requested:
-            source = normalize_youtube_source(
-                video_id,
-                self.videos[video_id].get("source"),
-            )
+            raw_source = self.videos[video_id].get("source")
+            if not is_youtube(raw_source):
+                continue
+            source = normalize_source(video_id, raw_source)
             provider = source.get("metadata_provider")
             if force or provider in {"fallback", "legacy"}:
                 candidates.append(video_id)
@@ -998,11 +1096,13 @@ class VideoLibrary:
             if not isinstance(result, dict):
                 continue
             incoming_source = result.get("source")
-            existing_source = normalize_youtube_source(
+            existing_source = normalize_source(
                 video_id,
                 data.get("source"),
             )
             merged_source = merge_youtube_sources(existing_source, incoming_source)
+            if "published_at" in existing_source:
+                merged_source["published_at"] = existing_source["published_at"]
             title = str(result.get("title") or "").strip()
             changed = merged_source != existing_source
             if title and title != data.get("title"):

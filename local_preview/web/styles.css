@@ -3394,6 +3394,37 @@ th {
   padding-bottom: 0.55rem;
 }
 
+.lab-audio-fields {
+  margin-top: 0.75rem;
+}
+
+.lab-audio-fields > label {
+  justify-self: start;
+}
+
+.lab-audio-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.6rem;
+}
+
+.lab-audio-form .lab-add-url {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+
+.lab-audio-form select,
+.lab-audio-form input,
+#reviewAudio {
+  max-width: 100%;
+}
+
+.lab-audio-fields progress {
+  display: block;
+  margin-top: 0.35rem;
+}
+
 .lab-segmented {
   display: inline-flex;
   border: 1px solid var(--line);

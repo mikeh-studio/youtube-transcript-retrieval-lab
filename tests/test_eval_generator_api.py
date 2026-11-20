@@ -91,10 +91,10 @@ class FakeService:
         return self.generator
 
 
-def _request(method, path, body=None):
+def _request(method, path, body=None, *, request_headers=None, authenticated=True):
     encoded = json.dumps(body).encode("utf-8") if body is not None else None
     request_lines = [f"{method} {path} HTTP/1.1", "Host: 127.0.0.1:8000"]
-    if method not in {"GET", "HEAD", "OPTIONS"}:
+    if authenticated and method not in {"GET", "HEAD", "OPTIONS"}:
         status, headers, payload = _request("GET", "/browser-session")
         assert status == 200
         token = json.loads(payload)["csrf_token"]
@@ -105,6 +105,9 @@ def _request(method, path, body=None):
                 "X-CSRF-Token: " + token,
             ]
         )
+    request_lines.extend(
+        f"{name}: {value}" for name, value in (request_headers or {}).items()
+    )
     if encoded is not None:
         request_lines.extend(
             ["Content-Type: application/json", f"Content-Length: {len(encoded)}"]

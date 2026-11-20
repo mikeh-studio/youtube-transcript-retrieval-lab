@@ -21,7 +21,7 @@ import traceback
 import uuid
 from collections import Counter
 from copy import deepcopy
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, replace
 from datetime import datetime, timezone
 from functools import lru_cache
 import hashlib
@@ -60,15 +60,19 @@ if load_dotenv is not None:
     load_dotenv(ROOT_DIR / ".env.local", override=True)
 
 from browser_boundary import BrowserBoundary  # noqa: E402
+from local_preview.audio_ingest import AudioIngestQueue, IngestJob  # noqa: E402
+from local_preview.audio_media import VIDEO_TYPES, serve_media  # noqa: E402
 from local_preview.collection_summary import (  # noqa: E402
     CollectionSummaryError,
     build_collection_summary,
     collection_source_ids,
 )
+from local_preview.feeds import preview_feed  # noqa: E402
 from local_preview.key_areas import KeyAreasGenerationError, cached_key_areas  # noqa: E402
 from local_preview.lexical_index import LexicalIndex  # noqa: E402
 from local_preview.retrieval_diagnostics import has_retrieval_failure  # noqa: E402
 from local_preview.summary_timestamps import parse_summary_timestamp  # noqa: E402
+from local_preview.stt.base import capabilities as stt_capabilities  # noqa: E402
 from local_preview.transcript_lines import numbered_lines  # noqa: E402
 
 _LEXICAL_INDEX_LOCK = threading.Lock()
@@ -78,12 +82,15 @@ from multilingual.reranker import (  # noqa: E402
     CrossEncoderReranker,
     DEFAULT_RERANK_CANDIDATES,
 )
+from multilingual.source_model import (  # noqa: E402
+    canonical_url,
+    is_youtube,
+    normalize_source,
+    timestamp_url,
+)
 from multilingual.text_processing import LANGUAGE_CONFIG  # noqa: E402
 from multilingual.video_routing import MultiVectorVideoRouter  # noqa: E402
-from multilingual.youtube_metadata import (  # noqa: E402
-    normalize_youtube_source,
-    youtube_timestamp_url,
-)
+from multilingual.youtube_metadata import canonical_youtube_url  # noqa: E402
 from pipelines.embed_ocr import embed_ocr  # noqa: E402
 from pipelines.extract_frames import extract_frames  # noqa: E402
 from pipelines.run_ocr import run_ocr  # noqa: E402
@@ -96,19 +103,19 @@ from pipelines.video_ocr_common import (  # noqa: E402
 )
 from retrieval.ocr_retriever import OCREvidenceRetriever  # noqa: E402
 from retrieval.search_multimodal import merge_evidence  # noqa: E402
-from feedback_keys import (  # noqa: E402
+from local_preview.feedback_keys import (  # noqa: E402
     feedback_chunk_key,
     feedback_query_hash,
     feedback_record_key,
     normalize_feedback_query,
 )
-from agentic_retrieval import (  # noqa: E402
+from local_preview.agentic_retrieval import (  # noqa: E402
     heuristic_query_rewrite,
     normalize_query_for_compare,
     run_agentic_tool_search,
 )
-from retrieval_tools import TranscriptRetrievalTools  # noqa: E402
-from grounded_answer import (  # noqa: E402
+from local_preview.retrieval_tools import TranscriptRetrievalTools  # noqa: E402
+from local_preview.grounded_answer import (  # noqa: E402
     ANSWER_CONFIDENCE_LEVELS,
     ANSWER_STATUSES,
     assess_grounded_answer_evidence,
@@ -120,7 +127,7 @@ from grounded_answer import (  # noqa: E402
     default_insufficient_answer,
     normalize_grounded_answer_payload,
 )
-from eval_generator import EvalGeneratorError, EvalGeneratorService  # noqa: E402
+from local_preview.eval_generator import EvalGeneratorError, EvalGeneratorService  # noqa: E402
 from local_preview.cli_llm import CLI_LLM, CLI_MODELS, resolve_cli_model  # noqa: E402
 from local_preview.codex_runner import CodexRunnerError  # noqa: E402
 from local_preview.label_drafts import LabelDraftError, LabelDraftService  # noqa: E402
@@ -330,7 +337,7 @@ STUDY_MODEL_PROFILES = {
 ASK_HISTORY_LIMIT_PER_VIDEO = 20
 ASK_HISTORY_LIST_LIMIT_MAX = 100
 LOCALHOST_CORS_HOSTS = {"127.0.0.1", "localhost", "::1"}
-LOCAL_VIDEO_EXTENSIONS = {".mp4", ".m4v", ".mov", ".mkv", ".webm"}
+LOCAL_VIDEO_EXTENSIONS = VIDEO_TYPES.keys()
 EVIDENCE_INCLUDED_TRUE = {"1", "true", "yes", "included", "eligible"}
 EVIDENCE_INCLUDED_FALSE = {"0", "false", "no", "excluded", "ineligible"}
 
@@ -574,7 +581,7 @@ def expand_playlist_ids(url: str) -> List[str]:
 
 
 def fetch_video_title(video_id: str) -> Optional[str]:
-    watch_url = f"https://www.youtube.com/watch?v={video_id}"
+    watch_url = canonical_youtube_url(video_id)
     user_agent = {"User-Agent": "Mozilla/5.0"}
 
     # First try oEmbed (lightweight and usually reliable without API keys).
@@ -608,21 +615,6 @@ def fetch_video_title(video_id: str) -> Optional[str]:
 
 
 @dataclass
-class IngestJob:
-    job_id: str
-    video_id: str
-    url: str
-    language: str
-    mode: str
-    status: str
-    attempts: int
-    error_code: Optional[str]
-    error_message: Optional[str]
-    created_at: str
-    updated_at: str
-
-
-@dataclass
 class LocalVideoOCRJob:
     job_id: str
     video_id: str
@@ -643,6 +635,8 @@ class LocalVideoOCRJob:
 class LocalRAGService:
     def __init__(self, *, engine=None):
         self.lock = threading.Lock()
+        self.library_write_lock = threading.RLock()
+        self._audio_ingest = None
         self.engine = RAGEngine() if engine is None else engine
         self.openai_model = (
             str(os.environ.get("OPENAI_MODEL") or "gpt-5.4-mini").strip()
@@ -749,10 +743,22 @@ class LocalRAGService:
 
     def _update_job(self, job_id: str, **updates) -> None:
         with self.lock:
-            job = self.jobs[job_id]
-            for key, value in updates.items():
-                setattr(job, key, value)
-            job.updated_at = now_iso()
+            self.jobs[job_id] = replace(self.jobs[job_id], updated_at=now_iso(), **updates)
+
+    def start_audio_ingest(self, payload: dict) -> IngestJob:
+        """Submit audio to the server's single background worker."""
+        with self.lock:
+            if self._audio_ingest is None:
+                self._audio_ingest = AudioIngestQueue(
+                    library=self.engine.library,
+                    write_lock=self.library_write_lock,
+                    root_dir=ROOT_DIR,
+                    clock=now_iso,
+                    store_job=self._store_job,
+                    update_job=self._update_job,
+                    mark_router_stale=self._mark_video_router_stale,
+                )
+        return self._audio_ingest.submit(payload)
 
     def _ensure_ocr_job_state(self) -> None:
         if not hasattr(self, "ocr_lock"):
@@ -805,7 +811,7 @@ class LocalRAGService:
 
     def _hydrate_video_title(self, video_id: str) -> None:
         video = self.engine.library.videos.get(video_id)
-        if not video:
+        if not video or not is_youtube(video.get("source")):
             return
         current = str(video.get("title") or "").strip() or f"Video {video_id}"
         if not self._is_placeholder_title(video_id, current):
@@ -821,20 +827,20 @@ class LocalRAGService:
         for video_id, data in self.engine.library.videos.items():
             self._hydrate_video_title(video_id)
             refreshed = self.engine.library.videos.get(video_id, data)
+            source = normalize_source(
+                video_id,
+                refreshed.get("source"),
+                legacy=not isinstance(refreshed.get("source"), dict),
+            )
             chunking = self.engine.library.get_video_chunking_metadata(video_id)
             history_rows = self.ask_history.get(video_id, [])
             results.append(
                 {
                     "video_id": video_id,
                     "title": refreshed.get("title", f"Video {video_id}"),
-                    "url": refreshed.get(
-                        "url", f"https://www.youtube.com/watch?v={video_id}"
-                    ),
-                    "source": normalize_youtube_source(
-                        video_id,
-                        refreshed.get("source"),
-                        legacy=not isinstance(refreshed.get("source"), dict),
-                    ),
+                    "url": refreshed.get("url") or canonical_url(source),
+                    "source": source,
+                    "source_type": source["platform"],
                     "language": refreshed.get("language", "ja"),
                     "num_chunks": len(refreshed.get("chunks", [])),
                     "chunking_version": chunking["version"],
@@ -889,10 +895,11 @@ class LocalRAGService:
             return service
 
     def delete_video(self, video_id: str):
-        self.engine.library.remove_video(video_id)
-        self.engine.library.save()
-        self._mark_video_router_stale()
-        self._delete_ask_history(video_id)
+        with self.library_write_lock:
+            self.engine.library.remove_video(video_id)
+            self.engine.library.save()
+            self._mark_video_router_stale()
+            self._delete_ask_history(video_id)
 
     def _mark_video_router_stale(self) -> None:
         """Force the video router to re-check persisted artifacts on next use."""
@@ -1436,12 +1443,13 @@ class LocalRAGService:
         if not hasattr(self, "ask_history") or not isinstance(self.ask_history, dict):
             self.ask_history = {}
 
-    @staticmethod
-    def _canonical_video_url(video_id: str) -> str:
-        return f"https://www.youtube.com/watch?v={video_id}"
+    def _library_source(self, video_id: str, source=None) -> dict:
+        if not isinstance(source, dict):
+            library = getattr(getattr(self, "engine", None), "library", None)
+            source = getattr(library, "videos", {}).get(video_id, {}).get("source")
+        return normalize_source(video_id, source)
 
-    @staticmethod
-    def _normalize_ask_history_sources(sources: List[dict]) -> List[dict]:
+    def _normalize_ask_history_sources(self, sources: List[dict]) -> List[dict]:
         normalized = []
         for row in sources or []:
             if not isinstance(row, dict):
@@ -1452,14 +1460,12 @@ class LocalRAGService:
             start = float(row.get("start", 0.0))
             end = float(row.get("end", start))
             chunk_index = row.get("chunk_index")
+            source = self._library_source(video_id, row.get("source"))
             normalized.append(
                 {
                     "video_id": video_id,
                     "video_title": str(row.get("video_title") or video_id).strip(),
-                    "video_url": str(
-                        row.get("video_url")
-                        or LocalRAGService._canonical_video_url(video_id)
-                    ).strip(),
+                    "video_url": str(row.get("video_url") or canonical_url(source)).strip(),
                     "language": normalize_language(row.get("language"), fallback="ja"),
                     "chunk_index": int(chunk_index)
                     if chunk_index is not None and str(chunk_index).strip() != ""
@@ -1467,10 +1473,7 @@ class LocalRAGService:
                     "text": str(row.get("text") or "").strip(),
                     "start": start,
                     "end": end,
-                    "url": str(
-                        row.get("url")
-                        or f"{LocalRAGService._canonical_video_url(video_id)}&t={int(start)}s"
-                    ).strip(),
+                    "url": str(row.get("url") or timestamp_url(source, start)).strip(),
                 }
             )
         return normalized
@@ -1523,8 +1526,8 @@ class LocalRAGService:
             )
         return normalized
 
-    @classmethod
-    def _ask_history_source_fingerprint(cls, sources: List[dict]) -> str:
+    @staticmethod
+    def _ask_history_source_fingerprint(sources: List[dict]) -> str:
         payload = [
             {
                 "video_id": str(row.get("video_id") or "").strip(),
@@ -1532,7 +1535,7 @@ class LocalRAGService:
                 "start": round(float(row.get("start", 0.0)), 3),
                 "end": round(float(row.get("end", row.get("start", 0.0))), 3),
             }
-            for row in cls._normalize_ask_history_sources(sources)
+            for row in sources
         ]
         serialized = json.dumps(
             payload,
@@ -1573,7 +1576,7 @@ class LocalRAGService:
             "url": str(
                 row.get("url")
                 or video.get("url")
-                or self._canonical_video_url(scoped_video_id)
+                or canonical_url(normalize_source(scoped_video_id, video.get("source")))
             ).strip(),
             "language": language,
             "question": question,
@@ -1866,7 +1869,7 @@ class LocalRAGService:
             "end": end,
             "url": str(
                 row.get("url")
-                or f"https://www.youtube.com/watch?v={video_id}&t={int(start)}s"
+                or timestamp_url(self._library_source(video_id, row.get("source")), start)
             ),
             "video_title": str(row.get("video_title") or f"Video {video_id}"),
             "language": normalize_language(row.get("language"), fallback="ja"),
@@ -2515,7 +2518,7 @@ class LocalRAGService:
                 "end": end,
                 "url": str(
                     payload.get("url")
-                    or f"https://www.youtube.com/watch?v={video_id}&t={int(start)}s"
+                    or timestamp_url(self._library_source(video_id, payload.get("source")), start)
                 ),
                 "video_title": str(payload.get("video_title") or f"Video {video_id}"),
                 "language": normalize_language(payload.get("language"), fallback="ja"),
@@ -2688,14 +2691,12 @@ class LocalRAGService:
             if scoped_video_ids is not None and current_video_id not in scoped_video_ids:
                 continue
             title = video_data.get("title", f"Video {current_video_id}")
-            video_url = video_data.get(
-                "url", f"https://www.youtube.com/watch?v={current_video_id}"
-            )
-            source = normalize_youtube_source(
+            source = normalize_source(
                 current_video_id,
                 video_data.get("source"),
                 legacy=not isinstance(video_data.get("source"), dict),
             )
+            video_url = video_data.get("url") or canonical_url(source)
             language = video_data.get("language", "ja")
             chunks = video_data.get("chunks", [])
             for chunk_idx, chunk in enumerate(chunks):
@@ -2711,7 +2712,7 @@ class LocalRAGService:
                         "text": chunk.get("raw_text", ""),
                         "start": start,
                         "end": float(chunk.get("end", start)),
-                        "url": f"https://www.youtube.com/watch?v={current_video_id}&t={int(start)}s",
+                        "url": timestamp_url(source, start),
                     }
                 )
         return rows
@@ -4795,7 +4796,8 @@ class LocalRAGService:
         video["full_transcript"] = payload
         if hasattr(self.engine.library, "save"):
             try:
-                self.engine.library.save()
+                with self.library_write_lock:
+                    self.engine.library.save()
             except Exception:
                 pass
         return payload, True
@@ -4948,7 +4950,11 @@ class LocalRAGService:
             transcript["segments"],
             cache_dir=self.cache_data_dir / "key_areas",
             language=language,
-            source_meta={"source_id": source_id, "title": episode["video_title"]},
+            source_meta={
+                "source_id": source_id,
+                "title": episode["video_title"],
+                "source": video.get("source"),
+            },
             participants=episode["participants_from_title"],
             llm=self._llm_text_response,
             provider=provider,
@@ -5134,6 +5140,7 @@ class LocalRAGService:
                     )
 
         summary_items: List[dict] = []
+        source = normalize_source(scoped_video_id, video.get("source"))
         timestamp_success_count = 0
         timestamp_failure_count = 0
         used_segment_counts: Dict[int, int] = {}
@@ -5170,7 +5177,7 @@ class LocalRAGService:
                     "end": end,
                     "timestamp_source": resolved_timestamp["source"],
                     "segment_index": resolved_segment_index,
-                    "url": youtube_timestamp_url(scoped_video_id, start),
+                    "url": timestamp_url(source, start),
                 }
             )
 
@@ -5305,6 +5312,7 @@ class LocalRAGService:
         source_label = "chunk" if raw_chunks else "segment"
         title = str(video.get("title") or f"Video {video_id}")
         language = str(video.get("language") or "ja")
+        source = normalize_source(video_id, video.get("source"))
 
         for idx, raw in enumerate(source_rows):
             text = self._study_clean_text(
@@ -5328,7 +5336,7 @@ class LocalRAGService:
                     "start": start,
                     "end": end,
                     "timestamp": self._study_timestamp_label(start),
-                    "url": f"https://www.youtube.com/watch?v={video_id}&t={int(start)}s",
+                    "url": timestamp_url(source, start),
                     "text": text,
                     "source_label": source_label,
                 }
@@ -6000,7 +6008,7 @@ class LocalRAGService:
                         "timestamp": self._study_timestamp_label(start),
                         "url": section.get("url")
                         or base_evidence.get("url")
-                        or f"https://www.youtube.com/watch?v={video_id}&t={int(start)}s",
+                        or timestamp_url(self._library_source(video_id), start),
                         "text": text,
                         "source_label": "study_section",
                         "base_evidence_id": base_evidence.get("evidence_id"),
@@ -6894,6 +6902,7 @@ class LocalRAGService:
         rows = video.get("chunks") or context.get("segments") or []
         topic_start = float(topic.get("start", 0.0) or 0.0)
         topic_end = float(topic.get("end", topic_start) or topic_start)
+        source = normalize_source(context.get("video_id"), video.get("source"))
         matches = []
         for index, row in enumerate(rows):
             start = float(row.get("start", 0.0) or 0.0)
@@ -6912,11 +6921,7 @@ class LocalRAGService:
                     "start": start,
                     "end": end,
                     "text": self._study_clip_text(text, 900),
-                    "url": (
-                        f"{video.get('url', '').split('&')[0]}&t={int(start)}s"
-                        if video.get("url")
-                        else ""
-                    ),
+                    "url": timestamp_url(source, start) if source["video_id"] else "",
                 }
             )
         if len(matches) <= limit:
@@ -7857,6 +7862,13 @@ class LocalRAGService:
             "model": model_name,
         }
 
+    def rechunk_from_transcript(self, source_id: str):
+        """Reindex stored source evidence without acquiring a new transcript."""
+        with self.library_write_lock:
+            source_id = self.engine.library.rechunk_from_transcript(source_id)
+            self._mark_video_router_stale()
+        return source_id
+
     def ingest(self, *, url: str, mode: str, language: str, force: bool):
         started_at = time.time()
         mode = (mode or "single").strip().lower()
@@ -7869,7 +7881,13 @@ class LocalRAGService:
         if mode == "playlist":
             targets = expand_playlist_ids(url)
         else:
-            video_id = extract_video_id(url)
+            source_id = (url or "").strip()
+            existing = self.engine.library.videos.get(source_id)
+            video_id = (
+                source_id
+                if existing and not is_youtube(existing.get("source"))
+                else extract_video_id(url)
+            )
             if not video_id:
                 raise ValueError("Invalid YouTube URL or video ID")
             targets = [video_id]
@@ -7888,10 +7906,16 @@ class LocalRAGService:
         skipped = []
 
         for idx, video_id in enumerate(targets):
-            video_exists = video_id in self.engine.library.videos
-            video_is_stale = (
-                video_exists and self.engine.library.video_chunking_is_stale(video_id)
-            )
+            with self.library_write_lock:
+                video_exists = video_id in self.engine.library.videos
+                source = self._library_source(video_id)
+                youtube = is_youtube(source)
+                job_language = (
+                    language if youtube else self.engine.library.videos[video_id]["language"]
+                )
+                video_is_stale = (
+                    video_exists and self.engine.library.video_chunking_is_stale(video_id)
+                )
             if (not force) and video_exists and (not video_is_stale):
                 skipped.append(
                     {
@@ -7905,17 +7929,21 @@ class LocalRAGService:
                     message="video already indexed; skipped",
                     video_id=video_id,
                     mode=mode,
-                    language=language,
+                    language=job_language,
                 )
                 continue
             if (not force) and video_is_stale:
                 self._append_ingest_log(
                     level="info",
                     event="job.reingest.stale_chunking",
-                    message="video uses stale chunking; re-ingesting",
+                    message=(
+                        "video uses stale chunking; re-ingesting"
+                        if youtube
+                        else "source uses stale chunking; rebuilding from stored transcript"
+                    ),
                     video_id=video_id,
                     mode=mode,
-                    language=language,
+                    language=job_language,
                 )
 
             job_id = f"job_{uuid.uuid4()}"
@@ -7923,8 +7951,8 @@ class LocalRAGService:
             job = IngestJob(
                 job_id=job_id,
                 video_id=video_id,
-                url=f"https://www.youtube.com/watch?v={video_id}",
-                language=language,
+                url=canonical_url(source),
+                language=job_language,
                 mode=mode,
                 status="running",
                 attempts=1,
@@ -7941,43 +7969,47 @@ class LocalRAGService:
                 job_id=job_id,
                 video_id=video_id,
                 mode=mode,
-                language=language,
+                language=job_language,
                 attempts=1,
                 status="running",
             )
 
             try:
-                self.engine.library.add_video(video_id, language=language)
-                try:
-                    self.engine.library.backfill_source_metadata(
-                        [video_id],
-                        persist=False,
-                    )
-                except Exception as metadata_exc:
-                    self._append_ingest_log(
-                        level="warning",
-                        event="video.metadata.backfill.failed",
-                        message="YouTube source metadata backfill failed",
-                        job_id=job_id,
-                        video_id=video_id,
-                        error_message=str(metadata_exc)[:300],
-                    )
-                self._hydrate_video_title(video_id)
-                if hasattr(self.engine.library, "save"):
-                    try:
-                        self.engine.library.save()
-                    except Exception as save_exc:
-                        self._append_ingest_log(
-                            level="warning",
-                            event="library.save.failed",
-                            message="library save failed after ingestion",
-                            job_id=job_id,
-                            video_id=video_id,
-                            mode=mode,
-                            language=language,
-                            error_message=str(save_exc)[:300],
-                        )
-                self._mark_video_router_stale()
+                with self.library_write_lock:
+                    if youtube:
+                        self.engine.library.add_video(video_id, language=language)
+                        try:
+                            self.engine.library.backfill_source_metadata(
+                                [video_id],
+                                persist=False,
+                            )
+                        except Exception as metadata_exc:
+                            self._append_ingest_log(
+                                level="warning",
+                                event="video.metadata.backfill.failed",
+                                message="YouTube source metadata backfill failed",
+                                job_id=job_id,
+                                video_id=video_id,
+                                error_message=str(metadata_exc)[:300],
+                            )
+                        self._hydrate_video_title(video_id)
+                        if hasattr(self.engine.library, "save"):
+                            try:
+                                self.engine.library.save()
+                            except Exception as save_exc:
+                                self._append_ingest_log(
+                                    level="warning",
+                                    event="library.save.failed",
+                                    message="library save failed after ingestion",
+                                    job_id=job_id,
+                                    video_id=video_id,
+                                    mode=mode,
+                                    language=language,
+                                    error_message=str(save_exc)[:300],
+                                )
+                        self._mark_video_router_stale()
+                    else:
+                        self.rechunk_from_transcript(video_id)
                 self._update_job(job_id, status="completed")
                 self._append_ingest_log(
                     level="info",
@@ -7986,7 +8018,7 @@ class LocalRAGService:
                     job_id=job_id,
                     video_id=video_id,
                     mode=mode,
-                    language=language,
+                    language=job_language,
                     attempts=1,
                     status="completed",
                     duration_ms=int((time.time() - job_started) * 1000),
@@ -7995,7 +8027,7 @@ class LocalRAGService:
                     {
                         "job_id": job_id,
                         "video_id": video_id,
-                        "language": language,
+                        "language": job_language,
                         "status": "completed",
                         "title": self.engine.library.videos.get(video_id, {}).get(
                             "title", f"Video {video_id}"
@@ -8016,7 +8048,7 @@ class LocalRAGService:
                     job_id=job_id,
                     video_id=video_id,
                     mode=mode,
-                    language=language,
+                    language=job_language,
                     attempts=1,
                     status="failed",
                     error_code="INGESTION_FAILED",
@@ -8027,7 +8059,7 @@ class LocalRAGService:
                     {
                         "job_id": job_id,
                         "video_id": video_id,
-                        "language": language,
+                        "language": job_language,
                         "status": "failed",
                         "error": str(exc)[:200],
                     }
@@ -8165,6 +8197,22 @@ class Handler(BrowserBoundary, BaseHTTPRequestHandler):
         path = parsed.path
 
         try:
+            if path == "/v1/stt/capabilities":
+                self._json({"ok": True, "capabilities": stt_capabilities()})
+                return
+
+            if path.startswith("/v1/sources/") and (
+                match := re.fullmatch(r"/v1/sources/([^/]+)/media", path)
+            ):
+                if not serve_media(
+                    self, SERVICE.engine.library, SERVICE.library_write_lock, unquote(match[1])
+                ):
+                    self._json(
+                        {"ok": False, "error": {"code": "NOT_FOUND", "message": "Media not found"}},
+                        404,
+                    )
+                return
+
             if path == "/v1/evaluation/reports" or path.startswith("/v1/evaluation/reports/"):
                 from local_preview.evaluation_reports import EvaluationReportStore
                 store = EvaluationReportStore(SERVICE.runtime_data_dir / "evaluation_reports")
@@ -8658,6 +8706,15 @@ class Handler(BrowserBoundary, BaseHTTPRequestHandler):
             if not isinstance(body, dict):
                 raise ValueError("Request body must be a JSON object")
 
+            if path == "/v1/feeds/preview":
+                self._json({"ok": True, **preview_feed(body.get("url"))})
+                return
+
+            if path == "/v1/ingest/audio":
+                job = SERVICE.start_audio_ingest(body)
+                self._json({"ok": True, "job": asdict(job)}, 202)
+                return
+
             if path == "/v1/evaluation/reports":
                 from local_preview.evaluation_reports import EvaluationReportStore
                 store = EvaluationReportStore(SERVICE.runtime_data_dir / "evaluation_reports")
@@ -8693,6 +8750,7 @@ class Handler(BrowserBoundary, BaseHTTPRequestHandler):
                 self._label_json(
                     "job", SERVICE._label_draft_service().start_job,
                     body.get("task"), body.get("source_ids"), body.get("language"),
+                    body.get("seed"),
                     status=202,
                 )
                 return

@@ -150,7 +150,7 @@ test("caps the collection selection at twelve videos", async ({ page }) => {
     await boxes.nth(index).check();
   }
   await expect(boxes.nth(12)).toBeDisabled();
-  await expect(page.getByText("12 selected · Choose 2–12 videos")).toBeVisible();
+  await expect(page.getByText("12 selected · Choose 2–12 sources")).toBeVisible();
   await boxes.first().uncheck();
   await expect(boxes.nth(12)).toBeEnabled();
 });

@@ -1763,7 +1763,8 @@ function QAStudioPage({ locale, initialQuestion = "" }) {
         ) : null}
       </section>
 
-      <PlayerPanel videoId={playerState.videoId} startSeconds={playerState.start} title={playerState.title} />
+      <PlayerPanel videoId={playerState.videoId} startSeconds={playerState.start} title={playerState.title}
+        video={askVideos.find((video) => video.video_id === playerState.videoId)} />
     </>
   );
 }
@@ -1984,7 +1985,8 @@ function TLDRStudioPage() {
         )}
       </section>
 
-      <PlayerPanel videoId={playerState.videoId} startSeconds={playerState.start} title={playerState.title} />
+      <PlayerPanel videoId={playerState.videoId} startSeconds={playerState.start} title={playerState.title}
+        video={videos.find((video) => video.video_id === playerState.videoId)} />
     </>
   );
 }
@@ -2715,7 +2717,8 @@ function StudyStudioPage() {
         ) : null}
       </section>
 
-      <PlayerPanel videoId={playerState.videoId} startSeconds={playerState.start} title={playerState.title} />
+      <PlayerPanel videoId={playerState.videoId} startSeconds={playerState.start} title={playerState.title}
+        video={videos.find((video) => video.video_id === playerState.videoId)} />
     </>
   );
 }
