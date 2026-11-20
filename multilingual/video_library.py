@@ -28,12 +28,14 @@ import re
 import tempfile
 import time
 from contextlib import contextmanager
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from html import unescape
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from urllib.request import Request, urlopen
-from youtube_transcript_api import YouTubeTranscriptApi
+from youtube_transcript_api import IpBlocked, RequestBlocked, YouTubeTranscriptApi
 
 from multilingual.source_model import (
     SOURCE_ID_RE,
@@ -47,6 +49,7 @@ from multilingual.youtube_metadata import (
     YouTubeMetadataClient,
     canonical_youtube_url,
     merge_youtube_sources,
+    utc_now_iso,
 )
 
 CHUNK_WINDOW_SECONDS = 60
@@ -61,6 +64,33 @@ LEGACY_EMBEDDING_METADATA = {
     "model": "intfloat/multilingual-e5-base",
     "dim": 768,
 }
+
+
+class TranscriptRequestPaused(RuntimeError):
+    """Pass a subscription transcript throttle to the polling scheduler."""
+
+    def __init__(self, reason, retry_after=0):
+        super().__init__(reason)
+        self.reason = reason
+        self.retry_after = retry_after
+
+
+def _stop_on_transcript_throttle(error):
+    if isinstance(error, IpBlocked):
+        raise TranscriptRequestPaused("rate_limited") from error
+    if isinstance(error, RequestBlocked):
+        raise TranscriptRequestPaused("request_blocked") from error
+    if isinstance(error, HTTPError) and error.code == 429:
+        header = error.headers.get("Retry-After", "") if error.headers else ""
+        try:
+            if re.fullmatch(r"[0-9]{1,10}", header):
+                delay = int(header)
+            else:
+                date = parsedate_to_datetime(header)
+                delay = max(0, (date - datetime.now(timezone.utc)).total_seconds())
+        except (ValueError, TypeError, OverflowError):
+            delay = 0
+        raise TranscriptRequestPaused("rate_limited", delay) from error
 
 
 @contextmanager
@@ -144,12 +174,14 @@ class VideoLibrary:
             for chunk_idx, _chunk in enumerate(data.get("chunks", [])):
                 self.chunk_map.append((video_id, chunk_idx))
 
-    def add_video(self, url, language="ja"):
+    def add_video(self, url, language="ja", *, stop_on_throttle=False, prepare_record=None):
         """Fetch, process, and add a video to the library.
 
         Args:
             url: YouTube video URL or video ID.
             language: Language code (e.g. "ja", "en"). Defaults to "ja".
+            stop_on_throttle: Surface throttling immediately for scheduled ingestion.
+            prepare_record: Optional callback before the record enters the library.
 
         Returns:
             video_id: The YouTube video ID that was added.
@@ -176,7 +208,9 @@ class VideoLibrary:
 
         print(f"\nFetching transcript for video: {video_id} (language: {language})")
         transcript_codes = LANGUAGE_CONFIG[language]["transcript_codes"]
-        transcript = self._fetch_transcript(video_id, transcript_codes)
+        transcript = self._fetch_transcript(
+            video_id, transcript_codes, stop_on_throttle=stop_on_throttle,
+        )
 
         print(f"Found {len(transcript)} transcript segments")
 
@@ -209,16 +243,21 @@ class VideoLibrary:
                 title = existing_video["title"]
 
         # Store video data with language
-        self.videos[video_id] = {
+        record = {
             "url": canonical_url(source),
             "title": title,
             "source": source,
+            "ingested_at": utc_now_iso(),
             "language": language,
             "chunks": chunks,
             "full_transcript": full_transcript,
             "summary_cache": {},
             "chunking": self.current_chunking_metadata(),
         }
+
+        if prepare_record is not None:
+            prepare_record(record)
+        self.videos[video_id] = record
 
         # Rebuild the unified index
         self._rebuild_index()
@@ -263,6 +302,7 @@ class VideoLibrary:
                 "url": canonical_url(source),
                 "title": title,
                 "source": source,
+                "ingested_at": utc_now_iso(),
                 "language": language,
                 "full_transcript": self._build_full_transcript(lines),
             },
@@ -417,13 +457,15 @@ class VideoLibrary:
             "char_count": len(full_text),
         }
 
-    def _fetch_transcript(self, video_id, transcript_codes):
+    def _fetch_transcript(self, video_id, transcript_codes, *, stop_on_throttle=False):
         """Fetch transcript using youtube-transcript-api, with watch-page fallback."""
         ytt_api = YouTubeTranscriptApi()
         primary_error = None
         try:
             return ytt_api.fetch(video_id, languages=transcript_codes)
         except Exception as err:
+            if stop_on_throttle:
+                _stop_on_transcript_throttle(err)
             primary_error = err
 
         # Fallback retries help with transient 429/5xx throttling.
@@ -431,12 +473,14 @@ class VideoLibrary:
         for attempt in range(1, 4):
             try:
                 fallback = self._fetch_transcript_from_watch_page(
-                    video_id, transcript_codes
+                    video_id, transcript_codes, stop_on_throttle=stop_on_throttle,
                 )
                 print(
                     "youtube-transcript-api failed; used watch-page caption fallback."
                 )
                 return fallback
+            except TranscriptRequestPaused:
+                raise
             except Exception as err:
                 fallback_error = err
                 if attempt < 3 and self._is_retryable_network_error(err):
@@ -454,11 +498,11 @@ class VideoLibrary:
             f"Fallback also failed: {type(fallback_error).__name__}: {fallback_error}"
         )
 
-    def _fetch_transcript_from_watch_page(self, video_id, transcript_codes):
+    def _fetch_transcript_from_watch_page(self, video_id, transcript_codes, *, stop_on_throttle=False):
         """Fallback transcript extraction using ytInitialPlayerResponse + json3 captions."""
         watch_url = canonical_youtube_url(video_id)
         req = Request(watch_url, headers={"User-Agent": "Mozilla/5.0"})
-        with self._open_with_retry(req, timeout=20) as response:
+        with self._open_with_retry(req, timeout=20, stop_on_throttle=stop_on_throttle) as response:
             html = response.read().decode("utf-8", errors="ignore")
 
         player_response = self._extract_player_response(html)
@@ -476,7 +520,7 @@ class VideoLibrary:
 
         caption_url = self._build_json3_url(track["baseUrl"])
         caption_req = Request(caption_url, headers={"User-Agent": "Mozilla/5.0"})
-        with self._open_with_retry(caption_req, timeout=20) as response:
+        with self._open_with_retry(caption_req, timeout=20, stop_on_throttle=stop_on_throttle) as response:
             payload = json.loads(response.read().decode("utf-8", errors="ignore"))
 
         events = payload.get("events", [])
@@ -565,13 +609,15 @@ class VideoLibrary:
             )
         )
 
-    def _open_with_retry(self, req, timeout=20, retries=3):
+    def _open_with_retry(self, req, timeout=20, retries=3, *, stop_on_throttle=False):
         """Open URL with small backoff on retryable network errors."""
         last_error = None
         for attempt in range(1, retries + 1):
             try:
                 return urlopen(req, timeout=timeout)
             except Exception as err:
+                if stop_on_throttle:
+                    _stop_on_transcript_throttle(err)
                 last_error = err
                 if attempt >= retries or not self._is_retryable_network_error(err):
                     raise
@@ -827,6 +873,8 @@ class VideoLibrary:
                 "full_transcript": data.get("full_transcript"),
                 "chunking": self._normalize_chunking_metadata(data.get("chunking")),
             }
+            if "ingested_at" in data:
+                record["ingested_at"] = data["ingested_at"]
             with _atomic_library_path(self._video_record_path(vid)) as temporary:
                 with open(temporary, "w", encoding="utf-8") as f:
                     json.dump(record, f, ensure_ascii=False, indent=2)
@@ -1046,6 +1094,8 @@ class VideoLibrary:
             normalized["summary_cache"] = data.get("summary_cache")
         if isinstance(data.get("full_transcript"), dict):
             normalized["full_transcript"] = data.get("full_transcript")
+        if "ingested_at" in data:
+            normalized["ingested_at"] = data["ingested_at"]
         return normalized
 
     def backfill_source_metadata(self, video_ids=None, *, force=False, persist=True):

@@ -69,10 +69,25 @@ from local_preview.collection_summary import (  # noqa: E402
 )
 from local_preview.feeds import preview_feed  # noqa: E402
 from local_preview.key_areas import KeyAreasGenerationError, cached_key_areas  # noqa: E402
+from local_preview.digest import DigestNotFound, DigestService  # noqa: E402
+from local_preview.novelty import NoveltyError  # noqa: E402
 from local_preview.lexical_index import LexicalIndex  # noqa: E402
 from local_preview.retrieval_diagnostics import has_retrieval_failure  # noqa: E402
-from local_preview.summary_timestamps import parse_summary_timestamp  # noqa: E402
 from local_preview.stt.base import capabilities as stt_capabilities  # noqa: E402
+from local_preview.summary_timestamps import parse_summary_timestamp  # noqa: E402
+from local_preview.subscription_ingest import (  # noqa: E402
+    SubscriptionSourceSkipped,
+    ingest_podcast,
+    ingest_youtube,
+    podcast_job_outcome,
+)
+from local_preview.subscriptions import (  # noqa: E402
+    FeedPollError,
+    SubscriptionNotFound,
+    SubscriptionStore,
+    library_writer,
+    start_poller,
+)
 from local_preview.transcript_lines import numbered_lines  # noqa: E402
 
 _LEXICAL_INDEX_LOCK = threading.Lock()
@@ -90,7 +105,11 @@ from multilingual.source_model import (  # noqa: E402
 )
 from multilingual.text_processing import LANGUAGE_CONFIG  # noqa: E402
 from multilingual.video_routing import MultiVectorVideoRouter  # noqa: E402
-from multilingual.youtube_metadata import canonical_youtube_url  # noqa: E402
+from multilingual.video_library import TranscriptRequestPaused  # noqa: E402
+from multilingual.youtube_metadata import (  # noqa: E402
+    YOUTUBE_INGEST_PAUSE_SECONDS,
+    canonical_youtube_url,
+)
 from pipelines.embed_ocr import embed_ocr  # noqa: E402
 from pipelines.extract_frames import extract_frames  # noqa: E402
 from pipelines.run_ocr import run_ocr  # noqa: E402
@@ -747,6 +766,9 @@ class LocalRAGService:
 
     def start_audio_ingest(self, payload: dict) -> IngestJob:
         """Submit audio to the server's single background worker."""
+        return self._audio_queue().submit(payload)
+
+    def _audio_queue(self):
         with self.lock:
             if self._audio_ingest is None:
                 self._audio_ingest = AudioIngestQueue(
@@ -758,7 +780,25 @@ class LocalRAGService:
                     update_job=self._update_job,
                     mark_router_stale=self._mark_video_router_stale,
                 )
-        return self._audio_ingest.submit(payload)
+            return self._audio_ingest
+
+    def subscription_store(self, *, wait_for_audio=False):
+        """Bind feed polling to the same library and ingest jobs as the API."""
+        return SubscriptionStore(
+            self.runtime_data_dir,
+            ingest_youtube=lambda *args: ingest_youtube(
+                *args, library=self.engine.library, write_lock=self.library_write_lock,
+                ingest=self.ingest,
+            ),
+            ingest_podcast=lambda *args: ingest_podcast(
+                *args, library=self.engine.library, write_lock=self.library_write_lock,
+                get_queue=self._audio_queue, get_job=self.get_job, wait=wait_for_audio,
+            ),
+            podcast_status=lambda *args: podcast_job_outcome(
+                *args, library=self.engine.library, write_lock=self.library_write_lock,
+                get_job=self.get_job,
+            ),
+        )
 
     def _ensure_ocr_job_state(self) -> None:
         if not hasattr(self, "ocr_lock"):
@@ -890,6 +930,7 @@ class LocalRAGService:
                     source_getter=lambda source_id: self.engine.library.videos.get(source_id),
                     drafter=CLI_LLM.text_response,
                     clock=now_iso,
+                    digest_getter=lambda digest_id: self._digest_service().get_digest(digest_id),
                 )
                 self.label_drafts = service
             return service
@@ -4961,6 +5002,38 @@ class LocalRAGService:
             model=model,
         )
 
+    def _digest_service(self):
+        """Return the digest workflow and its single feedback writer."""
+        with self.lock:
+            service = getattr(self, "digest_service", None)
+            if service is None:
+                service = DigestService(
+                    self.runtime_data_dir,
+                    library=self.engine.library,
+                    retrieve_fn=self.retrieve,
+                    key_areas_fn=self.generate_key_areas,
+                    llm=self._llm_text_response,
+                    clock=now_iso,
+                    ingest_log_paths=self._existing_log_paths,
+                )
+                self.digest_service = service
+            return service
+
+    def build_digest(self, payload):
+        """Validate model options and build a local novelty digest."""
+        language = payload.get("language", "en")
+        if not isinstance(language, str) or language not in SUMMARY_LANGUAGES:
+            raise ValueError("language must be one of: en, ja")
+        provider = payload.get("provider", DEFAULT_ASK_PROVIDER)
+        model = payload.get("model")
+        if not isinstance(provider, str) or (model is not None and not isinstance(model, str)):
+            raise ValueError("provider and model must be strings")
+        provider = provider.strip().lower() or DEFAULT_ASK_PROVIDER
+        return self._digest_service().build_digest(
+            window=payload.get("window"), source_ids=payload.get("source_ids"),
+            language=language, provider=provider, model=self._resolve_llm_model(provider, model),
+        )
+
     def summarize_collection(self, *, source_ids, language, focus, provider, model):
         """Synthesize themes from indexed sources using cached key areas."""
         source_ids = collection_source_ids(source_ids)
@@ -7869,7 +7942,10 @@ class LocalRAGService:
             self._mark_video_router_stale()
         return source_id
 
-    def ingest(self, *, url: str, mode: str, language: str, force: bool):
+    def ingest(
+        self, *, url: str, mode: str, language: str, force: bool,
+        stop_on_throttle=False, prepare_record=None,
+    ):
         started_at = time.time()
         mode = (mode or "single").strip().lower()
         language = normalize_language(language)
@@ -7977,7 +8053,10 @@ class LocalRAGService:
             try:
                 with self.library_write_lock:
                     if youtube:
-                        self.engine.library.add_video(video_id, language=language)
+                        options = {"stop_on_throttle": True} if stop_on_throttle else {}
+                        if prepare_record is not None:
+                            options["prepare_record"] = prepare_record
+                        self.engine.library.add_video(video_id, language=language, **options)
                         try:
                             self.engine.library.backfill_source_metadata(
                                 [video_id],
@@ -7997,6 +8076,8 @@ class LocalRAGService:
                             try:
                                 self.engine.library.save()
                             except Exception as save_exc:
+                                if prepare_record is not None:
+                                    raise
                                 self._append_ingest_log(
                                     level="warning",
                                     event="library.save.failed",
@@ -8034,6 +8115,10 @@ class LocalRAGService:
                         ),
                     }
                 )
+            except SubscriptionSourceSkipped as exc:
+                self._update_job(job_id, status="skipped", step="skipped", progress=1.0,
+                                 error_code=str(exc))
+                raise
             except Exception as exc:
                 self._update_job(
                     job_id,
@@ -8064,6 +8149,8 @@ class LocalRAGService:
                         "error": str(exc)[:200],
                     }
                 )
+                if stop_on_throttle and isinstance(exc, TranscriptRequestPaused):
+                    raise
 
             # Gentle pacing helps avoid YouTube 429 throttling on playlist ingestion.
             if mode == "playlist" and idx < len(targets) - 1:
@@ -8072,9 +8159,9 @@ class LocalRAGService:
                     event="playlist.pacing",
                     message="playlist pacing delay before next video",
                     video_id=video_id,
-                    delay_ms=1200,
+                    delay_ms=int(YOUTUBE_INGEST_PAUSE_SECONDS * 1000),
                 )
-                time.sleep(1.2)
+                time.sleep(YOUTUBE_INGEST_PAUSE_SECONDS)
 
         response = {
             "mode": mode,
@@ -8098,7 +8185,8 @@ class LocalRAGService:
 
 SERVICE = (
     None
-    if {_SKIP_GLOBAL_SERVICE, os.environ.get("YT_RAG_SKIP_GLOBAL_SERVICE", "").strip().lower()}
+    if __name__ == "__main__"
+    or {_SKIP_GLOBAL_SERVICE, os.environ.get("YT_RAG_SKIP_GLOBAL_SERVICE", "").strip().lower()}
     & {"1", "true", "yes", "on"}
     else LocalRAGService()
 )
@@ -8131,6 +8219,29 @@ class Handler(BrowserBoundary, BaseHTTPRequestHandler):
             result = action(*args)
         except LabelDraftError as exc:
             self._json({"ok": False, "error": {"code": exc.code, "message": str(exc)}}, exc.status)
+        else:
+            self._json({"ok": True, key: result}, status)
+
+    def _digest_json(self, key, action, *args, status=200):
+        try:
+            result = action(*args)
+        except DigestNotFound as exc:
+            self._json({"ok": False, "error": {"code": "DIGEST_NOT_FOUND", "message": str(exc)}}, 404)
+        except (NoveltyError, KeyAreasGenerationError) as exc:
+            self._json({"ok": False, "error": {"code": "DIGEST_GENERATION_FAILED", "message": str(exc)}}, 502)
+        except CodexRunnerError as exc:
+            self._json({"ok": False, "error": {"code": exc.code, "message": str(exc)}}, exc.status)
+        else:
+            self._json({"ok": True, key: result}, status)
+
+    def _subscription_json(self, key, action, *args, status=200, **kwargs):
+        try:
+            result = action(*args, **kwargs)
+        except SubscriptionNotFound:
+            self._json({"ok": False, "error": {"code": "SUBSCRIPTION_NOT_FOUND",
+                                               "message": "Subscription not found"}}, 404)
+        except FeedPollError as exc:
+            self._json({"ok": False, "error": {"code": "FEED_POLL_FAILED", "message": str(exc)}}, 502)
         else:
             self._json({"ok": True, key: result}, status)
 
@@ -8197,6 +8308,31 @@ class Handler(BrowserBoundary, BaseHTTPRequestHandler):
         path = parsed.path
 
         try:
+            if path == "/v1/digests":
+                self._digest_json("digests", SERVICE._digest_service().list_digests)
+                return
+
+            if path.startswith("/v1/digest/") and (match := re.fullmatch(r"/v1/digest/([^/]+)", path)):
+                self._digest_json("digest", SERVICE._digest_service().get_digest, unquote(match[1]))
+                return
+
+            if path == "/v1/subscriptions":
+                self._json({"ok": True, "subscriptions": SERVICE.subscription_store().list()})
+                return
+
+            if path == "/v1/releases":
+                since = parse_qs(parsed.query, keep_blank_values=True).get("since", [None])[0]
+                try:
+                    store = SERVICE.subscription_store()
+                    # Never make a page load wait behind a running poll.
+                    store.reconcile(blocking=False)
+                    releases = store.list_releases(since)
+                except ValueError as exc:
+                    self._json({"ok": False, "error": {"code": "INVALID_INPUT", "message": str(exc)}}, 400)
+                else:
+                    self._json({"ok": True, "releases": releases})
+                return
+
             if path == "/v1/stt/capabilities":
                 self._json({"ok": True, "capabilities": stt_capabilities()})
                 return
@@ -8635,6 +8771,13 @@ class Handler(BrowserBoundary, BaseHTTPRequestHandler):
         path = parsed.path
 
         try:
+            if path.startswith("/v1/subscriptions/") and (
+                match := re.fullmatch(r"/v1/subscriptions/([^/]+)", path)
+            ):
+                subscription_id = unquote(match[1])
+                self._subscription_json("deleted", SERVICE.subscription_store().delete, subscription_id)
+                return
+
             if path == "/v1/feedback/search-review":
                 params = parse_qs(parsed.query or "")
                 video_id = (params.get("video_id") or [None])[0]
@@ -8706,6 +8849,42 @@ class Handler(BrowserBoundary, BaseHTTPRequestHandler):
             if not isinstance(body, dict):
                 raise ValueError("Request body must be a JSON object")
 
+            if path == "/v1/digest/whats-new":
+                self._digest_json("digest", SERVICE.build_digest, body, status=201)
+                return
+
+            if path.startswith("/v1/digest/") and (match := re.fullmatch(r"/v1/digest/([^/]+)/feedback", path)):
+                self._digest_json(
+                    "feedback", SERVICE._digest_service().save_feedback,
+                    unquote(match[1]), body, status=201,
+                )
+                return
+
+            if path == "/v1/subscriptions":
+                store = SERVICE.subscription_store()
+                if "id" in body:
+                    subscription_id = body.pop("id")
+                    if not isinstance(subscription_id, str) or not subscription_id:
+                        raise ValueError("id must be a non-empty string.")
+                    self._subscription_json("subscription", store.update, subscription_id, body)
+                else:
+                    self._json({"ok": True, "subscription": store.create(body)}, 201)
+                return
+
+            if path == "/v1/subscriptions/poll-all" or (
+                path.startswith("/v1/subscriptions/")
+                and (match := re.fullmatch(r"/v1/subscriptions/([^/]+)/poll", path))
+            ):
+                dry_run = body.get("dry_run", False)
+                if not isinstance(dry_run, bool):
+                    raise ValueError("dry_run must be a boolean.")
+                store = SERVICE.subscription_store()
+                if path == "/v1/subscriptions/poll-all":
+                    self._subscription_json("polls", store.poll_all, dry_run=dry_run)
+                else:
+                    self._subscription_json("poll", store.poll, unquote(match[1]), dry_run=dry_run)
+                return
+
             if path == "/v1/feeds/preview":
                 self._json({"ok": True, **preview_feed(body.get("url"))})
                 return
@@ -8747,6 +8926,12 @@ class Handler(BrowserBoundary, BaseHTTPRequestHandler):
                 return
 
             if path == "/v1/labels/jobs":
+                if body.get("task") == "digest_novelty":
+                    self._label_json(
+                        "job", SERVICE._label_draft_service().start_digest_job,
+                        body.get("digest_id"), status=202,
+                    )
+                    return
                 self._label_json(
                     "job", SERVICE._label_draft_service().start_job,
                     body.get("task"), body.get("source_ids"), body.get("language"),
@@ -9433,23 +9618,26 @@ class Handler(BrowserBoundary, BaseHTTPRequestHandler):
 
 def main(argv: List[str]) -> int:
     global SERVICE
-    if SERVICE is None:
-        SERVICE = LocalRAGService()
-
     host = "127.0.0.1"
     port = 8000
     if len(argv) >= 2:
         port = int(argv[1])
 
-    server = ThreadingHTTPServer((host, port), Handler)
-    print(f"Local preview server running at http://{host}:{port}")
-    print("Press Ctrl+C to stop")
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        server.server_close()
+    with library_writer():
+        if SERVICE is None:
+            SERVICE = LocalRAGService()
+        with ThreadingHTTPServer((host, port), Handler) as server:
+            stop_poller = start_poller(
+                SERVICE.subscription_store, os.environ.get("YT_RAG_FEED_POLL_MINUTES", "0"),
+            )
+            print(f"Local preview server running at http://{host}:{port}")
+            print("Press Ctrl+C to stop")
+            try:
+                server.serve_forever()
+            except KeyboardInterrupt:
+                pass
+            finally:
+                stop_poller.set()
     return 0
 
 

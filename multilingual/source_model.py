@@ -67,6 +67,9 @@ def normalize_source(source_id, raw=None, *, legacy=False):
             raw_stt, ("engine", "model", "language", "audio_sha256", "created_at")
         )
         stt["word_timestamps"] = raw_stt.get("word_timestamps") is True
+        audio_duration = raw_stt.get("audio_duration_seconds")
+        if isinstance(audio_duration, (int, float)) and math.isfinite(audio_duration) and audio_duration >= 0:
+            stt["audio_duration_seconds"] = audio_duration
         normalized = {
             "platform": platform,
             "video_id": str(source_id or "").strip(),

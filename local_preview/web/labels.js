@@ -15,6 +15,7 @@ const state = {
   listRequest: 0,
   draftRequest: 0,
   contextRequest: 0,
+  digestsRequest: 0,
 };
 const apiRoot = "/v1/labels";
 const draftPath = (id) => `${apiRoot}/drafts/${encodeURIComponent(id)}`;
@@ -26,6 +27,7 @@ const isMultiSourceQA = () => state.draft?.task === "multi_source_qa";
 const isCollectionThemes = () => state.draft?.task === "collection_themes";
 const isReference = () => state.draft?.task === "stt_reference";
 const isLanding = () => state.draft?.task === "ts_landing";
+const isNovelty = () => state.draft?.task === "digest_novelty";
 const draftSource = (id) => state.draft.sources.find((source) => source.source_id === id);
 
 async function api(path, body) {
@@ -163,7 +165,7 @@ function updateControls() {
   const final = draft.status === "finalized";
   const audit = isAudit();
   const decided = draft.items.filter((item) => item.review).length;
-  const accepted = audit || draft.items.some((item) => item.review && item.review.decision !== "rejected");
+  const accepted = audit || isNovelty() || draft.items.some((item) => item.review && item.review.decision !== "rejected");
   const editing = !$("editForm").hidden;
   $("progress").textContent = `${decided} of ${draft.items.length} decided`;
   $("previous").disabled = saving || editing || index === 0;
@@ -206,6 +208,29 @@ function renderCrossSourceDetails(label) {
     }
     row.append(evidence);
     details.append(row);
+  }
+}
+
+function renderPriorPassages(item) {
+  $("priorEvidence").hidden = !isNovelty();
+  const list = $("priorPassages");
+  list.replaceChildren();
+  if (!isNovelty()) return;
+  if (!item.prior_passages.length) {
+    const row = document.createElement("li");
+    row.textContent = "No prior passages were retrieved.";
+    list.append(row);
+    return;
+  }
+  for (const passage of item.prior_passages) {
+    const row = document.createElement("li");
+    const heading = document.createElement("strong");
+    const text = document.createElement("p");
+    const cited = item.prior.includes(passage.passage_id) ? " (cited)" : "";
+    heading.textContent = `${passage.passage_id}${cited} · ${passage.title} · ${timecode(passage.start, true)}–${timecode(passage.end, true)}`;
+    text.textContent = passage.text;
+    row.append(heading, text);
+    list.append(row);
   }
 }
 
@@ -263,6 +288,11 @@ function renderItem() {
   } else if (collectionThemes) {
     $("itemText").textContent = label.title;
     $("itemTiming").textContent = label.source_ids.map((id) => draftSource(id).title).join(" · ");
+  } else if (isNovelty()) {
+    $("itemText").textContent = item.text;
+    const decision = item.relation === "contradicts" ? "Approve if the claim truly contradicts the cited evidence."
+      : "Approve if the claim is truly new relative to the prior evidence.";
+    $("itemTiming").textContent = `${decision}${item.downgraded ? " The model's original relation had no valid citation." : ""}`;
   } else if (audio) {
     $("itemText").textContent = label.text;
     $("itemTiming").textContent = isLanding()
@@ -277,10 +307,11 @@ function renderItem() {
         : `Importance ${label.importance}/3 · Onset ${timecode(label.onset, true)} · Span ${timecode(label.span_start, true)}–${timecode(label.span_end, true)}`;
   }
   renderCrossSourceDetails(label);
+  renderPriorPassages(item);
   $("rationale").textContent = audit
     ? `Judge ${judgment.kind === "match" ? "match" : "faithfulness"} · ${judgment.decision ?? "No match"}`
-    : item.rationale ? `Draft rationale · ${item.rationale}` : "";
-  $("rationale").hidden = !audit && !item.rationale;
+    : isNovelty() ? item.reason : item.rationale ? `Draft rationale · ${item.rationale}` : "";
+  $("rationale").hidden = !$("rationale").textContent;
   const points = judgment?.gold_points ?? [];
   $("auditGoldPoints").replaceChildren(...points.map((point) => {
     const row = document.createElement("li");
@@ -292,12 +323,13 @@ function renderItem() {
   $("auditNote").value = item.review?.note ?? "";
   $("approve").textContent = audit ? "Agree" : "Approve";
   $("reject").textContent = audit ? "Disagree" : "Reject";
-  $("edit").hidden = audit;
+  $("edit").hidden = audit || isNovelty();
   $("edit").textContent = isLanding() ? "Record offset" : "Edit";
-  $("reviewKeys").hidden = audit;
+  $("reviewKeys").hidden = audit || isNovelty();
+  $("noveltyKeys").hidden = !isNovelty();
   $("notes").textContent = draft.notes ? `Draft notes · ${draft.notes}` : "";
   $("notes").hidden = !draft.notes;
-  const url = audio || audit || !source ? "" : timestampUrl(source, section ? label.start : label.onset);
+  const url = audio || audit || !source ? "" : timestampUrl(source, section || isNovelty() ? label.start : label.onset);
   $("timestamp").hidden = !url;
   if (url) $("timestamp").href = url;
   else $("timestamp").removeAttribute("href");
@@ -430,16 +462,39 @@ function setSourceCount() {
   const task = state.tasks.find((entry) => entry.task === $("task").value);
   const audit = task?.input === "judge_audit_sample";
   const audio = task?.input === "stt_segments";
+  const digest = task?.input === "digest";
   $("sources").multiple = task?.max_sources > 1;
-  $("sourceField").hidden = $("languageField").hidden = audit;
-  $("sources").disabled = $("language").disabled = audit;
+  $("sourceField").hidden = $("languageField").hidden = audit || digest;
+  $("sources").disabled = $("language").disabled = audit || digest;
+  $("digestField").hidden = $("digests").disabled = !digest;
   $("auditFileField").hidden = !audit;
   $("auditFile").disabled = !audit;
   $("auditFile").required = audit;
   $("seedField").hidden = $("seed").disabled = !audio;
   $("language").readOnly = audio;
   $("startJob").textContent = audit ? "Import audit sample" : "Start draft";
-  $("startJob").disabled = state.starting || !task || (!audit && !$("sources").options.length);
+  $("startJob").disabled = state.starting || !task ||
+    (digest ? !$("digests").value : !audit && !$("sources").options.length);
+}
+
+async function loadDigests() {
+  const request = ++state.digestsRequest;
+  $("digests").replaceChildren();
+  setSourceCount();
+  $("jobStatus").textContent = "Loading saved digests…";
+  try {
+    const { digests } = await api("/v1/digests");
+    if (request !== state.digestsRequest) return;
+    for (const digest of digests.filter((row) => row.reviewable_count > 0)) {
+      $("digests").add(new Option(
+        `${digest.created_at} · ${digest.release_titles.join(", ")}`, digest.digest_id,
+      ));
+    }
+    $("jobStatus").textContent = $("digests").length ? "" : "No saved digest has claims to review.";
+    setSourceCount();
+  } catch (error) {
+    if (request === state.digestsRequest) $("jobStatus").textContent = error.message;
+  }
 }
 
 function populateSources() {
@@ -495,15 +550,18 @@ $("startForm").addEventListener("submit", async (event) => {
       draftID = draft.draft_id;
     } else {
       const task = state.tasks.find((entry) => entry.task === $("task").value);
+      const digest = task.input === "digest";
       const sourceIds = Array.from($("sources").selectedOptions, (option) => option.value);
-      if (sourceIds.length < task.min_sources || sourceIds.length > task.max_sources) {
+      if (!digest && (sourceIds.length < task.min_sources || sourceIds.length > task.max_sources)) {
         throw new Error(`Choose ${task.min_sources} to ${task.max_sources} sources.`);
       }
       $("jobStatus").textContent = "Starting draft job…";
       const { job } = await api(`${apiRoot}/jobs`, {
         task: $("task").value,
-        source_ids: sourceIds,
-        language: $("language").value.trim(),
+        ...(digest ? { digest_id: $("digests").value } : {
+          source_ids: sourceIds,
+          language: $("language").value.trim(),
+        }),
         ...(task.input === "stt_segments" ? { seed: $("seed").valueAsNumber } : {}),
       });
       draftID = await pollJob(job);
@@ -524,9 +582,11 @@ $("startForm").addEventListener("submit", async (event) => {
 });
 
 $("task").addEventListener("change", () => {
+  ++state.digestsRequest;
   populateSources();
   setSourceCount();
   $("jobStatus").textContent = "";
+  if ($("task").value === "digest_novelty") void loadDigests();
 });
 $("sources").addEventListener("change", syncAudioLanguage);
 $("drafts").addEventListener("change", () => void openDraft($("drafts").value));
@@ -610,7 +670,8 @@ Promise.all([api(`${apiRoot}/tasks`), api("/v1/videos")])
     for (const task of tasks) $("task").add(new Option(task.title, task.task));
     populateSources();
     if (tasks.length) setSourceCount();
-    if (!videos.length) $("jobStatus").textContent = "Add a source to the Library before drafting.";
+    if ($("task").value === "digest_novelty") void loadDigests();
+    else if (!videos.length) $("jobStatus").textContent = "Add a source to the Library before drafting.";
   })
   .catch((error) => { $("jobStatus").textContent = error.message; });
 

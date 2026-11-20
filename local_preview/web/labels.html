@@ -31,6 +31,7 @@
             <form id="startForm" class="grid">
               <label>Task<select id="task" required></select></label>
               <label id="sourceField">Sources<select id="sources" required></select></label>
+              <label id="digestField" hidden>Saved digest<select id="digests" required disabled></select></label>
               <label id="languageField">Output language
                 <input id="language" list="languages" value="en" required />
                 <datalist id="languages">
@@ -76,6 +77,10 @@
               <p id="rationale" class="label-status" hidden></p>
               <ul id="auditGoldPoints" hidden></ul>
               <ul id="crossSourceDetails" hidden></ul>
+              <section id="priorEvidence" aria-labelledby="priorHeading" hidden>
+                <h4 id="priorHeading">Retrieved prior passages</h4>
+                <ol id="priorPassages"></ol>
+              </section>
               <label id="auditNoteField" hidden>Optional disagreement note
                 <textarea id="auditNote" maxlength="4000"></textarea>
               </label>
@@ -123,6 +128,7 @@
               <p id="finalizeStatus" class="label-status"></p>
             </div>
             <p id="reviewKeys" class="label-status">Keys <kbd>A</kbd> approve, <kbd>E</kbd> edit, <kbd>R</kbd> reject, <kbd>J</kbd> next, <kbd>K</kbd> previous.</p>
+            <p id="noveltyKeys" class="label-status" hidden>Keys <kbd>A</kbd> approve, <kbd>R</kbd> reject, <kbd>J</kbd> next, <kbd>K</kbd> previous.</p>
           </div>
         </section>
       </div>

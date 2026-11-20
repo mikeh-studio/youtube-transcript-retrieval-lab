@@ -45,7 +45,8 @@ def is_youtube_url(url):
     return any(host == domain or host.endswith("." + domain) for domain in YOUTUBE_DOMAINS)
 
 
-def _feed_destination(url):
+def check_feed_destination(url):
+    """Allow YouTube feed URLs while excluding other YouTube endpoints."""
     host = url.hostname.rstrip(".")
     youtube_feed = (
         (host == "youtube.com" or host.endswith(".youtube.com"))
@@ -318,6 +319,6 @@ def preview_feed(url, *, fetch=safe_fetch):
     """Fetch and parse a feed without storing a subscription."""
     result = fetch(
         url, max_bytes=FEED_MAX_BYTES, timeout=15, accept=FEED_ACCEPT,
-        check_url=_feed_destination,
+        check_url=check_feed_destination,
     )
     return parse_feed(result.body, base_url=result.url)

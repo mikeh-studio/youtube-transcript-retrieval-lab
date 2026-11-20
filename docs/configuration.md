@@ -94,6 +94,62 @@ enclosure URL. With retention disabled, RSS citations use the enclosure URL
 and local-file sources have no playback URL. The app leaves the original local
 file alone. YouTube audio is never downloaded.
 
+## Feed subscriptions
+
+`YT_RAG_FEED_POLL_MINUTES` defaults to `0`. Set it to a positive number
+to poll in the running server after each interval. Manual polls are available
+at any setting.
+
+| Route | Request and response |
+| --- | --- |
+| `GET /v1/subscriptions` | Returns `subscriptions`. |
+| `POST /v1/subscriptions` | Creates a subscription from `url` and optional settings. Include `id` to update an existing subscription's settings. Returns `subscription`. |
+| `DELETE /v1/subscriptions/{id}` | Returns `deleted.id`. Release history and indexed sources are retained. |
+| `POST /v1/subscriptions/{id}/poll` | Accepts optional `dry_run` and returns `poll`. |
+| `POST /v1/subscriptions/poll-all` | Accepts optional `dry_run` and returns `polls`, with individual feed failures reported under `error`. |
+| `GET /v1/releases?since=...` | Reconciles podcast jobs and returns `releases`. An optional ISO 8601 timestamp with a timezone filters inclusively by release `updated_at`. |
+
+Subscription settings include `kind` (`youtube` or `podcast`, inferred from
+the feed URL by default), `language` (`en` by default, or `ja`),
+`domain_tag` (optional display text, default `null`),
+`auto_ingest` (default `false`), `title_include` and `title_exclude`
+(optional regexes of up to 200 characters, without nested repetition or overlapping
+repeated alternatives, matched against the first 300 title characters), and `min_duration_s` (default `600`,
+`0` disables the duration filter). Changing the URL or kind requires a
+new subscription. Enabling auto-ingest applies to newly discovered items
+and resumes pending items when re-enabled.
+
+Polls check ETag and Last-Modified and deduplicate by feed item ID. On the first
+poll with auto-ingest enabled, older or undated releases are marked `discovered`
+with reason `backlog`. Releases dated at or after subscription creation are eligible
+for auto-ingest, as are newly seen releases on later polls. Each subscription
+can attempt five auto-ingests per poll, including any podcast jobs still in flight.
+The poll result reports `ingesting_count`. Pending items carry over
+to later polls, including when the feed returns HTTP 304. A YouTube throttle
+pauses automatic YouTube ingestion across subscriptions until the reported
+`retry_at` time. Server polls queue podcast transcription in the background.
+Standalone CLI polls wait for their audio jobs to finish.
+
+Release rows contain `subscription_id`, `external_id`, `title`, `link`,
+`published_at`, `source_id`, `duration_seconds`, `reason`, `discovered_at`,
+`updated_at`, and `status` (`discovered`, `pending`, `ingesting`, `ingested`,
+`skipped`, or `failed`). Podcast rows may have a `job_id`. A job missing after a
+restart returns to `pending` with reason `job_lost` and a cleared `job_id`, so a
+subsequent poll can retry it. The duration filter uses the last YouTube caption endpoint or
+measured podcast audio duration. New short sources stay out of the library,
+while existing sources are preserved. For eligible sources, the feed date is
+stored as `source.published_at` when available. State lives in
+`data/runtime/subscriptions.json` and `data/runtime/releases.jsonl`.
+
+```bash
+.venv/bin/python -m local_preview.subscriptions list
+.venv/bin/python -m local_preview.subscriptions poll --sub ID --dry-run
+.venv/bin/python -m local_preview.subscriptions poll
+```
+
+A dry run fetches and filters feed metadata without modifying local state or
+starting ingestion. Use the API for a live poll while the server is running.
+
 ## Catalog
 
 | Variable                      | Purpose                                                                                            |

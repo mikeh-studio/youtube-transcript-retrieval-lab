@@ -18,6 +18,7 @@ from typing import Callable
 from local_preview.codex_runner import CodexRunnerError
 from evals.summary.predictions import record_sha256
 from local_preview import audio_labels, cross_source_labels
+from local_preview.digest import DigestNotFound, REVIEW_RELATIONS
 from local_preview.judge_audit import validate_sample
 from local_preview.local_files import json_bytes as _json_bytes, write_atomic as _write_atomic
 from local_preview.transcript_lines import fingerprint_lines, format_lines, numbered_lines
@@ -46,7 +47,7 @@ class LabelTask:
     schema: str | None
     prompt: Callable[[list[dict], str], str] | None
     canonicalize: Callable[[object, list[dict]], tuple[list[dict], str]] | None
-    edit: Callable[[dict, dict, dict], dict]
+    edit: Callable[[dict, dict, dict], dict] | None
 
 
 def _sha256(payload):
@@ -313,6 +314,10 @@ TASKS = {
         title="Timestamp landing", min_sources=1, max_sources=1,
         schema=None, prompt=None, canonicalize=None, edit=audio_labels.edit_landing,
     ),
+    "digest_novelty": LabelTask(
+        title="Digest novelty", min_sources=0, max_sources=0,
+        schema=None, prompt=None, canonicalize=None, edit=None,
+    ),
 }
 
 
@@ -320,7 +325,7 @@ class LabelDraftService:
     """Store draft proposals, owner decisions, and immutable label datasets."""
 
     def __init__(
-        self, root_dir, runtime_dir, eval_dir, source_getter, drafter, clock
+        self, root_dir, runtime_dir, eval_dir, source_getter, drafter, clock, digest_getter=None
     ):
         self.schema_dir = Path(root_dir) / "local_preview" / "schemas"
         self.draft_dir = Path(runtime_dir) / "label_drafts" / "drafts"
@@ -328,6 +333,7 @@ class LabelDraftService:
         self.source_getter = source_getter
         self.drafter = drafter
         self.clock = clock
+        self.digest_getter = digest_getter
         self._lock = threading.Lock()
         self._jobs = {}
         self._active_job = None
@@ -341,6 +347,7 @@ class LabelDraftService:
                 "min_sources": task.min_sources,
                 "max_sources": task.max_sources,
                 **({"input": "stt_segments"} if key in audio_labels.TASK_NAMES else {}),
+                **({"input": "digest"} if key == "digest_novelty" else {}),
             }
             for key, task in TASKS.items()
         ] + [{
@@ -388,7 +395,7 @@ class LabelDraftService:
     def start_job(self, task, source_ids, language, seed=None):
         """Reserve the single worker slot and start a background draft job."""
         spec = TASKS.get(task) if isinstance(task, str) else None
-        if spec is None:
+        if spec is None or task == "digest_novelty":
             raise LabelDraftError("INVALID_TASK", "Choose a supported label task.")
         if (
             not isinstance(source_ids, list)
@@ -410,6 +417,27 @@ class LabelDraftService:
                 seed = audio_labels.DEFAULT_SEED
             if type(seed) is not int or not 0 <= seed < 2**32:
                 raise LabelDraftError("INVALID_SEED", "Seed must be an unsigned 32-bit integer.")
+        return self._start_job(task, spec, source_ids, language, seed)
+
+    def start_digest_job(self, digest_id):
+        """Draft judgments from a saved digest without generating new predictions."""
+        try:
+            if self.digest_getter is None:
+                raise DigestNotFound()
+            digest = self.digest_getter(digest_id)
+        except DigestNotFound as exc:
+            raise LabelDraftError("DIGEST_NOT_FOUND", "Choose a saved digest.", 404) from exc
+        source_ids = [
+            release["source_id"] for release in digest["releases"]
+            if any(item["relation"] in REVIEW_RELATIONS for item in release["claims"])
+        ]
+        if not source_ids:
+            raise LabelDraftError("NO_VALID_ITEMS", "The digest contains no novelty or contradiction claims.")
+        return self._start_job(
+            "digest_novelty", TASKS["digest_novelty"], source_ids, digest["language"], digest=digest,
+        )
+
+    def _start_job(self, task, spec, source_ids, language, seed=None, digest=None):
         with self._lock:
             if self._active_job is not None:
                 raise LabelDraftError(
@@ -434,11 +462,12 @@ class LabelDraftService:
                 "created_at": self.clock(),
                 "completed_at": None,
                 **({"seed": seed} if task in audio_labels.TASK_NAMES else {}),
+                **({"digest_id": digest["digest_id"]} if digest is not None else {}),
             }
             self._jobs[job_id] = job
             self._active_job = job_id
             worker = threading.Thread(
-                target=self._run_job, args=(deepcopy(job), spec), daemon=True
+                target=self._run_job, args=(deepcopy(job), spec, digest), daemon=True
             )
             try:
                 worker.start()
@@ -456,7 +485,7 @@ class LabelDraftService:
                 )
             return deepcopy(self._jobs[job_id])
 
-    def _run_job(self, job, spec):
+    def _run_job(self, job, spec, digest):
         job_id = job["job_id"]
         with self._lock:
             self._jobs[job_id]["status"] = "running"
@@ -469,7 +498,7 @@ class LabelDraftService:
                 metadata, lines = self._source(
                     source_id, audio_language=job["language"] if audio_task else None,
                 )
-                if not audio_task:
+                if not audio_task and digest is None:
                     metadata["sample"] = _sample_lines(lines, budget)
                 sources.append(metadata)
             if audio_task:
@@ -483,6 +512,8 @@ class LabelDraftService:
                     "seed": job["seed"],
                     "system_under_test_used": job["task"] == "stt_reference",
                 }
+            elif digest is not None:
+                items, notes, provenance = self._digest_labels(digest, sources)
             else:
                 items, notes, provenance = self._model_labels(job, spec, sources)
             draft_id = f"draft_{uuid.uuid4().hex}"
@@ -520,6 +551,28 @@ class LabelDraftService:
             with self._lock:
                 self._jobs[job_id].update(result, completed_at=self.clock())
                 self._active_job = None
+
+    @staticmethod
+    def _digest_labels(digest, sources):
+        fingerprints = {source["source_id"]: source["source_fingerprint"] for source in sources}
+        items = []
+        for release in digest["releases"]:
+            source_id = release["source_id"]
+            if source_id not in fingerprints:
+                continue
+            fingerprint = release.get("source_fingerprint")
+            if fingerprint is not None and fingerprint != fingerprints[source_id]:
+                raise LabelDraftError("SOURCE_CHANGED", "The release transcript has changed since the digest.", 409)
+            items.extend(
+                {**claim, "source_id": source_id}
+                for claim in release["claims"] if claim["relation"] in REVIEW_RELATIONS
+            )
+        return items, "", {
+            "digest_id": digest["digest_id"],
+            "provider": digest["provider"],
+            "model": digest["model"],
+            "system_under_test_used": True,
+        }
 
     def _model_labels(self, job, spec, sources):
         configured_provider = (os.environ.get("YT_RAG_LABEL_DRAFTER") or "").strip()
@@ -712,7 +765,7 @@ class LabelDraftService:
         )
         first, last = (
             (effective["start"], effective["end"])
-            if draft["task"] == "sections" or draft["task"] in audio_labels.TASK_NAMES
+            if draft["task"] in {"sections", "digest_novelty"} or draft["task"] in audio_labels.TASK_NAMES
             else (effective["span_start"], effective["span_end"])
         )
         return {
@@ -783,6 +836,8 @@ class LabelDraftService:
                 review = {"decision": decision}
                 if audit and decision == "edited":
                     raise LabelDraftError("INVALID_REVIEW", "Choose agree or disagree.")
+                if draft["task"] == "digest_novelty" and decision == "edited":
+                    raise LabelDraftError("INVALID_REVIEW", "Choose approve or reject.")
                 if audit and "note" in row:
                     note = row["note"]
                     if decision != "rejected" or not isinstance(note, str) or len(note) > MAX_LABEL_TEXT:
@@ -823,6 +878,7 @@ class LabelDraftService:
                     "REVIEW_INCOMPLETE", "Decide every item before finalizing.", 409
                 )
             audit = draft["task"] == "judge_audit"
+            novelty = draft["task"] == "digest_novelty"
             multi_source = not audit and TASKS[draft["task"]].min_sources > 1
             counts = dict.fromkeys(DECISIONS, 0)
             rows = []
@@ -836,7 +892,7 @@ class LabelDraftService:
                 review = item["review"]
                 decision = review["decision"]
                 counts[decision] += 1
-                if decision == "rejected" and not audit:
+                if decision == "rejected" and not (audit or novelty):
                     continue
                 fields = {
                     key: value
