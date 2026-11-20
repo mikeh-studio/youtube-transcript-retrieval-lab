@@ -188,6 +188,34 @@ def test_review_finalize_and_export_preserve_human_edits(tmp_path):
     assert saved[0]["query_set"] == result["query_set"]
 
 
+def test_finalize_exports_span_provenance_from_draft_snapshot(tmp_path):
+    video_id = "video000001"
+    video = _video(video_id)
+    service = _service(tmp_path, videos={video_id: video})
+    draft = service._canonicalize_draft(
+        generated=_generated_payload(video_id),
+        context=service._build_context([video_id]),
+        capability={"version": "codex-cli test", "model_override": None},
+    )
+    service._write_json(service._draft_path(draft["draft_id"]), draft)
+    service.save_review(draft["draft_id"], [
+        {"id": case["id"], "decision": "approved"} for case in draft["cases"]
+    ])
+    video["chunking"]["version"] = "time_v3"
+
+    result = service.finalize(draft["draft_id"])
+    _, payload = service.export_dataset(result["dataset"]["dataset_id"])
+    first_row = json.loads(payload.splitlines()[0])
+    assert first_row["gold_evidence"] == [{
+        "video_id": video_id,
+        "chunk_index": 0,
+        "start": 0.0,
+        "end": 60.0,
+        "legacy_chunk_index": 0,
+        "chunking_version": "time_v2",
+    }]
+
+
 def test_finalize_requires_every_case_to_be_reviewed(tmp_path):
     service = _service(tmp_path)
     context = service._build_context(["video000001"])

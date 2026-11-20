@@ -24,7 +24,8 @@ def test_gold_evidence_matches_by_timestamp_overlap():
     gold = {"video_id": "vid1", "start": 30.0, "end": 50.0}
     result = {"video_id": "vid1", "chunk_index": 1, "start": 45.0, "end": 70.0}
 
-    assert gold_matches_result(gold, result) is True
+    assert gold_matches_result(gold, result) is False
+    assert gold_matches_result(gold, result, min_overlap_ratio=0.25) is True
 
 
 def test_recall_at_k_counts_unique_gold_hits():

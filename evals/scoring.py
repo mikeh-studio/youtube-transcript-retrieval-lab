@@ -1,15 +1,18 @@
 """Scoring helpers for offline retrieval benchmarks.
 
-The benchmark evaluates whether retrieved transcript chunks hit known gold
-evidence. Gold evidence can point to an exact chunk index or to a timestamp
-range that overlaps a retrieved chunk from the same video.
+The benchmark scores timestamp spans and supports legacy chunk-index labels.
 """
 
 from __future__ import annotations
 
 import math
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from functools import partial
+from typing import Dict, Iterable, List, Optional, Sequence
 
+from evals.evidence_spans import chunking_version, normalize_gold_evidence, span_matches
+
+
+SCORING_VERSION = "span_overlap_v1"
 
 METRIC_PRECISION_1 = "Precision@1"
 METRIC_PRECISION_5 = "Precision@5"
@@ -32,95 +35,71 @@ QUALITY_METRICS = (
 )
 
 
-def _coerce_float(value: Any, default: Optional[float] = None) -> Optional[float]:
-    try:
-        if value is None:
-            return default
-        return float(value)
-    except (TypeError, ValueError):
-        return default
-
-
-def _coerce_int(value: Any) -> Optional[int]:
-    try:
-        if value is None:
-            return None
-        return int(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _timestamp_bounds(row: dict) -> Tuple[Optional[float], Optional[float]]:
-    if isinstance(row.get("timestamp_range"), dict):
-        timestamp_range = row["timestamp_range"]
-        start = _coerce_float(
-            timestamp_range.get("start", timestamp_range.get("start_seconds"))
-        )
-        end = _coerce_float(
-            timestamp_range.get("end", timestamp_range.get("end_seconds"))
-        )
-        return start, end
-
-    start = _coerce_float(row.get("start", row.get("start_seconds")))
-    end = _coerce_float(row.get("end", row.get("end_seconds")))
-    return start, end
-
-
-def _ranges_overlap(left: dict, right: dict) -> bool:
-    left_start, left_end = _timestamp_bounds(left)
-    right_start, right_end = _timestamp_bounds(right)
-    if (
-        left_start is None
-        or left_end is None
-        or right_start is None
-        or right_end is None
-    ):
-        return False
-    if left_end < left_start:
-        left_start, left_end = left_end, left_start
-    if right_end < right_start:
-        right_start, right_end = right_end, right_start
-    return max(left_start, right_start) < min(left_end, right_end)
-
-
-def gold_matches_result(gold: dict, result: dict) -> bool:
+def gold_matches_result(
+    gold: dict, result: dict, *, min_overlap_ratio: float = 0.5
+) -> bool:
     """Return True when a result satisfies one gold evidence entry."""
-    if str(gold.get("video_id") or "") != str(result.get("video_id") or ""):
+    gold = normalize_gold_evidence(gold)
+    result_video_id = str(result.get("video_id") or result.get("source_id") or "")
+    if gold["video_id"] != result_video_id:
         return False
 
-    gold_chunk_index = _coerce_int(gold.get("chunk_index"))
-    result_chunk_index = _coerce_int(result.get("chunk_index"))
-    if gold_chunk_index is not None and result_chunk_index is not None:
-        return gold_chunk_index == result_chunk_index
+    if "start" in gold:
+        return span_matches(gold, result, min_overlap_ratio=min_overlap_ratio)
 
-    return _ranges_overlap(gold, result)
+    gold_version, result_version = gold.get("chunking_version"), chunking_version(result)
+    if gold_version and result_version and gold_version != result_version:
+        raise ValueError(
+            f"Chunking version mismatch for {result_video_id}: "
+            f"gold {gold_version!r}, result {result_version!r}"
+        )
+    try:
+        result_index = int(result.get("chunk_index"))
+    except (TypeError, ValueError, OverflowError):
+        return False
+    return gold["legacy_chunk_index"] == result_index
 
 
 def _matched_gold_indices(
-    gold_evidence: Sequence[dict], results: Sequence[dict], k: int
+    gold_evidence: Sequence[dict],
+    results: Sequence[dict],
+    k: int,
+    *,
+    min_overlap_ratio: float,
 ) -> List[int]:
     matched = set()
     for row in list(results)[: max(0, int(k))]:
         for idx, gold in enumerate(gold_evidence):
             if idx in matched:
                 continue
-            if gold_matches_result(gold, row):
+            if gold_matches_result(gold, row, min_overlap_ratio=min_overlap_ratio):
                 matched.add(idx)
                 break
     return sorted(matched)
 
 
-def recall_at_k(gold_evidence: Sequence[dict], results: Sequence[dict], k: int) -> float:
+def recall_at_k(
+    gold_evidence: Sequence[dict],
+    results: Sequence[dict],
+    k: int,
+    *,
+    min_overlap_ratio: float = 0.5,
+) -> float:
     """Compute gold-evidence recall at K for one query."""
     if not gold_evidence:
         return 0.0
-    return len(_matched_gold_indices(gold_evidence, results, k)) / float(
-        len(gold_evidence)
+    matched = _matched_gold_indices(
+        gold_evidence, results, k, min_overlap_ratio=min_overlap_ratio
     )
+    return len(matched) / float(len(gold_evidence))
 
 
 def precision_at_k(
-    gold_evidence: Sequence[dict], results: Sequence[dict], k: int
+    gold_evidence: Sequence[dict],
+    results: Sequence[dict],
+    k: int,
+    *,
+    min_overlap_ratio: float = 0.5,
 ) -> float:
     """Compute the share of the top-K ranks containing relevant evidence."""
     limit = max(0, int(k))
@@ -129,22 +108,40 @@ def precision_at_k(
     relevant = sum(
         1
         for row in list(results)[:limit]
-        if any(gold_matches_result(gold, row) for gold in gold_evidence)
+        if any(
+            gold_matches_result(gold, row, min_overlap_ratio=min_overlap_ratio)
+            for gold in gold_evidence
+        )
     )
     return relevant / float(limit)
 
 
-def mrr_at_k(gold_evidence: Sequence[dict], results: Sequence[dict], k: int) -> float:
+def mrr_at_k(
+    gold_evidence: Sequence[dict],
+    results: Sequence[dict],
+    k: int,
+    *,
+    min_overlap_ratio: float = 0.5,
+) -> float:
     """Compute reciprocal rank of the first gold hit within K."""
     if not gold_evidence:
         return 0.0
     for rank, row in enumerate(list(results)[: max(0, int(k))], start=1):
-        if any(gold_matches_result(gold, row) for gold in gold_evidence):
+        if any(
+            gold_matches_result(gold, row, min_overlap_ratio=min_overlap_ratio)
+            for gold in gold_evidence
+        ):
             return 1.0 / float(rank)
     return 0.0
 
 
-def ndcg_at_k(gold_evidence: Sequence[dict], results: Sequence[dict], k: int) -> float:
+def ndcg_at_k(
+    gold_evidence: Sequence[dict],
+    results: Sequence[dict],
+    k: int,
+    *,
+    min_overlap_ratio: float = 0.5,
+) -> float:
     """Compute binary nDCG at K, de-duplicating repeated hits to the same gold row."""
     if not gold_evidence:
         return 0.0
@@ -156,7 +153,7 @@ def ndcg_at_k(gold_evidence: Sequence[dict], results: Sequence[dict], k: int) ->
         for idx, gold in enumerate(gold_evidence):
             if idx in seen_gold:
                 continue
-            if gold_matches_result(gold, row):
+            if gold_matches_result(gold, row, min_overlap_ratio=min_overlap_ratio):
                 matched_idx = idx
                 break
         if matched_idx is None:
@@ -171,22 +168,34 @@ def ndcg_at_k(gold_evidence: Sequence[dict], results: Sequence[dict], k: int) ->
     return dcg / idcg if idcg > 0.0 else 0.0
 
 
-def score_query_results(query_case: dict, results: Sequence[dict]) -> Dict[str, float]:
+def score_query_results(
+    query_case: dict, results: Sequence[dict], *, min_overlap_ratio: float = 0.5
+) -> Dict[str, float]:
     """Score one query case against retrieved rows."""
     gold_evidence = query_case.get("gold_evidence") or []
     if not isinstance(gold_evidence, list):
         raise ValueError(
             f"{query_case.get('id', '<unknown>')} gold_evidence must be a list"
         )
+    precision = partial(
+        precision_at_k, gold_evidence, results, min_overlap_ratio=min_overlap_ratio
+    )
+    recall = partial(
+        recall_at_k, gold_evidence, results, min_overlap_ratio=min_overlap_ratio
+    )
     return {
-        METRIC_PRECISION_1: precision_at_k(gold_evidence, results, 1),
-        METRIC_PRECISION_5: precision_at_k(gold_evidence, results, 5),
-        METRIC_PRECISION_10: precision_at_k(gold_evidence, results, 10),
-        METRIC_RECALL_1: recall_at_k(gold_evidence, results, 1),
-        METRIC_RECALL_5: recall_at_k(gold_evidence, results, 5),
-        METRIC_RECALL_10: recall_at_k(gold_evidence, results, 10),
-        METRIC_MRR_10: mrr_at_k(gold_evidence, results, 10),
-        METRIC_NDCG_10: ndcg_at_k(gold_evidence, results, 10),
+        METRIC_PRECISION_1: precision(1),
+        METRIC_PRECISION_5: precision(5),
+        METRIC_PRECISION_10: precision(10),
+        METRIC_RECALL_1: recall(1),
+        METRIC_RECALL_5: recall(5),
+        METRIC_RECALL_10: recall(10),
+        METRIC_MRR_10: mrr_at_k(
+            gold_evidence, results, 10, min_overlap_ratio=min_overlap_ratio
+        ),
+        METRIC_NDCG_10: ndcg_at_k(
+            gold_evidence, results, 10, min_overlap_ratio=min_overlap_ratio
+        ),
     }
 
 

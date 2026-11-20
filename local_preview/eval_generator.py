@@ -10,11 +10,8 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-import os
 import re
-import shutil
 import subprocess
-import tempfile
 import threading
 import uuid
 from copy import deepcopy
@@ -22,6 +19,8 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional
+
+from local_preview.codex_runner import CodexRunner, CodexRunnerError, _safe_error_text
 
 
 CASE_TYPES = (
@@ -37,7 +36,6 @@ DIFFICULTIES = {"easy", "medium", "hard"}
 REVIEW_DECISIONS = {"approved", "edited", "rejected"}
 MAX_SELECTED_VIDEOS = 3
 MAX_CONTEXT_CHARS = 150_000
-CODEX_TIMEOUT_SECONDS = 300
 MIN_VALID_CASES = 3
 
 
@@ -50,11 +48,6 @@ def _chmod_private(path: Path) -> None:
         path.chmod(0o600)
     except OSError:
         pass
-
-
-def _safe_error_text(value: object, limit: int = 500) -> str:
-    text = re.sub(r"\s+", " ", str(value or "")).strip()
-    return text[:limit]
 
 
 class EvalGeneratorError(RuntimeError):
@@ -104,154 +97,17 @@ class EvalGeneratorService:
             / "eval_generator_output.schema.json"
         )
         self.video_getter = video_getter
-        self.command_runner = command_runner or subprocess.run
+        self.codex_runner = CodexRunner(
+            command_runner, lambda: self._codex_path(), include_diagnostics=True
+        )
         self.lock = threading.Lock()
         self.jobs: Dict[str, EvalGeneratorJob] = {}
         self.active_job_id: Optional[str] = None
-        self._capability_cache: Optional[dict] = None
-        self._capability_cached_at = 0.0
 
-    # ------------------------------------------------------------------
-    # Codex capability and invocation
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _codex_path() -> Optional[str]:
-        override = str(os.environ.get("YT_RAG_CODEX_BIN") or "").strip()
-        if override:
-            resolved = shutil.which(override)
-            if resolved:
-                return resolved
-            candidate = Path(override).expanduser()
-            if candidate.exists() and candidate.is_file():
-                return str(candidate.resolve())
-            return None
-        return shutil.which("codex")
-
-    @staticmethod
-    def _sanitized_env() -> dict:
-        allowed = {
-            "PATH",
-            "HOME",
-            "CODEX_HOME",
-            "TMPDIR",
-            "TEMP",
-            "TMP",
-            "LANG",
-            "LC_ALL",
-            "SSL_CERT_FILE",
-            "SSL_CERT_DIR",
-            "HTTP_PROXY",
-            "HTTPS_PROXY",
-            "ALL_PROXY",
-            "NO_PROXY",
-            "http_proxy",
-            "https_proxy",
-            "all_proxy",
-            "no_proxy",
-        }
-        return {key: value for key, value in os.environ.items() if key in allowed}
+    _codex_path = staticmethod(CodexRunner._codex_path)
 
     def capabilities(self, *, force: bool = False) -> dict:
-        import time
-
-        with self.lock:
-            if (
-                not force
-                and self._capability_cache is not None
-                and time.monotonic() - self._capability_cached_at < 30
-            ):
-                return deepcopy(self._capability_cache)
-
-        codex_path = self._codex_path()
-        if not codex_path:
-            result = {
-                "available": False,
-                "authenticated": False,
-                "version": None,
-                "model_override": str(os.environ.get("YT_RAG_CODEX_MODEL") or "")
-                or None,
-                "message": "Codex CLI was not found. Install Codex or set YT_RAG_CODEX_BIN.",
-            }
-        else:
-            env = self._sanitized_env()
-            try:
-                version_run = self.command_runner(
-                    [codex_path, "--version"],
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                    timeout=10,
-                    env=env,
-                )
-                login_run = self.command_runner(
-                    [codex_path, "login", "status"],
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                    timeout=10,
-                    env=env,
-                )
-                available = version_run.returncode == 0
-                authenticated = available and login_run.returncode == 0
-                version_text = _safe_error_text(
-                    version_run.stdout or version_run.stderr, limit=120
-                )
-                result = {
-                    "available": available,
-                    "authenticated": authenticated,
-                    "version": version_text or None,
-                    "model_override": str(
-                        os.environ.get("YT_RAG_CODEX_MODEL") or ""
-                    ).strip()
-                    or None,
-                    "message": (
-                        "Codex CLI is ready."
-                        if authenticated
-                        else "Codex CLI is installed but not authenticated. Run codex login."
-                    ),
-                }
-            except (OSError, subprocess.SubprocessError) as exc:
-                result = {
-                    "available": False,
-                    "authenticated": False,
-                    "version": None,
-                    "model_override": str(
-                        os.environ.get("YT_RAG_CODEX_MODEL") or ""
-                    ).strip()
-                    or None,
-                    "message": f"Codex CLI check failed: {_safe_error_text(exc)}",
-                }
-
-        with self.lock:
-            self._capability_cache = deepcopy(result)
-            self._capability_cached_at = time.monotonic()
-        return result
-
-    def _codex_command(self, codex_path: str, temp_dir: str) -> List[str]:
-        command = [
-            codex_path,
-            "exec",
-            "--ephemeral",
-            "--sandbox",
-            "read-only",
-            "--config",
-            'approval_policy="never"',
-            "--skip-git-repo-check",
-            "--ignore-user-config",
-            "--strict-config",
-            "--output-schema",
-            str(self.schema_path),
-            "--color",
-            "never",
-            "-C",
-            str(temp_dir),
-        ]
-        model = str(os.environ.get("YT_RAG_CODEX_MODEL") or "").strip()
-        if model:
-            command.extend(["--model", model])
-        command.append("-")
-        return command
+        return self.codex_runner.capabilities(force=force)
 
     # ------------------------------------------------------------------
     # Job lifecycle
@@ -344,53 +200,11 @@ class EvalGeneratorService:
             context = self._build_context(job["video_ids"])
             prompt = self._build_prompt(context)
             capability = self.capabilities()
-            codex_path = self._codex_path()
-            if not codex_path or not capability.get("authenticated"):
-                raise EvalGeneratorError(
-                    "CODEX_UNAVAILABLE", "Codex CLI is no longer available.", 503
-                )
-
-            self._update_job(job_id, step="generating")
-            with tempfile.TemporaryDirectory(prefix="yt-rag-eval-generator-") as temp_dir:
-                command = self._codex_command(codex_path, temp_dir)
-                try:
-                    completed = self.command_runner(
-                        command,
-                        input=prompt,
-                        capture_output=True,
-                        text=True,
-                        check=False,
-                        timeout=CODEX_TIMEOUT_SECONDS,
-                        env=self._sanitized_env(),
-                    )
-                except subprocess.TimeoutExpired as exc:
-                    raise EvalGeneratorError(
-                        "CODEX_TIMEOUT",
-                        "Codex generation exceeded the five-minute timeout.",
-                        504,
-                    ) from exc
-                except OSError as exc:
-                    raise EvalGeneratorError(
-                        "CODEX_EXEC_FAILED",
-                        f"Codex could not be started: {_safe_error_text(exc)}",
-                        502,
-                    ) from exc
-
-            if completed.returncode != 0:
-                raise EvalGeneratorError(
-                    "CODEX_EXEC_FAILED",
-                    "Codex generation failed. "
-                    + _safe_error_text(completed.stderr or completed.stdout),
-                    502,
-                )
-            try:
-                generated = json.loads(completed.stdout)
-            except json.JSONDecodeError as exc:
-                raise EvalGeneratorError(
-                    "INVALID_CODEX_OUTPUT",
-                    "Codex returned output that was not valid JSON.",
-                    502,
-                ) from exc
+            generated, _ = self.codex_runner.run(
+                prompt,
+                self.schema_path,
+                on_generating=lambda: self._update_job(job_id, step="generating"),
+            )
 
             self._update_job(job_id, step="validating")
             draft = self._canonicalize_draft(
@@ -407,7 +221,7 @@ class EvalGeneratorService:
                 draft_id=draft["draft_id"],
                 completed_at=completed_at,
             )
-        except EvalGeneratorError as exc:
+        except (EvalGeneratorError, CodexRunnerError) as exc:
             self._update_job(
                 job_id,
                 status="failed",
@@ -913,6 +727,11 @@ class EvalGeneratorService:
 
         dataset_id = f"dataset_{uuid.uuid4()}"
         created_at = now_iso()
+        source_snapshot = draft.get("source_snapshot") or {}
+        chunking_versions = {
+            video["video_id"]: video.get("chunking_version")
+            for video in source_snapshot.get("videos", [])
+        }
         rows = []
         for case in accepted:
             rows.append(
@@ -924,8 +743,12 @@ class EvalGeneratorService:
                     "difficulty": case["difficulty"],
                     "gold_evidence": [
                         {
-                            key: row[key]
-                            for key in ("video_id", "chunk_index", "start", "end")
+                            "video_id": row["video_id"],
+                            "chunk_index": row["chunk_index"],
+                            "start": row["start"],
+                            "end": row["end"],
+                            "legacy_chunk_index": row["chunk_index"],
+                            "chunking_version": chunking_versions.get(row["video_id"]),
                         }
                         for row in case["gold_evidence"]
                     ],
@@ -968,7 +791,7 @@ class EvalGeneratorService:
             "created_at": created_at,
             "source_draft_id": draft_id,
             "generator": deepcopy(draft.get("generator") or {}),
-            "source_snapshot": deepcopy(draft.get("source_snapshot") or {}),
+            "source_snapshot": deepcopy(source_snapshot),
             "rows": rows,
             "query_set": query_set,
         }

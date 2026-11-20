@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Label review | Retrieval Lab</title>
+    <link rel="icon" href="./icons/favicon-ytrag.svg" />
+    <link rel="stylesheet" href="./styles.css" />
+    <script src="/browser-session.js"></script>
+  </head>
+  <body>
+    <header class="appbar">
+      <a class="brand brand-link" href="./index.html" aria-label="Retrieval Lab home">
+        <img src="./icons/icon-play.svg" alt="" aria-hidden="true" />
+        <div>
+          <p id="eyebrowText" class="eyebrow">Retrieval Lab</p>
+          <p class="brand-sub">YouTube transcripts</p>
+        </div>
+      </a>
+      <nav class="appbar-nav" aria-label="Primary"></nav>
+    </header>
+    <main class="shell">
+      <div class="hero">
+        <h1>Label review</h1>
+        <p class="subtitle">Review summary key points and audit automated judge decisions.</p>
+      </div>
+      <div class="label-workspace">
+        <aside class="label-sidebar">
+          <section class="panel">
+            <h2 class="section-title">New draft</h2>
+            <form id="startForm" class="grid">
+              <label>Task<select id="task" required></select></label>
+              <label id="sourceField">Sources<select id="sources" required></select></label>
+              <label id="languageField">Output language
+                <input id="language" list="languages" value="en" required />
+                <datalist id="languages">
+                  <option value="en">English</option>
+                  <option value="ja">Japanese</option>
+                </datalist>
+              </label>
+              <label id="auditFileField" hidden>Judge audit sample
+                <input type="file" id="auditFile" accept=".jsonl,application/x-ndjson" disabled />
+              </label>
+              <button class="btn" id="startJob" disabled>Start draft</button>
+              <p id="jobStatus" class="label-status" role="status"></p>
+            </form>
+          </section>
+          <section class="panel grid">
+            <h2 class="section-title">Saved drafts</h2>
+            <label>Draft<select id="drafts" disabled></select></label>
+            <p id="draftStatus" class="label-status" role="status"></p>
+          </section>
+        </aside>
+        <section class="panel" aria-labelledby="reviewHeading">
+          <h2 id="reviewHeading" class="section-title">Review draft</h2>
+          <p id="reviewStatus" class="label-status" role="status"></p>
+          <div id="review" class="grid" hidden>
+            <div class="label-actions">
+              <p id="progress" role="status"></p>
+              <div class="label-actions">
+                <button class="btn secondary" id="previous" type="button" aria-keyshortcuts="k">Previous</button>
+                <button class="btn secondary" id="next" type="button" aria-keyshortcuts="j">Next</button>
+              </div>
+            </div>
+            <p id="notes" class="label-status" hidden></p>
+            <article class="label-item grid" aria-labelledby="itemHeading">
+              <h3 id="itemHeading" tabindex="-1"></h3>
+              <p id="decisionStatus" class="label-status"></p>
+              <p id="itemText" class="label-text"></p>
+              <p id="itemTiming"></p>
+              <p id="rationale" class="label-status" hidden></p>
+              <ul id="auditGoldPoints" hidden></ul>
+              <label id="auditNoteField" hidden>Optional disagreement note
+                <textarea id="auditNote" maxlength="4000"></textarea>
+              </label>
+              <a id="timestamp" target="_blank" rel="noopener noreferrer" hidden>Open at timestamp</a>
+              <div id="decisionActions" class="label-actions">
+                <button class="btn secondary" id="approve" type="button" aria-keyshortcuts="a">Approve</button>
+                <button class="btn secondary" id="edit" type="button" aria-keyshortcuts="e">Edit</button>
+                <button class="btn secondary danger" id="reject" type="button" aria-keyshortcuts="r">Reject</button>
+              </div>
+              <form id="editForm" class="grid" hidden>
+                <label>Label text<textarea name="text" required maxlength="4000"></textarea></label>
+                <div class="label-edit-fields">
+                  <label>Importance (1–3)<input name="importance" type="number" required min="1" max="3" step="1" /></label>
+                  <label>Onset (seconds)<input name="onset" type="number" required min="0" step="any" /></label>
+                  <label>Span start (seconds)<input name="span_start" type="number" required min="0" step="any" /></label>
+                  <label>Span end (seconds)<input name="span_end" type="number" required min="0" step="any" /></label>
+                </div>
+                <div class="label-actions">
+                  <button class="btn" id="saveEdit">Save edit</button>
+                  <button class="btn secondary" id="cancelEdit" type="button">Cancel</button>
+                </div>
+              </form>
+            </article>
+            <section id="contextSection" aria-labelledby="contextHeading">
+              <h3 id="contextHeading">Transcript context</h3>
+              <p id="contextStatus" class="label-status" role="status"></p>
+              <ul id="context" class="label-context" aria-label="Transcript lines" tabindex="0" hidden></ul>
+            </section>
+            <div class="label-actions">
+              <button class="btn" id="finalize" type="button">Finalize dataset</button>
+              <p id="finalizeStatus" class="label-status"></p>
+            </div>
+            <p id="reviewKeys" class="label-status">Keys <kbd>A</kbd> approve, <kbd>E</kbd> edit, <kbd>R</kbd> reject, <kbd>J</kbd> next, <kbd>K</kbd> previous.</p>
+          </div>
+        </section>
+      </div>
+    </main>
+    <nav class="bottom-tabbar" aria-label="Primary mobile"></nav>
+    <script type="module" src="./labels.js"></script>
+  </body>
+</html>

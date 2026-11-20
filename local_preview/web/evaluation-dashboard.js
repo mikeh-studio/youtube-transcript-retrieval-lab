@@ -71,7 +71,7 @@ function metricValue(v, fallback = "Awaiting grades") {
   }
   return typeof v === "number" ? formatNumber(v) : show(v);
 }
-function row(label, key, a, b, fallback = "Awaiting grades", target = "") {
+function row(label, key, a, b, fallback = "Awaiting grades", target = "", comparable = true) {
   const scalar = (v) =>
     typeof v === "number" && Number.isFinite(v)
       ? v
@@ -81,7 +81,7 @@ function row(label, key, a, b, fallback = "Awaiting grades", target = "") {
   const av = scalar(a),
     bv = scalar(b);
   const delta =
-    av === null || bv === null
+    !comparable || av === null || bv === null
       ? "—"
       : key.endsWith("_usd")
         ? `${bv - av < 0 ? "−" : ""}$${Math.abs(bv - av).toFixed(6)}`
@@ -128,6 +128,8 @@ function compatibilityReasons(a, b) {
       reasons.push(`${key}: not recorded`);
     else if (String(a[key]) !== String(b[key])) reasons.push(`${key}: differs`);
   }
+  if ((a.scoring_version || b.scoring_version) && a.scoring_version !== b.scoring_version)
+    reasons.push("scoring_version: differs");
   if (a.stage != null && a.stage !== state.stage)
     reasons.push("selected stage differs");
   if (a.cutoff != null && String(a.cutoff) !== state.cutoff)
@@ -446,6 +448,8 @@ function render() {
       : methods[1] || methods[0];
   const d = arm(benchmark ? state.methodA : "direct");
   const m = arm(benchmark ? state.methodB : "mcp");
+  // Arms of one benchmark report share a scorer; only differing recorded versions block deltas.
+  const comparable = !(d.scoring_version && m.scoring_version && d.scoring_version !== m.scoring_version);
   const profileTabs = `<div class="tabs" aria-label="Report profiles">${r.profiles.map((v, i) => `<button data-profile="${i}" aria-pressed="${i === state.profile}" class="${i === state.profile ? "active" : ""}">${esc(v.id || v.model || `Profile ${i + 1}`)}${v.status ? ` · ${esc(v.status)}` : ""}</button>`).join("")}</div>`;
   const profiles = r.profiles || [];
   const incomplete = profiles.some(
@@ -521,6 +525,10 @@ function render() {
       ? `<div class="toolbar"><label>Method A <select id="methodA">${methods.map((name) => `<option value="${esc(name)}" ${name === state.methodA ? "selected" : ""}>${esc(name)}</option>`).join("")}</select></label><label>Method B <select id="methodB">${methods.map((name) => `<option value="${esc(name)}" ${name === state.methodB ? "selected" : ""}>${esc(name)}</option>`).join("")}</select></label></div>`
       : "";
     body += methodControls;
+    if (!comparable)
+      body += '<p class="detail-note" role="note">The scoring rule changed. Deltas require matching scoring versions.</p>';
+    else if (benchmark && !r.scoring_version)
+      body += '<p class="detail-note" role="note">Scored before span-based scoring. Compare it only with reports from the same scoring rule.</p>';
     if (state.mode === "versions" && rejectedCandidates.length)
       body += `<details><summary>Why other runs are unavailable</summary>${rejectedCandidates.map((x) => `<p>${esc(x.title || x.run_id)}: ${esc(compatibilityReasons(r, x).join("; "))}</p>`).join("")}</details>`;
     const da =
@@ -602,6 +610,8 @@ function render() {
               ranking(da, k),
               ranking(ma, k),
               k === "auc" ? "Not configured" : "Not calculated",
+              "",
+              comparable,
             ),
           )
           .join(""),

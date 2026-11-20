@@ -12,6 +12,8 @@ Explicit `contributors`, `contributor_ids`, `case_ids`, or `question_ids` can be
 
 Recorded answer-quality distributions may place `good`, `partial`, and `poor` counts directly in the `answer_quality` object or under its `distribution` object; the corresponding capitalized keys are also retained. Missing counts are not inferred.
 
+Offline retrieval benchmark imports retain `scoring_version` at report and method level. The dashboard requires matching, nonempty method versions to show deltas.
+
 An explicitly illustrative report can set `source_type: demo`. The dashboard then
 shows a persistent “Demo data — not measured results” disclosure across views.
 This flag does not fill missing fields or qualify the report for cost assessment;

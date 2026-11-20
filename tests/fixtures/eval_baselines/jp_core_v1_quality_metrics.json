@@ -1,0 +1,52 @@
+{
+  "dense": {
+    "Precision@1": 0.125,
+    "Precision@5": 0.19999999999999998,
+    "Precision@10": 0.09999999999999999,
+    "gold_recall@1": 0.125,
+    "gold_recall@5": 1.0,
+    "gold_recall@10": 1.0,
+    "MRR@10": 0.48958333333333337,
+    "nDCG@10": 0.6192994465449029
+  },
+  "lexical": {
+    "Precision@1": 0.875,
+    "Precision@5": 0.19999999999999998,
+    "Precision@10": 0.09999999999999999,
+    "gold_recall@1": 0.875,
+    "gold_recall@5": 1.0,
+    "gold_recall@10": 1.0,
+    "MRR@10": 0.9375,
+    "nDCG@10": 0.9538662191964322
+  },
+  "hybrid_baseline": {
+    "Precision@1": 0.625,
+    "Precision@5": 0.19999999999999998,
+    "Precision@10": 0.09999999999999999,
+    "gold_recall@1": 0.625,
+    "gold_recall@5": 1.0,
+    "gold_recall@10": 1.0,
+    "MRR@10": 0.7916666666666666,
+    "nDCG@10": 0.8452324383928644
+  },
+  "optimized_hybrid": {
+    "Precision@1": 1.0,
+    "Precision@5": 0.19999999999999998,
+    "Precision@10": 0.09999999999999999,
+    "gold_recall@1": 1.0,
+    "gold_recall@5": 1.0,
+    "gold_recall@10": 1.0,
+    "MRR@10": 1.0,
+    "nDCG@10": 1.0
+  },
+  "agentic": {
+    "Precision@1": 0.875,
+    "Precision@5": 0.19999999999999998,
+    "Precision@10": 0.09999999999999999,
+    "gold_recall@1": 0.875,
+    "gold_recall@5": 1.0,
+    "gold_recall@10": 1.0,
+    "MRR@10": 0.9375,
+    "nDCG@10": 0.9538662191964322
+  }
+}

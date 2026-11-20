@@ -34,6 +34,7 @@ jobs:
         run: |
           python -m evals.real_runner --help
           python -m evals.experiments compare --help
+          python -m evals.summary.runner --help
 
       - name: Run chunking regression suite
         run: HF_HUB_OFFLINE=1 pytest multilingual/tests/test_chunking_strategies.py -q
@@ -66,4 +67,4 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Run workspace and evaluation regressions
-        run: npx playwright test e2e/qa-answer-mode.spec.ts e2e/workbench.spec.ts e2e/library.spec.ts e2e/shell-redesign.spec.ts e2e/evaluation-dashboard.spec.ts
+        run: npx playwright test e2e/qa-answer-mode.spec.ts e2e/workbench.spec.ts e2e/library.spec.ts e2e/shell-redesign.spec.ts e2e/evaluation-dashboard.spec.ts e2e/labels-review.spec.ts

@@ -330,12 +330,15 @@ def test_public_benchmark_shows_only_recorded_metrics():
     report = normalize_report(
         {
             "query_count": 8,
+            "scoring_version": "span_overlap_v1",
             "selected_run": {"name": "hybrid"},
             "runs": [
                 {
                     "name": "hybrid",
+                    "scoring_version": "span_overlap_v1",
                     "metrics": {"gold_recall@5": 1.0, "MRR@10": 0.75, "nDCG@10": 0.8},
-                }
+                },
+                {"name": "legacy", "metrics": {"MRR@10": 0.5}},
             ],
         }
     )
@@ -344,6 +347,9 @@ def test_public_benchmark_shows_only_recorded_metrics():
     assert ranking == {"recall_at_5": 1.0, "mrr_at_10": 0.75, "ndcg_at_10": 0.8}
     assert "precision_at_5" not in ranking
     assert profile["arms"]["hybrid"]["total"] == 8
+    assert report["scoring_version"] == "span_overlap_v1"
+    assert profile["arms"]["hybrid"]["scoring_version"] == "span_overlap_v1"
+    assert profile["arms"]["legacy"]["scoring_version"] is None
     assert "cutoff" not in report
 
 
