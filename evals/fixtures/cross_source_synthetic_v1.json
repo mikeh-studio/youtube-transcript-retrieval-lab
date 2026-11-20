@@ -1,0 +1,50 @@
+{
+  "qa": {
+    "id": "item_1",
+    "language": "en",
+    "selected_source_ids": ["demo-cork", "demo-clay", "demo-wax"],
+    "question": "How do the cork and clay demos keep moisture away from the jar?",
+    "required_facts": [
+      "The cork lid absorbs moisture near the rim.",
+      "The clay lid has a groove that channels drops away."
+    ],
+    "gold_spans": [
+      {"source_id": "demo-cork", "start": 10, "end": 20},
+      {"source_id": "demo-clay", "start": 30, "end": 40}
+    ]
+  },
+  "gold_themes": [
+    {"id": "item_1", "title": "Keeping the jar dry", "source_ids": ["demo-cork", "demo-clay"]},
+    {"id": "item_2", "title": "Wax decorations", "source_ids": ["demo-wax"]}
+  ],
+  "ask": {
+    "status": "answered",
+    "answer": "Cork absorbs moisture while the clay groove channels drops away.",
+    "citations": [
+      {"video_id": "demo-cork", "start_seconds": 15, "end_seconds": 25},
+      {"video_id": "demo-clay", "start_seconds": 60, "end_seconds": 70}
+    ],
+    "retrieved_chunks": [
+      {"video_id": "demo-clay", "start_seconds": 30, "end_seconds": 40}
+    ]
+  },
+  "collection": {
+    "source_ids": ["demo-cork", "demo-clay", "demo-wax"],
+    "overview": "Two demos use different lids to keep a jar dry.",
+    "themes": [
+      {
+        "title": "Lid moisture control",
+        "summary": "The two lids redirect moisture in different ways.",
+        "perspectives": [
+          {"source_id": "demo-cork", "stance": "adds", "statement": "Cork absorbs water near the rim.", "citations": ["E1"]},
+          {"source_id": "demo-clay", "stance": "differs", "statement": "The clay lid uses a groove to redirect drops.", "citations": ["E2"]}
+        ]
+      }
+    ],
+    "evidence_catalog": [
+      {"citation_id": "E1", "video_id": "demo-cork", "start_seconds": 12, "end_seconds": 17, "text": "The cork at the rim drinks in the stray drops."},
+      {"citation_id": "E2", "video_id": "demo-clay", "start_seconds": 30, "end_seconds": 38, "text": "Drops go out through a groove under the clay lid."},
+      {"citation_id": "E3", "video_id": "demo-wax", "start_seconds": 50, "end_seconds": 60, "text": "We press wax dots next to the handle."}
+    ]
+  }
+}

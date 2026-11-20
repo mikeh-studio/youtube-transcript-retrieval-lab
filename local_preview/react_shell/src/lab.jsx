@@ -2,6 +2,9 @@
 import React from "react";
 
 export const LAST_VIDEO_KEY = "yt_rag_last_video_id";
+export const COLLECTION_SELECTION_KEY = "yt_rag_collection_source_ids";
+export const COLLECTION_MIN_SOURCES = 2;
+export const COLLECTION_MAX_SOURCES = 12;
 export const FEEDBACK_REVISION_STORAGE_KEY = "youtube-rag-feedback-revision";
 export const YOUTUBE_ID_PATTERN = /^[a-zA-Z0-9_-]{11}$/;
 

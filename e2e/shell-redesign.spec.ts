@@ -94,7 +94,7 @@ test("Study remains available as a secondary tool", async ({ page }) => {
   await page.goto("/index.html#/study");
   await expect(
     page.getByRole("tablist", { name: "Study tool" }).getByRole("tab"),
-  ).toHaveText(["Study", "Summary"]);
+  ).toHaveText(["Study", "Summary", "Key areas"]);
 });
 
 test("shows supported speaker context on generated study flashcards", async ({

@@ -213,3 +213,139 @@ test("imports a judge audit and records a disagreement with a note", async ({ pa
     { id: "item_1", decision: "rejected", note: "The window supports both claims." },
   ]);
 });
+
+test("reviews episode sections and saves boundary seconds", async ({ page }) => {
+  const title = "<b>Opening drum check</b>";
+  const draft = {
+    draft_id: draftId,
+    task: "sections",
+    language: "en",
+    status: "pending_review",
+    sources: [source],
+    notes: "",
+    items: [{
+      id: "item_1", source_id: source.source_id, title, start: 28.5, end: 100,
+      start_line: 12, end_line: 29,
+      review: null as null | { decision: string; edits: Record<string, unknown> },
+    }],
+  };
+  await page.route("**/v1/videos", (route) => route.fulfill({
+    json: { videos: [{ video_id: source.source_id, title: source.title }] },
+  }));
+  await page.route("**/v1/labels/**", (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === "/v1/labels/tasks") return route.fulfill({ json: { tasks: [
+      { task: "sections", title: "Episode sections", min_sources: 1, max_sources: 1 },
+    ] } });
+    if (path === "/v1/labels/drafts") return route.fulfill({
+      json: { drafts: [{ ...draft, item_count: 1, decided_count: 0 }] },
+    });
+    if (path === draftPath) return route.fulfill({ json: { draft } });
+    if (path === `${draftPath}/context`) return route.fulfill({
+      json: { context: { lines: [{ line: 12, start: 28.5, end: 29, text: transcript }] } },
+    });
+    if (path === `${draftPath}/review`) {
+      const { decisions: [row] } = route.request().postDataJSON();
+      expect(row).toEqual({
+        id: "item_1", decision: "edited", edits: { title, start: 31.25, end: 101 },
+      });
+      draft.items[0].review = { decision: row.decision, edits: row.edits };
+      return route.fulfill({ json: { draft } });
+    }
+    return route.fulfill({ status: 404, json: { error: { message: "Unexpected mock request" } } });
+  });
+
+  await page.goto("/labels.html");
+  await page.locator("#drafts").selectOption(draftId);
+  await expect(page.getByText(title, { exact: true })).toBeVisible();
+  await expect(page.locator("#itemText b")).toHaveCount(0);
+  await expect(page.getByText("Section 0:28.5–1:40")).toBeVisible();
+  await page.getByRole("button", { name: "Edit" }).click();
+  await expect(page.getByLabel("Section title")).toHaveValue(title);
+  await expect(page.getByLabel("Importance (1–3)")).toBeHidden();
+  await page.getByLabel("Section start (seconds)").fill("31.25");
+  await page.getByLabel("Section end (seconds)").fill("101");
+  await page.getByRole("button", { name: "Save edit" }).click();
+  await expect(page.getByText("Section 0:31.25–1:41")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Open at timestamp" })).toHaveAttribute("href", `${source.url}&t=31s`);
+});
+
+test("reviews and edits a multi-source question with separate transcript context", async ({ page }) => {
+  const second = {
+    source_id: "claydemos",
+    title: "Clay lid demonstration",
+    url: "https://www.youtube.com/watch?v=claydemos",
+    duration: 90,
+  };
+  const question = "<b>How do the two workshops store their tools?</b>";
+  const spans = [
+    { source_id: source.source_id, start: 25.5, end: 30 },
+    { source_id: second.source_id, start: 10, end: 17 },
+  ];
+  const draft = {
+    draft_id: draftId,
+    task: "multi_source_qa",
+    language: "en",
+    status: "pending_review",
+    sources: [source, second],
+    notes: "",
+    items: [{
+      id: "item_1",
+      question,
+      required_facts: ["The first workshop hangs the rake.", "The second keeps tools in a box."],
+      gold_spans: spans,
+      review: null as null | { decision: string; edits: Record<string, unknown> },
+    }],
+  };
+  await page.route("**/v1/videos", (route) => route.fulfill({
+    json: { videos: [source, second].map(({ source_id, title }) => ({ video_id: source_id, title })) },
+  }));
+  await page.route("**/v1/labels/**", (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === "/v1/labels/tasks") return route.fulfill({ json: { tasks: [{
+      task: "multi_source_qa", title: "Multi-source questions", min_sources: 2, max_sources: 12,
+    }] } });
+    if (path === "/v1/labels/drafts") return route.fulfill({
+      json: { drafts: [{ ...draft, item_count: 1, decided_count: 0 }] },
+    });
+    if (path === draftPath) return route.fulfill({ json: { draft } });
+    if (path === `${draftPath}/context`) return route.fulfill({
+      json: { context: { groups: [
+        { source_id: source.source_id, lines: [{ line: 12, start: 25.5, end: 29, text: transcript }] },
+        { source_id: second.source_id, lines: [{ line: 3, start: 10, end: 17, text: "A box holds the tools." }] },
+      ] } },
+    });
+    if (path === `${draftPath}/review`) {
+      const { decisions: [row] } = route.request().postDataJSON();
+      expect(row).toEqual({
+        id: "item_1",
+        decision: "edited",
+        edits: {
+          question: "Where does each workshop put its tools?",
+          required_facts: draft.items[0].required_facts,
+          gold_spans: [spans[0], { ...spans[1], end: 19.5 }],
+        },
+      });
+      draft.items[0].review = { decision: row.decision, edits: row.edits };
+      return route.fulfill({ json: { draft } });
+    }
+    return route.fulfill({ status: 404, json: { error: { message: "Unexpected mock request" } } });
+  });
+
+  await page.goto("/labels.html");
+  await expect(page.locator("#sources")).toHaveAttribute("multiple", "");
+  await page.locator("#drafts").selectOption(draftId);
+  await expect(page.getByText(question, { exact: true })).toBeVisible();
+  await expect(page.getByText(transcript, { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: second.title })).toBeVisible();
+  await expect(page.locator("#itemText b, #contextGroups img")).toHaveCount(0);
+  await expect(page.getByRole("link", { name: /Clay lid demonstration/ }))
+    .toHaveAttribute("href", `${second.url}&t=10s`);
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("textbox", { name: "Question", exact: true })
+    .fill("Where does each workshop put its tools?");
+  await page.getByLabel(/^Gold spans, one per line/).fill(`${source.source_id} 25.5 30\n${second.source_id} 10 19.5`);
+  await page.getByRole("button", { name: "Save edit" }).click();
+  await expect(page.getByText("Where does each workshop put its tools?")).toBeVisible();
+  await expect(page.getByText("1 of 1 decided")).toBeVisible();
+});

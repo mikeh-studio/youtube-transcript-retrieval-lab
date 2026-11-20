@@ -147,6 +147,77 @@ span timestamps in seconds. The matching manifest records the JSONL SHA-256
 and counts for each review decision. Use the manifest to identify completed
 datasets.
 
+Choose **Episode sections** to draft topic boundaries and titles with Codex
+from numbered transcript lines. The review form accepts title and boundary
+edits in seconds. Finalized rows under `data/evaluation/labels/sections/`
+contain `title`, `start` and `end` with the same source and review provenance.
+The Codex model uses its usual default unless a compatible
+`YT_RAG_LABEL_DRAFTER_MODEL` override is set.
+
+### Episode key areas API
+
+`POST /v1/summaries/key-areas` accepts `source_id` or `video_id`, plus
+optional `language` (`en` by default, or `ja`), `provider` and `model`.
+Provider and model defaults follow transcript summaries.
+
+The version 1 response contains `overview.tldr` and `sections`. Each section
+has `title`, `summary`, inclusive `start_line` and `end_line`, a time span in
+seconds, and `key_points`. Each key point has `text`, `evidence_lines`,
+individual `evidence` time spans, `speakers`, an overall `start` and `end`,
+and a playback `url`. Sections partition the numbered transcript. Their
+timestamps preserve caption gaps and overlaps. An empty `speakers` array
+means no proposed name was supported by its cited lines or their turn labels.
+
+`quality` reports the share of proposed citation references that fall in range,
+the share of transcript lines covered, counts of boundary repairs and discarded
+points, and `anchor_mode: "line_ids"`. Results are cached under
+`data/cache/key_areas/<source_id>.json` by version, language, provider, model,
+and transcript fingerprint. The response indicates cache reuse in `cached`.
+
+### Collection summaries API
+
+`POST /v1/summaries/collection` accepts `source_ids` (2–12 distinct indexed
+IDs), `language` (`en` or `ja`), an optional `focus` string, `provider`, and
+`model`. It reuses cached key areas and clusters section embeddings at cosine
+similarity 0.80. Up to eight clusters are ranked by distinct source count, then
+total section duration. Each theme retrieves up to eight hybrid transcript
+matches within the selection. The focus guides synthesis over that evidence.
+
+The response includes `overview`, `themes`, and an `evidence_catalog`. A theme
+has `title`, `summary`, and `perspectives`. Each perspective contains a
+`source_id`, a `stance` (`agrees`, `differs`, `adds`, or `only_here`), a
+`statement`, and `citations` such as `["E1"]`. Resolve each ID against
+`evidence_catalog[].citation_id` for its transcript excerpt, timestamp in seconds,
+and playback URL. The server drops references outside the theme or the
+perspective's source, then omits perspectives that have no valid citation.
+`coverage` reports selected and cited source counts and the share of proposed
+references that pass validation. The share is zero when there are no references.
+
+### Cross-source labels and evaluation
+
+In **Label review**, choose **Multi-source questions** or **Collection themes**
+and select 2–12 sources. Codex drafts both tasks from numbered transcript
+excerpts. Finalized JSONL rows include `selected_source_ids`, source fingerprints,
+and owner review provenance. Question labels include `question`, `required_facts`,
+and timestamped `gold_spans` across two or more sources. Theme labels include
+`title` and `source_ids` for the sources that discuss the theme.
+
+`evals.summary.cross_source` exposes `generate_ask_prediction` and
+`generate_collection_prediction`. Each takes an injected callable accepting the
+request fields as keyword arguments and returning the corresponding API response
+dictionary. Ask generation uses library-wide `multi_vector` routing. Collection
+generation uses the label's selected sources and defaults to the question as
+focus when a question label is supplied.
+
+Use `score_ask` and `score_collection` to measure the fraction of gold sources
+cited and the fraction of gold timestamp spans matched by a same-source citation
+under the P1 overlap rule. Pass question gold spans to score a focused collection
+on the same evidence task. Pass reviewed theme rows and an explicit `judge_llm`
+to `score_collection` for `theme_recall` and `stance_source_precision`.
+The judge compares theme meanings and grades each perspective against its own
+cited excerpts in the context of the theme. A metric is `null` when its
+denominator is empty or it requires a judge and none was supplied.
+
 ## Summary evaluation
 
 The summary evaluator measures the coverage of owner-reviewed key points, where
@@ -170,7 +241,8 @@ Keep source transcripts, reviewed gold, generated predictions, judge decisions
 and reports under gitignored `data/` or `evals/reports/`. A gold JSONL row
 declares `"schema": "summary-gold/v1"` and contains `source_id`, `language`
 (`en` or `ja`), `source_fingerprint`, `duration_s`, and `key_points`.
-Optional `sections` contain `start` and `title`. When assembling gold from
+Optional `sections` contain `start` and `title` and can retain the reviewed
+`end` from finalized Episode sections labels. When assembling gold from
 finalized **Summary key points** labels, group them by source, retain the
 transcript fingerprint, and map each label's `span_start` and `span_end` to
 a `{start,end}` entry in `spans`. Each point retains its `id`, reviewed
@@ -181,7 +253,8 @@ and verifies the stored transcript fingerprint before generation or judging.
 Use `generate --gold … --manifest … --provider … --out predictions.jsonl`
 against the stored library. The provider choices are `codex_cli`, `claude_cli`,
 `chatgpt`, `claude` and `sakana`. `--model` and `--system` can identify
-the run. Prediction rows record the model, provider, output language, cache hit
+the run. Use `--system key_areas` to generate episode sections and score their
+flattened, cited key points. Prediction rows record the model, provider, output language, cache hit
 and CLI version when available. Older cache entries can lack item-level
 timestamp provenance. Use `--data-dir` to select the stored library or
 `--transcripts` to supply a JSON file with the same shape as the
@@ -220,10 +293,15 @@ timeout.
 | `language_match_rate` | Share of item texts matching the gold language by Japanese or Latin script. Mixed script containing Japanese characters counts as Japanese. |
 | `keypoint_recall_w`, `keypoint_precision` | Importance covered divided by total gold importance, and matched items divided by predicted items. Both require judge decisions. |
 | `faithfulness_rate`, `partial_rate` | Items graded supported or partial, respectively, divided by all judged items. |
+| `boundary_f1@15s`, `boundary_f1@30s` | Compare internal section start times in seconds, excluding each plan's first section. Greedily pair the closest boundaries within the tolerance, one-to-one. F1 is twice the match count divided by the total boundary count, or 1 if both counts are zero. |
+| `window_diff` | Share of windows with different gold and predicted boundary counts. Use one-second bins and a window width of half the mean gold section length, rounded down and clamped to fit the timeline. |
+| `section_coverage` | Union of predicted section time spans divided by source duration. |
 
 Results contain per-source counts and per-system micro-aggregates. Rates
 with a zero denominator are unavailable. Span proximity measures timestamp
 coverage. Meaning and claim support require semantic review.
+Boundary metrics require gold and predicted sections. Time coverage only
+requires predicted sections.
 
 `score` writes `results.json`. `report` also writes `summary.md` and a
 fixed-seed `judge_audit_sample.jsonl` containing up to 20 individual decisions.

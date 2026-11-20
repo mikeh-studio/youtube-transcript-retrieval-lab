@@ -19,6 +19,10 @@ const draftPath = (id) => `${apiRoot}/drafts/${encodeURIComponent(id)}`;
 const currentItem = () => state.draft?.items[state.index];
 const effectiveItem = (item) => ({ ...item, ...item.review?.edits });
 const isAudit = () => state.draft?.task === "judge_audit";
+const isSections = () => state.draft?.task === "sections";
+const isMultiSourceQA = () => state.draft?.task === "multi_source_qa";
+const isCollectionThemes = () => state.draft?.task === "collection_themes";
+const draftSource = (id) => state.draft.sources.find((source) => source.source_id === id);
 
 async function api(path, body) {
   const response = await fetch(path, body === undefined ? undefined : {
@@ -94,25 +98,41 @@ async function openDraft(id) {
   }
 }
 
+function transcriptRows(lines) {
+  return lines.map((line) => {
+    const row = document.createElement("li");
+    const time = document.createElement("time");
+    const text = document.createElement("span");
+    time.textContent = `[${String(line.line).padStart(4, "0")}] ${timecode(line.start)}`;
+    text.textContent = line.text;
+    row.append(time, text);
+    return row;
+  });
+}
+
 async function loadContext(draftID, itemID) {
   const request = ++state.contextRequest;
   $("context").replaceChildren();
   $("context").hidden = true;
+  $("contextGroups").replaceChildren();
   $("contextStatus").textContent = "Loading transcript context…";
   try {
     const { context } = await api(`${draftPath(draftID)}/context?item=${encodeURIComponent(itemID)}`);
     if (request !== state.contextRequest || state.draft?.draft_id !== draftID) return;
-    const rows = document.createDocumentFragment();
-    for (const line of context.lines) {
-      const row = document.createElement("li");
-      const time = document.createElement("time");
-      const text = document.createElement("span");
-      time.textContent = `[${String(line.line).padStart(4, "0")}] ${timecode(line.start)}`;
-      text.textContent = line.text;
-      row.append(time, text);
-      rows.append(row);
+    if (context.groups) {
+      for (const group of context.groups) {
+        const heading = document.createElement("h4");
+        heading.textContent = draftSource(group.source_id).title;
+        const list = document.createElement("ul");
+        list.className = "label-context";
+        list.tabIndex = 0;
+        list.append(...transcriptRows(group.lines));
+        $("contextGroups").append(heading, list);
+      }
+      $("contextStatus").textContent = "";
+      return;
     }
-    $("context").replaceChildren(rows);
+    $("context").replaceChildren(...transcriptRows(context.lines));
     $("context").hidden = !context.lines.length;
     $("contextStatus").textContent = context.lines.length ? "" : "No transcript lines overlap this span.";
   } catch (error) {
@@ -147,13 +167,42 @@ function updateControls() {
       : "";
 }
 
+function renderCrossSourceDetails(label) {
+  const details = $("crossSourceDetails");
+  details.replaceChildren();
+  details.hidden = !isMultiSourceQA();
+  if (details.hidden) return;
+  for (const fact of label.required_facts) {
+    const row = document.createElement("li");
+    row.textContent = fact;
+    details.append(row);
+  }
+  for (const { source_id, start, end } of label.gold_spans) {
+    const source = draftSource(source_id);
+    const row = document.createElement("li");
+    const url = timestampUrl(source.url, start);
+    const evidence = document.createElement(url ? "a" : "span");
+    evidence.textContent = `${source.title} · ${timecode(start, true)}–${timecode(end, true)}`;
+    if (url) {
+      evidence.href = url;
+      evidence.target = "_blank";
+      evidence.rel = "noopener noreferrer";
+    }
+    row.append(evidence);
+    details.append(row);
+  }
+}
+
 function renderItem() {
   const { draft, index } = state;
   const item = currentItem();
   const label = effectiveItem(item);
   const audit = isAudit();
+  const section = isSections();
   const judgment = item.judgment;
-  const source = draft.sources.find((entry) => entry.source_id === item.source_id);
+  const multiQA = isMultiSourceQA();
+  const collectionThemes = isCollectionThemes();
+  const source = draftSource(item.source_id);
   $("review").hidden = false;
   $("editForm").hidden = true;
   $("itemHeading").textContent = `Item ${index + 1} of ${draft.items.length}`;
@@ -161,10 +210,21 @@ function renderItem() {
   $("decisionStatus").textContent = decision
     ? audit ? (decision === "approved" ? "Agree" : "Disagree") : decision[0].toUpperCase() + decision.slice(1)
     : "Pending";
-  $("itemText").textContent = audit ? judgment.prediction_text : label.text;
-  $("itemTiming").textContent = audit
-    ? `${source.title} · ${timecode(judgment.start, true)} · ${judgment.judge.model}`
-    : `Importance ${label.importance}/3 · Onset ${timecode(label.onset, true)} · Span ${timecode(label.span_start, true)}–${timecode(label.span_end, true)}`;
+  if (multiQA) {
+    $("itemText").textContent = label.question;
+    $("itemTiming").textContent = "Required facts and gold spans";
+  } else if (collectionThemes) {
+    $("itemText").textContent = label.title;
+    $("itemTiming").textContent = label.source_ids.map((id) => draftSource(id).title).join(" · ");
+  } else {
+    $("itemText").textContent = audit ? judgment.prediction_text : section ? label.title : label.text;
+    $("itemTiming").textContent = audit
+      ? `${source.title} · ${timecode(judgment.start, true)} · ${judgment.judge.model}`
+      : section
+        ? `Section ${timecode(label.start, true)}–${timecode(label.end, true)}`
+        : `Importance ${label.importance}/3 · Onset ${timecode(label.onset, true)} · Span ${timecode(label.span_start, true)}–${timecode(label.span_end, true)}`;
+  }
+  renderCrossSourceDetails(label);
   $("rationale").textContent = audit
     ? `Judge ${judgment.kind === "match" ? "match" : "faithfulness"} · ${judgment.decision ?? "No match"}`
     : item.rationale ? `Draft rationale · ${item.rationale}` : "";
@@ -184,11 +244,12 @@ function renderItem() {
   $("reviewKeys").hidden = audit;
   $("notes").textContent = draft.notes ? `Draft notes · ${draft.notes}` : "";
   $("notes").hidden = !draft.notes;
-  const url = audit ? "" : timestampUrl(source?.url, label.onset);
+  const url = audit || !source ? "" : timestampUrl(source.url, section ? label.start : label.onset);
   $("timestamp").hidden = !url;
   if (url) $("timestamp").href = url;
   else $("timestamp").removeAttribute("href");
   updateControls();
+  $("contextHeading").textContent = collectionThemes ? "Transcript excerpts" : "Transcript context";
   $("contextSection").hidden = audit && judgment.kind === "match";
   if ($("contextSection").hidden) ++state.contextRequest;
   else void loadContext(draft.draft_id, item.id);
@@ -206,11 +267,53 @@ function startEdit() {
   if ($("edit").disabled || $("decisionActions").hidden) return;
   const item = effectiveItem(currentItem());
   const form = $("editForm");
-  for (const name of ["text", "importance", "onset", "span_start", "span_end"]) {
-    form.elements[name].value = item[name];
+  const section = isSections();
+  const multiQA = isMultiSourceQA();
+  const collectionThemes = isCollectionThemes();
+  const multiple = multiQA || collectionThemes;
+  $("singleSourceFields").hidden = multiple;
+  for (const [id, name, enabled] of [
+    ["editFactsField", "required_facts", multiQA],
+    ["editSpansField", "gold_spans", multiQA],
+    ["editSourcesField", "source_ids", collectionThemes],
+  ]) {
+    form.elements[name].disabled = $(id).hidden = !enabled;
   }
-  const source = state.draft.sources.find((entry) => entry.source_id === item.source_id);
-  for (const name of ["onset", "span_start", "span_end"]) form.elements[name].max = source.duration;
+  for (const name of ["importance", "onset", "span_start", "span_end"]) {
+    form.elements[name].disabled = multiple;
+  }
+  $("editTextLabel").textContent = section ? "Section title" : "Label text";
+  $("editStartLabel").textContent = section ? "Section start (seconds)" : "Span start (seconds)";
+  $("editEndLabel").textContent = section ? "Section end (seconds)" : "Span end (seconds)";
+  form.elements.text.value = section ? item.title : item.text;
+  form.elements.span_start.value = section ? item.start : item.span_start;
+  form.elements.span_end.value = section ? item.end : item.span_end;
+  for (const name of ["importance", "onset"]) {
+    const field = form.elements[name];
+    field.disabled = field.closest("label").hidden = section || multiple;
+    field.value = item[name] ?? "";
+  }
+  if (multiQA) {
+    $("editTextLabel").textContent = "Question";
+    form.elements.text.value = item.question;
+    form.elements.required_facts.value = item.required_facts.join("\n");
+    form.elements.gold_spans.value = item.gold_spans.map(
+      ({ source_id, start, end }) => `${source_id} ${start} ${end}`,
+    ).join("\n");
+    $("editSpanSources").textContent = state.draft.sources.map(
+      (source) => `${source.title} (${source.source_id})`,
+    ).join(" · ");
+    form.elements.gold_spans.setCustomValidity("");
+  } else if (collectionThemes) {
+    $("editTextLabel").textContent = "Theme title";
+    form.elements.text.value = item.title;
+    form.elements.source_ids.replaceChildren(...state.draft.sources.map((source) =>
+      new Option(source.title, source.source_id, false, item.source_ids.includes(source.source_id)),
+    ));
+  } else {
+    const source = draftSource(item.source_id);
+    for (const name of ["onset", "span_start", "span_end"]) form.elements[name].max = source.duration;
+  }
   form.hidden = false;
   updateControls();
   form.elements.text.focus();
@@ -302,10 +405,15 @@ $("startForm").addEventListener("submit", async (event) => {
       const { draft } = await api(`${apiRoot}/judge-audits`, { judgments });
       draftID = draft.draft_id;
     } else {
+      const task = state.tasks.find((entry) => entry.task === $("task").value);
+      const sourceIds = Array.from($("sources").selectedOptions, (option) => option.value);
+      if (sourceIds.length < task.min_sources || sourceIds.length > task.max_sources) {
+        throw new Error(`Choose ${task.min_sources} to ${task.max_sources} sources.`);
+      }
       $("jobStatus").textContent = "Starting draft job…";
       const { job } = await api(`${apiRoot}/jobs`, {
         task: $("task").value,
-        source_ids: Array.from($("sources").selectedOptions, (option) => option.value),
+        source_ids: sourceIds,
         language: $("language").value.trim(),
       });
       draftID = await pollJob(job);
@@ -343,6 +451,35 @@ $("cancelEdit").addEventListener("click", () => {
 $("editForm").addEventListener("submit", (event) => {
   event.preventDefault();
   const fields = event.currentTarget.elements;
+  if (isMultiSourceQA()) {
+    const lines = fields.gold_spans.value.trim().split(/\n/).map((line) => line.trim().split(/\s+/));
+    if (lines.some((line) => line.length !== 3 || !line.slice(1).every((value) => Number.isFinite(Number(value))))) {
+      fields.gold_spans.setCustomValidity("Enter a source ID followed by start and end seconds on each line.");
+      fields.gold_spans.reportValidity();
+      return;
+    }
+    decide("edited", {
+      question: fields.text.value,
+      required_facts: fields.required_facts.value.split(/\n/).map((line) => line.trim()).filter(Boolean),
+      gold_spans: lines.map(([source_id, start, end]) => ({ source_id, start: Number(start), end: Number(end) })),
+    });
+    return;
+  }
+  if (isCollectionThemes()) {
+    decide("edited", {
+      title: fields.text.value,
+      source_ids: Array.from(fields.source_ids.selectedOptions, (option) => option.value),
+    });
+    return;
+  }
+  if (isSections()) {
+    decide("edited", {
+      title: fields.text.value,
+      start: fields.span_start.valueAsNumber,
+      end: fields.span_end.valueAsNumber,
+    });
+    return;
+  }
   decide("edited", {
     text: fields.text.value,
     importance: fields.importance.valueAsNumber,
@@ -351,6 +488,7 @@ $("editForm").addEventListener("submit", (event) => {
     span_end: fields.span_end.valueAsNumber,
   });
 });
+$("editForm").elements.gold_spans.addEventListener("input", (event) => event.target.setCustomValidity(""));
 $("finalize").addEventListener("click", () => void mutate("finalize", {}));
 $("review").addEventListener("keydown", (event) => {
   if (

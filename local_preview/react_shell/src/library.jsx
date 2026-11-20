@@ -1,5 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
+  COLLECTION_MAX_SOURCES,
+  COLLECTION_MIN_SOURCES,
+  COLLECTION_SELECTION_KEY,
   FriendlyError,
   LAST_VIDEO_KEY,
   apiRequest,
@@ -85,7 +88,7 @@ function openStudyFor(videoId) {
   navigate("/study");
 }
 
-export function LibraryPage({ onSuccess }) {
+export function LibraryPage({ onSuccess, onSummarizeSelection }) {
   const [url, setUrl] = useState("");
   const [mode, setMode] = useState("single");
   const [language, setLanguage] = useState("ja");
@@ -99,6 +102,8 @@ export function LibraryPage({ onSuccess }) {
   const [deletingVideoId, setDeletingVideoId] = useState("");
   const [filterText, setFilterText] = useState("");
   const [filterLanguage, setFilterLanguage] = useState("");
+  const [selectedVideoIds, setSelectedVideoIds] = useState([]);
+  const [selectionError, setSelectionError] = useState("");
   const [catalog, setCatalog] = useState({ state: "loading", byVideoId: new Map(), truncated: false });
 
   async function loadVideos({ silent = false } = {}) {
@@ -110,6 +115,8 @@ export function LibraryPage({ onSuccess }) {
       const payload = await apiRequest("/v1/videos");
       const rows = (Array.isArray(payload?.videos) ? payload.videos : []).slice().reverse();
       setVideos(rows);
+      const indexedIds = new Set(rows.map((row) => row.video_id));
+      setSelectedVideoIds((ids) => ids.filter((id) => indexedIds.has(id)));
       return rows;
     } catch (error) {
       if (!silent) {
@@ -248,6 +255,29 @@ export function LibraryPage({ onSuccess }) {
 
   const showCatalogColumn = catalog.state === "ready";
   const showChannelColumn = videos.some((video) => channelName(video));
+  const selectionAtLimit = selectedVideoIds.length >= COLLECTION_MAX_SOURCES;
+
+  function toggleVideoSelection(videoId, checked) {
+    setSelectionError("");
+    setSelectedVideoIds((ids) => {
+      if (!checked) {
+        return ids.filter((id) => id !== videoId);
+      }
+      return ids.length < COLLECTION_MAX_SOURCES && !ids.includes(videoId)
+        ? [...ids, videoId]
+        : ids;
+    });
+  }
+
+  function summarizeSelection() {
+    try {
+      sessionStorage.setItem(COLLECTION_SELECTION_KEY, JSON.stringify(selectedVideoIds));
+    } catch (_) {
+      setSelectionError("This browser could not save the video selection for this tab.");
+      return;
+    }
+    onSummarizeSelection();
+  }
 
   return (
     <section className="lab-library">
@@ -384,11 +414,31 @@ export function LibraryPage({ onSuccess }) {
           <p className="lab-hint">Catalog status reflects the first {CATALOG_PAGE_LIMIT * CATALOG_MAX_PAGES} catalog items.</p>
         ) : null}
 
+        {!isLoadingVideos && videos.length >= COLLECTION_MIN_SOURCES ? (
+          <div className="collection-selection">
+            <button
+              className="btn secondary"
+              type="button"
+              onClick={summarizeSelection}
+              disabled={selectedVideoIds.length < COLLECTION_MIN_SOURCES || Boolean(deletingVideoId)}
+            >
+              Summarize selection
+            </button>
+            <span className="lab-hint" aria-live="polite">
+              {selectedVideoIds.length} selected · Choose {COLLECTION_MIN_SOURCES}–{COLLECTION_MAX_SOURCES} videos
+            </span>
+          </div>
+        ) : null}
+        {selectionError ? <p role="alert">{selectionError}</p> : null}
+
         {!isLoadingVideos && visibleVideos.length ? (
           <div className="lab-table-wrap">
             <table className="lab-table">
               <thead>
                 <tr>
+                  {videos.length >= COLLECTION_MIN_SOURCES ? (
+                    <th scope="col"><span className="sr-only">Select for collection</span></th>
+                  ) : null}
                   <th scope="col">Video</th>
                   {showChannelColumn ? <th scope="col">Channel</th> : null}
                   <th scope="col">Lang</th>
@@ -400,11 +450,23 @@ export function LibraryPage({ onSuccess }) {
               <tbody>
                 {visibleVideos.map((video) => {
                   const videoId = String(video.video_id || "").trim();
+                  const selected = selectedVideoIds.includes(videoId);
                   const thumbnailUrl = thumbnailUrlForVideo(videoId);
                   const catalogItem = catalog.byVideoId.get(videoId);
                   const topics = (catalogItem?.labels || []).map((label) => label.en).filter(Boolean);
                   return (
                     <tr key={videoId} data-video-id={videoId}>
+                      {videos.length >= COLLECTION_MIN_SOURCES ? (
+                        <td className="collection-select-cell">
+                          <input
+                            type="checkbox"
+                            aria-label={`Select ${video.title || videoId}`}
+                            checked={selected}
+                            disabled={(!selected && selectionAtLimit) || deletingVideoId === videoId}
+                            onChange={(event) => toggleVideoSelection(videoId, event.target.checked)}
+                          />
+                        </td>
+                      ) : null}
                       <td>
                         <div className="lab-video-cell">
                           <span className="lab-thumb">

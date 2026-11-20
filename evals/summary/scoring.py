@@ -5,6 +5,8 @@ from collections import Counter
 from math import fsum
 
 from evals.contracts import ContractError
+from evals.summary.predictions import RESOLVED_TIMESTAMP_SOURCES
+from evals.summary.sections import section_counts, section_metrics
 
 
 JP_SCRIPT = re.compile(r"[\u3041-\u30fa\u3400-\u4dbf\u4e00-\u9fff\uff66-\uff9d]")
@@ -57,7 +59,10 @@ def _counts(gold, prediction, decisions):
     items = prediction["items"]
     points = gold["key_points"]
     points_by_id = {point["id"]: point for point in points}
-    anchors = [item for item in items if item.get("timestamp_source") == "anchor_match"]
+    anchors = [
+        item for item in items
+        if item.get("timestamp_source") in RESOLVED_TIMESTAMP_SOURCES
+    ]
     anchor_keys = {(item["start"], item["end"]) for item in anchors}
     matches = (
         _proxy_matches(points, items)
@@ -114,6 +119,7 @@ def _counts(gold, prediction, decisions):
                 ),
             }
         )
+    counts.update(section_counts(gold, prediction))
     return counts
 
 
@@ -141,6 +147,7 @@ def _metrics(counts, judged, window_policy, prompt_version):
                 "prompt_version": prompt_version,
             }
         )
+    result.update(section_metrics(counts))
     return result
 
 
