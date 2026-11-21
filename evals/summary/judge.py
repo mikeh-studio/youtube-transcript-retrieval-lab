@@ -13,6 +13,7 @@ from pipelines.export_library import parse_json
 FAITHFULNESS_LABELS = ("supported", "partial", "unsupported")
 KINDS = ("match", "faithfulness")
 WINDOW_SECONDS = 45
+MAX_JUDGE_ATTEMPTS = 2
 GOLD_WINDOW_CAP_SECONDS = 600
 LEGACY_WINDOW_POLICY = "anchor_only_v1"
 WINDOW_POLICY = "anchor_plus_matched_gold_v1"
@@ -118,21 +119,44 @@ def _window(item, lines, matched_point=None):
     )
 
 
+def _reused_gold_ids(decoded):
+    rows = decoded.get("decisions") if isinstance(decoded, dict) else None
+    seen, reused = set(), set()
+    for row in rows if isinstance(rows, list) else []:
+        value = row.get("decision") if isinstance(row, dict) else None
+        if isinstance(value, str):
+            (reused if value in seen else seen).add(value)
+    return sorted(reused)
+
+
 def _judge_batch(llm, kind, task, payload, item_ids, gold_ids):
-    response = llm(
-        system_prompt=DATA_RULE + task,
-        user_message=json.dumps(payload, ensure_ascii=False),
-    )
-    try:
-        decoded = decode_judge_reply(response["text"])
-    except ValueError as exc:
-        raise ContractError(f"Judge {kind} did not return valid JSON") from exc
-    decisions = _decisions(
-        decoded.get("decisions") if isinstance(decoded, dict) else None,
-        item_ids,
-        gold_ids,
-        kind,
-    )
+    message = json.dumps(payload, ensure_ascii=False)
+    for attempt in range(MAX_JUDGE_ATTEMPTS):
+        response = llm(system_prompt=DATA_RULE + task, user_message=message)
+        try:
+            decoded = decode_judge_reply(response["text"])
+        except ValueError as exc:
+            raise ContractError(f"Judge {kind} did not return valid JSON") from exc
+        try:
+            decisions = _decisions(
+                decoded.get("decisions") if isinstance(decoded, dict) else None,
+                item_ids,
+                gold_ids,
+                kind,
+            )
+            break
+        except ContractError:
+            reused = _reused_gold_ids(decoded) if kind == "match" else []
+            # Long prediction lists can tempt the judge to reuse a gold point; ask once more.
+            if not reused or attempt + 1 == MAX_JUDGE_ATTEMPTS:
+                raise
+            message = (
+                json.dumps(payload, ensure_ascii=False)
+                + "\nYour previous reply matched more than one prediction to gold IDs "
+                + ", ".join(reused)
+                + ". Match each gold ID to at most one prediction, the one that best "
+                "conveys it, and use null for every other prediction."
+            )
     provenance = {
         key: response.get(key) for key in ("provider", "model", "cli_version")
     }
