@@ -240,6 +240,38 @@ def test_judge_sends_separate_windows_and_validates_all_decisions(inputs, reply_
         validate_judgments(rows, gold, predictions)
 
 
+@pytest.mark.parametrize("keeps_reusing", [False, True])
+def test_judge_retries_once_when_matching_reuses_a_gold_id(inputs, keeps_reusing):
+    gold, predictions = inputs
+    sources = load_sources(gold, data_dir=None, transcripts=TRANSCRIPTS)
+    calls = []
+    base = fake_llm(calls)
+    match_replies = []
+
+    def llm(*, system_prompt, user_message):
+        reply = base(system_prompt=system_prompt, user_message=user_message.split("\n")[0])
+        payload = json.loads(user_message.split("\n")[0])
+        if "gold" not in payload:
+            return reply
+        match_replies.append(user_message)
+        decisions = json.loads(reply["text"])["decisions"]
+        matched = [row for row in decisions if row["decision"] is not None]
+        if len(match_replies) == 1 or keeps_reusing:
+            matched[1]["decision"] = matched[0]["decision"]
+        return {**reply, "text": json.dumps({"decisions": decisions})}
+
+    if keeps_reusing:
+        with pytest.raises(ContractError, match="one-to-one"):
+            judge(gold, predictions, sources, llm)
+        assert len(match_replies) == 2
+        return
+    rows = judge(gold, predictions, sources, llm)
+    assert len(rows) == 14
+    retry = match_replies[1]
+    assert "matched more than one prediction to gold IDs" in retry
+    assert "Match each gold ID to at most one prediction" in retry
+
+
 def test_judge_caps_only_gold_ranges_and_sends_each_line_in_timeline_order(inputs):
     gold, predictions = inputs
     key = ("synthetic", "synthetic_en")

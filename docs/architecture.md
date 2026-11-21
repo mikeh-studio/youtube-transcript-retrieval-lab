@@ -60,6 +60,15 @@ local files (data/, gitignored) and browser storage
    `insufficient_evidence`; the response includes confidence and the retrieval
    trace under `retrieval_details`.
 
+## Collection summaries
+
+`POST /v1/summaries/collection` assigns a one-based `theme_index` to each
+candidate and checks returned citations against that candidate's evidence.
+The server retries once for missing indices or invalid JSON. It returns cited
+themes in candidate order, with `status: "not_returned"` and empty `perspectives`
+for any indices still missing. The `coverage` block records `retries` and
+`not_returned`. Invalid JSON on the retry produces `COLLECTION_SUMMARY_FAILED`.
+
 ## Frontend
 
 The navigation is defined once in `local_preview/web/lab-nav.js`: Library,

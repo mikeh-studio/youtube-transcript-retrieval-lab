@@ -85,6 +85,40 @@ test("generates key areas with a duration-weighted timeline and cited playback",
   await expect(page.getByRole("heading", { name: "Overview" })).toHaveCount(0);
 });
 
+test("scrolls through 40 episode sections without overflowing on a phone", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockLibrary(page);
+  await page.route("https://www.youtube.com/embed/**", (route) => route.fulfill({
+    contentType: "text/html", body: "<p>Player fixture</p>",
+  }));
+  const sections = Array.from({ length: 40 }, (_, index) => ({
+    start_line: index + 1, end_line: index + 1, start: index * 180, end: (index + 1) * 180,
+    title: `Lantern workshop demonstration ${index + 1}`,
+    summary: "Mark the crease lightly before folding the paper.",
+    key_points: [],
+  }));
+  await page.route("**/v1/summaries/key-areas", (route) => route.fulfill({
+    json: {
+      ok: true, sections, overview: { tldr: "A sequence of folding demonstrations." },
+      quality: { citation_validity: 1, section_coverage: 1, repaired_boundaries: 0 },
+    },
+  }));
+
+  await page.goto("/index.html#/key-areas");
+  await page.getByRole("button", { name: "Generate key areas" }).click();
+  await expect(page.getByRole("group", { name: "Section timeline" }).getByRole("button")).toHaveCount(40);
+  const cards = page.getByRole("article");
+  await expect(cards).toHaveCount(40);
+  await cards.first().scrollIntoViewIfNeeded();
+  await expect(cards.first()).toBeInViewport();
+  await expect(cards.last()).not.toBeInViewport();
+  await cards.last().scrollIntoViewIfNeeded();
+  await expect(cards.last().getByRole("heading")).toBeInViewport();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await cards.last().getByRole("button").click();
+  await expect(page.getByTitle("YouTube player")).toHaveAttribute("src", /[?&]start=7020&/);
+});
+
 test("keeps Library selections across filters and renders cited collection perspectives", async ({ page }) => {
   await mockLibrary(page);
   const firstUrl = `https://www.youtube.com/watch?v=${VIDEOS[0].video_id}&t=12s`;
@@ -136,6 +170,34 @@ test("keeps Library selections across filters and renders cited collection persp
   await expect(theme.getByRole("link", { name: `${VIDEOS[0].title} at 0:12` })).toHaveAttribute("href", firstUrl);
   await expect(theme.getByRole("link", { name: `${VIDEOS[1].title} at 1:05` })).toHaveAttribute("href", secondUrl);
   await expect(page.getByText("Sources cited 2 of 2 · Citation validity 80%")).toBeVisible();
+});
+
+test("scrolls through 40 collection themes without overflowing on a phone", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockLibrary(page);
+  await page.addInitScript((ids) => {
+    sessionStorage.setItem("yt_rag_collection_source_ids", JSON.stringify(ids));
+  }, VIDEOS.map((video) => video.video_id));
+  const themes = Array.from({ length: 40 }, (_, index) => ({
+    title: `Lantern workshop theme ${index + 1}`,
+    summary: "Each workshop folds the paper along the marked crease.",
+    perspectives: [],
+  }));
+  await page.route("**/v1/summaries/collection", (route) => route.fulfill({
+    json: {
+      ok: true, themes, evidence_catalog: [],
+      coverage: { sources_selected: 2, sources_cited: 0, citation_validity: 0 },
+    },
+  }));
+
+  await page.goto("/index.html#/collection");
+  await page.getByRole("button", { name: "Generate collection summary" }).click();
+  const cards = page.getByRole("article");
+  await expect(cards).toHaveCount(40);
+  await expect(cards.last()).not.toBeInViewport();
+  await cards.last().scrollIntoViewIfNeeded();
+  await expect(cards.last().getByRole("heading")).toBeInViewport();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 });
 
 test("caps the collection selection at twelve videos", async ({ page }) => {

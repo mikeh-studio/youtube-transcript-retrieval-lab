@@ -1,11 +1,16 @@
 """Ask-layer tests for video-first routing and YouTube provenance."""
 
 import importlib
+import json
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
+import numpy as np
 import pytest
+
+from multilingual.video_routing import MultiVectorVideoRouter
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -68,7 +73,7 @@ def test_video_first_agentic_expands_shortlist_before_global_fallback():
     route_calls = []
     retrieval_scopes = []
 
-    def route_videos(query, *, top_k, language, video_ids=None):
+    def route_videos(query, *, top_k, language, video_ids=None, rank_by_relevance=False):
         del video_ids
         route_calls.append((query, top_k, language))
         video_ids = ["v1", "v2"] if top_k == 2 else ["v1", "v2", "v3", "v4"]
@@ -249,7 +254,7 @@ def test_video_first_non_agentic_expands_when_routed_evidence_is_weak(
     route_calls = []
     retrieval_scopes = []
 
-    def route_videos(query, *, top_k, language, video_ids=None):
+    def route_videos(query, *, top_k, language, video_ids=None, rank_by_relevance=False):
         del query, language, video_ids
         route_calls.append(top_k)
         selected = ["v1", "v2"] if top_k == 2 else list(all_video_ids)
@@ -318,7 +323,7 @@ def test_video_first_non_agentic_falls_back_globally_after_weak_expansion(
     )()
     retrieval_scopes = []
 
-    def route_videos(query, *, top_k, language, video_ids=None):
+    def route_videos(query, *, top_k, language, video_ids=None, rank_by_relevance=False):
         del query, language, video_ids
         selected = all_video_ids[:top_k]
         return {
@@ -410,6 +415,99 @@ def test_video_first_uses_global_retrieval_when_router_is_unavailable():
     assert details["stages"][0]["scope"] == "global_fallback"
 
 
+@pytest.mark.parametrize(
+    ("question_language", "relevant_language"),
+    [("en", "en"), ("en", "ja"), ("ja", "en")],
+)
+def test_mixed_library_routes_to_relevant_videos(
+    monkeypatch, question_language, relevant_language
+):
+    questions = {"en": "How do kites float?", "ja": "凧はなぜ浮きますか"}
+    relevant_texts = {
+        "en": ["Fabric wings catch a breeze.", "Tension keeps the sail stable."],
+        "ja": ["布の翼が風を受ける。", "糸の張力で翼が安定する。"],
+    }
+    unrelated_texts = {
+        "en": ["Clay bowls dry overnight.", "The kiln needs a vent."],
+        "ja": ["粘土の器を一晩乾燥させる。", "窯には通気口が必要だ。"],
+    }
+    lexical_decoys = {"en": "Kites painted on a teapot.", "ja": "凧は茶器の絵柄。"}
+    videos = {}
+    dense_by_text = {}
+    for language in questions:
+        is_relevant = language == relevant_language
+        texts = relevant_texts[language] if is_relevant else unrelated_texts[language]
+        scores = [0.83 if is_relevant else 0.805] * 2 + [0.6]
+        for index, (title, cosine) in enumerate(
+            zip([*texts, lexical_decoys[language]], scores)
+        ):
+            videos[f"{language}-{index}"] = {"title": title, "language": language}
+            dense_by_text[title] = cosine
+
+    def embed_passages(passages):
+        vectors = []
+        for passage in passages:
+            cosine = next(
+                score
+                for text, score in dense_by_text.items()
+                if text in passage["embed_text"]
+            )
+            vectors.append([cosine, (1.0 - cosine**2) ** 0.5])
+        return np.array(vectors, dtype="float32")
+
+    processor = SimpleNamespace(
+        generate_embeddings=embed_passages,
+        encode_query=lambda *_args, **_kwargs: np.array([[1.0, 0.0]], dtype="float32"),
+        embedding_metadata=lambda: {"backend": "test", "model": "test", "dim": 2},
+    )
+    router = MultiVectorVideoRouter(processor)
+    router.build(videos, persist=False)
+    service = local_api.LocalRAGService.__new__(local_api.LocalRAGService)
+    service.engine = SimpleNamespace(library=SimpleNamespace(videos=videos))
+    service._get_video_router = lambda: router
+    question = questions[question_language]
+
+    def translate(**kwargs):
+        request = json.loads(kwargs["user_message"])
+        assert request["query"] == question
+        assert request["source_language"] == question_language
+        (other_language,) = request["target_languages"]
+        payload = {"translations": {other_language: questions[other_language]}}
+        return {"text": json.dumps(payload)}
+
+    service._llm_text_response = translate
+    retrieval_calls = []
+
+    def retrieve(query, **kwargs):
+        retrieval_calls.append((query, kwargs["language"], kwargs["video_ids"]))
+        return _retrieval(kwargs["video_ids"], sufficient=True)["retrieval"]
+
+    service.retrieve = retrieve
+    monkeypatch.setattr(
+        local_api,
+        "assess_grounded_answer_evidence",
+        lambda **kwargs: {"sufficient": True, "reason_code": "fixture"},
+    )
+    output = service.retrieve_video_first(
+        question, language=question_language, video_top_k=2
+    )
+    details = output["retrieval"]["details"]["video_routing"]
+    selected = [f"{relevant_language}-0", f"{relevant_language}-1"]
+
+    assert details["selected_video_ids"] == selected
+    assert details["fusion"] == "language_scoped_relevance"
+    assert retrieval_calls == [(questions[relevant_language], relevant_language, selected)]
+    for candidate in details["candidates"]:
+        (hit,) = candidate["variant_hits"]
+        assert candidate["score"] == hit["relevance_score"] == pytest.approx(0.83)
+        assert hit["lexical_score"] is None
+    # The lexical decoy would make the per-language RRF shortlist.
+    assert all(
+        attempt["video_ids"] == [f"{attempt['language']}-0", f"{attempt['language']}-1"]
+        for attempt in details["route_attempts"]
+    )
+
+
 def test_english_frieren_query_routes_to_japanese_video_after_translation():
     service = local_api.LocalRAGService.__new__(local_api.LocalRAGService)
     service.engine = type(
@@ -437,7 +535,7 @@ def test_english_frieren_query_routes_to_japanese_video_after_translation():
         ),
     }
 
-    def route_videos(query, *, top_k, language, video_ids=None):
+    def route_videos(query, *, top_k, language, video_ids=None, rank_by_relevance=False):
         del query, top_k
         if language == "ja":
             video_id = "frieren1234"
@@ -534,7 +632,7 @@ def test_untranslated_fallback_keeps_source_query_language_for_grounding():
         list(text) if language == "ja" else text.lower().split()
     )
 
-    def route_videos(query, *, top_k, language, video_ids=None):
+    def route_videos(query, *, top_k, language, video_ids=None, rank_by_relevance=False):
         del query, top_k
         selected_ids = ["frieren1234"] if language == "ja" else []
         assert all(video_id in (video_ids or []) for video_id in selected_ids)
