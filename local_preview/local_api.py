@@ -72,6 +72,7 @@ from local_preview.key_areas import KeyAreasGenerationError, cached_key_areas  #
 from local_preview.digest import DigestNotFound, DigestService  # noqa: E402
 from local_preview.novelty import NoveltyError  # noqa: E402
 from local_preview.lexical_index import LexicalIndex  # noqa: E402
+from local_preview.query_variant_routing import route_query_variants  # noqa: E402
 from local_preview.retrieval_diagnostics import has_retrieval_failure  # noqa: E402
 from local_preview.stt.base import capabilities as stt_capabilities  # noqa: E402
 from local_preview.summary_timestamps import parse_summary_timestamp  # noqa: E402
@@ -989,6 +990,7 @@ class LocalRAGService:
         top_k: int = DEFAULT_VIDEO_ROUTING_TOP_K,
         language: Optional[str] = None,
         video_ids: Optional[List[str]] = None,
+        rank_by_relevance: bool = False,
     ) -> dict:
         """Return a best-effort video shortlist without blocking Ask fallback."""
         started_at = time.perf_counter()
@@ -999,6 +1001,7 @@ class LocalRAGService:
                 top_k=top_k,
                 language=language,
                 video_ids=video_ids,
+                rank_by_relevance=rank_by_relevance,
             )
         except Exception as exc:
             routed = {
@@ -1008,7 +1011,7 @@ class LocalRAGService:
                 "fallback_reason": "router_unavailable",
                 "dense_available": False,
                 "lexical_available": False,
-                "fusion": "rrf",
+                "fusion": "relevance" if rank_by_relevance else "rrf",
                 "error": str(exc),
             }
         routed["latency_ms"] = round((time.perf_counter() - started_at) * 1000, 3)
@@ -1145,92 +1148,10 @@ class LocalRAGService:
         }
 
     def _route_query_variants(self, expansion: dict, *, top_k: int) -> dict:
-        """Fuse language-scoped video rankings for the expanded query."""
-        started_at = time.perf_counter()
-        fused: Dict[str, dict] = {}
-        route_attempts = []
-        for variant in expansion["variants"]:
-            routed = self.route_videos(
-                variant["query"],
-                top_k=top_k,
-                language=variant["language"],
-                video_ids=variant["video_ids"],
-            )
-            route_attempts.append(
-                {
-                    "language": variant["language"],
-                    "kind": variant["kind"],
-                    "video_ids": list(routed.get("video_ids") or []),
-                    "used_fallback": bool(routed.get("used_fallback")),
-                    "fallback_reason": routed.get("fallback_reason"),
-                    "latency_ms": routed.get("latency_ms"),
-                }
-            )
-            if routed.get("used_fallback"):
-                continue
-            variant_weight = 1.1 if variant["kind"] == "translated" else 1.0
-            for rank, candidate in enumerate(routed.get("results") or [], start=1):
-                video_id = candidate["video_id"]
-                entry = fused.setdefault(
-                    video_id,
-                    {
-                        "video_id": video_id,
-                        "title": candidate.get("title"),
-                        "language": candidate.get("language") or variant["language"],
-                        "source": candidate.get("source"),
-                        "score": 0.0,
-                        "variant_hits": [],
-                    },
-                )
-                lexical_score = float(candidate.get("lexical_score") or 0.0)
-                entry["score"] += variant_weight * (
-                    (1.0 / (60 + rank)) + (0.02 * lexical_score)
-                )
-                entry["variant_hits"].append(
-                    {
-                        "language": variant["language"],
-                        "kind": variant["kind"],
-                        "rank": rank,
-                        "dense_score": candidate.get("dense_score"),
-                        "lexical_score": candidate.get("lexical_score"),
-                    }
-                )
-
-        ordered = sorted(
-            fused.values(),
-            key=lambda row: (-float(row["score"]), row["video_id"]),
-        )[:top_k]
-        for rank, candidate in enumerate(ordered, start=1):
-            candidate["rank"] = rank
-        fallback_reason = None
-        if not ordered:
-            fallback_reason = next(
-                (
-                    attempt["fallback_reason"]
-                    for attempt in route_attempts
-                    if attempt.get("fallback_reason")
-                ),
-                "no_language_variant_signal",
-            )
-        return {
-            "video_ids": [candidate["video_id"] for candidate in ordered],
-            "results": ordered,
-            "used_fallback": not bool(ordered),
-            "fallback_reason": fallback_reason,
-            "dense_available": any(
-                hit.get("dense_score") is not None
-                for candidate in ordered
-                for hit in candidate["variant_hits"]
-            ),
-            "lexical_available": any(
-                hit.get("lexical_score") is not None
-                for candidate in ordered
-                for hit in candidate["variant_hits"]
-            ),
-            "fusion": "language_scoped_rrf",
-            "route_attempts": route_attempts,
-            "latency_ms": round((time.perf_counter() - started_at) * 1000, 3),
-        }
+        """Return the video shortlist for the expanded query."""
+        return route_query_variants(
+            expansion, top_k=top_k, route_videos=self.route_videos
+        )
 
     @staticmethod
     def _normalize_local_video_path(video_path: str) -> Path:

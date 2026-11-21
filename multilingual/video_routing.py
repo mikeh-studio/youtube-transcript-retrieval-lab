@@ -33,6 +33,13 @@ DEFAULT_MAX_SECTIONS = 5
 RRF_K = 60
 
 
+def video_relevance(dense_score: Optional[float], lexical_score: Optional[float]) -> float:
+    """Combine cosine similarity and token overlap on a shared scale."""
+    # Both signals are already normalized. Scaling each language's list to its
+    # own maximum would make the strongest distractor look like a strong match.
+    return (dense_score or 0.0) + 0.25 * (lexical_score or 0.0)
+
+
 def _chmod_private(path: str) -> None:
     try:
         os.chmod(path, 0o600)
@@ -466,8 +473,9 @@ class MultiVectorVideoRouter:
         top_k=3,
         language=None,
         video_ids: Optional[List[str]] = None,
+        rank_by_relevance: bool = False,
     ) -> dict:
-        """Rank videos with dense multi-vector aggregation plus lexical RRF."""
+        """Rank videos with dense and lexical signals, using RRF by default."""
         query = _compact_text(query)
         top_k = max(0, int(top_k))
         allowed_video_ids = (
@@ -543,22 +551,30 @@ class MultiVectorVideoRouter:
                     )
         lexical_available = bool(lexical_scores)
 
-        dense_order = sorted(
-            dense_scores,
-            key=lambda video_id: (-dense_scores[video_id], video_id),
-        )
-        lexical_order = sorted(
-            lexical_scores,
-            key=lambda video_id: (-lexical_scores[video_id], video_id),
-        )
-        fused = defaultdict(float)
-        for rank, video_id in enumerate(dense_order, start=1):
-            fused[video_id] += 1.0 / (RRF_K + rank)
-        for rank, video_id in enumerate(lexical_order, start=1):
-            fused[video_id] += 1.0 / (RRF_K + rank)
-            # Preserve lexical-strength differences that rank-only RRF loses,
-            # especially when a fallback dense backend produces noisy ties.
-            fused[video_id] += 0.02 * lexical_scores[video_id]
+        if rank_by_relevance:
+            fused = {
+                video_id: video_relevance(
+                    dense_scores.get(video_id), lexical_scores.get(video_id)
+                )
+                for video_id in dense_scores.keys() | lexical_scores.keys()
+            }
+        else:
+            dense_order = sorted(
+                dense_scores,
+                key=lambda video_id: (-dense_scores[video_id], video_id),
+            )
+            lexical_order = sorted(
+                lexical_scores,
+                key=lambda video_id: (-lexical_scores[video_id], video_id),
+            )
+            fused = defaultdict(float)
+            for rank, video_id in enumerate(dense_order, start=1):
+                fused[video_id] += 1.0 / (RRF_K + rank)
+            for rank, video_id in enumerate(lexical_order, start=1):
+                fused[video_id] += 1.0 / (RRF_K + rank)
+                # Preserve lexical-strength differences that rank-only RRF loses,
+                # especially when a fallback dense backend produces noisy ties.
+                fused[video_id] += 0.02 * lexical_scores[video_id]
 
         used_fallback = False
         fallback_reason = None
@@ -607,5 +623,5 @@ class MultiVectorVideoRouter:
             "fallback_reason": fallback_reason,
             "dense_available": dense_available,
             "lexical_available": lexical_available,
-            "fusion": "rrf",
+            "fusion": "relevance" if rank_by_relevance else "rrf",
         }
