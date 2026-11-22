@@ -10,7 +10,9 @@ from types import SimpleNamespace
 
 import pytest
 
+from local_preview import key_areas
 from local_preview.key_areas import KeyAreasGenerationError, build_key_areas
+from local_preview.section_rule import NO_SECTION_TARGET, SECTION_RULE
 from local_preview.transcript_lines import fingerprint_lines, numbered_lines
 from tests.test_eval_generator_api import _request, local_api
 from tests.test_local_api_summary_and_retrieval import _make_service
@@ -145,6 +147,32 @@ def test_extends_ends_and_enforces_section_count_with_caption_overlap():
     assert (second["start_line"], second["end_line"]) == (3, 6)
 
 
+def test_default_keeps_all_drafted_blocks_and_requires_ad_coverage():
+    segments = [
+        {
+            "start": 120 * index,
+            "end": 120 * (index + 1),
+            "text": f"Drum exercise {index + 1}.",
+        }
+        for index in range(30)
+    ]
+    llm = FakeLLM(_draft(*(_section(line, line) for line in range(1, 31))))
+    result = _build(segments, llm)
+
+    assert [(row["start_line"], row["end_line"]) for row in result["sections"]] == [
+        (line, line) for line in range(1, 31)
+    ]
+    assert result["quality"]["section_coverage"] == 1.0
+    system = llm.calls[0]["system_prompt"]
+    assert SECTION_RULE in system
+    assert NO_SECTION_TARGET in system
+    assert "Give every line to one section in chronological\norder." in system
+    assert "Fold ad reads into the preceding section." in system
+    assert "Include opening ad reads in the first section." in system
+    assert "Leave ad reads out" not in system
+    assert "at most" not in system
+
+
 def test_windowing_keeps_global_ids_and_uses_one_merge_call():
     segments = _segments(["La " * 1000 for _ in range(6)])
     llm = FakeLLM(
@@ -155,6 +183,11 @@ def test_windowing_keeps_global_ids_and_uses_one_merge_call():
     )
     result = _build(segments, llm)
     assert len(llm.calls) == 4
+    for call in llm.calls:
+        assert SECTION_RULE in call["system_prompt"]
+        assert NO_SECTION_TARGET in call["system_prompt"]
+        assert "Fold ad reads into the preceding section." in call["system_prompt"]
+        assert "at most" not in call["system_prompt"] + call["user_message"]
     for index, call in enumerate(llm.calls[:3]):
         window = (
             call["user_message"]
@@ -166,7 +199,13 @@ def test_windowing_keeps_global_ids_and_uses_one_merge_call():
             f"{index * 2 + 1:04d}",
             f"{index * 2 + 2:04d}",
         ]
+        assert "Keep partial blocks at window edges" in call["user_message"]
     merge = llm.calls[-1]["user_message"]
+    assert (
+        "keep a boundary wherever the show changes blocks, including across windows"
+        in merge
+    )
+    assert "Use leading ad ranges noted in the drafts" in merge
     assert "BEGIN WINDOW DRAFTS" in merge
     assert '"start_line": 5' in merge
     assert "BEGIN TRANSCRIPT" not in merge
@@ -313,6 +352,24 @@ def test_ja_cast_requires_transcript_evidence_and_cache_is_fingerprinted(service
     source["full_transcript"]["segments"][0]["text"] += " よく聞こえます。"
     assert service.generate_key_areas(*args)["cached"] is False
     assert len(llm.calls) == 5
+
+
+def test_version_one_cache_is_regenerated(monkeypatch, service):
+    service, _ = service
+    llm = FakeLLM(_draft(_section(1, 4)), _draft(_section(1, 4, _point([2]))))
+    service._llm_text_response = llm
+    with monkeypatch.context() as patch:
+        patch.setattr(key_areas, "KEY_AREAS_VERSION", 1)
+        old = service.generate_key_areas(SOURCE_ID)
+        assert old["version"] == 1
+        assert service.generate_key_areas(SOURCE_ID)["cached"] is True
+
+    new = service.generate_key_areas(SOURCE_ID)
+    assert new["version"] == key_areas.KEY_AREAS_VERSION > old["version"]
+    assert new["cached"] is False
+    assert new["sections"][0]["key_points"][0]["evidence_lines"] == [2]
+    assert service.generate_key_areas(SOURCE_ID)["cached"] is True
+    assert len(llm.calls) == 2
 
 
 def test_key_areas_http_aliases_errors_and_csrf(monkeypatch, service):

@@ -55,3 +55,8 @@ def seconds_to_line(lines, seconds):
 def fingerprint_lines(lines):
     """Hash the numbered transcript representation used for label review."""
     return sha256(json_bytes(lines)).hexdigest()
+
+
+def transcript_line_map(source):
+    """Map every transcript line ID, so references between sampled lines still resolve."""
+    return {line["line"]: line for line in source.get("lines") or source["sample"]}

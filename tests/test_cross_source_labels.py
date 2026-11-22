@@ -14,8 +14,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def _draft(task, tmp_path, monkeypatch, proposal):
-    monkeypatch.setenv("YT_RAG_LABEL_DRAFTER", "claude_cli")
-    monkeypatch.setenv("YT_RAG_LABEL_DRAFTER_MODEL", "unused-claude-model")
+    monkeypatch.delenv("YT_RAG_LABEL_DRAFTER", raising=False)
+    monkeypatch.delenv("YT_RAG_LABEL_DRAFTER_MODEL", raising=False)
     calls = []
 
     def drafter(**kwargs):
@@ -99,6 +99,69 @@ def test_multi_source_qa_resolves_lines_and_retains_reviewed_spans(tmp_path, mon
     videos[IDS[1]]["full_transcript"]["segments"][0]["text"] = "The lid is made of pebble."
     with pytest.raises(LabelDraftError, match="changed since drafting"):
         service.context(draft["draft_id"], item["id"])
+
+
+def test_multi_source_qa_rejects_spans_on_omitted_sample_lines(tmp_path, monkeypatch):
+    monkeypatch.setattr("local_preview.label_drafts.MAX_CONTEXT_CHARS", 200)
+    calls = []
+
+    def drafter(**kwargs):
+        calls.append(kwargs)
+        return {
+            "text": json.dumps({
+                "cases": [
+                    {
+                        "question": "Why does an omitted line fail validation?",
+                        "required_facts": ["Omitted line fact."],
+                        "gold_spans": [
+                            {"source_id": IDS[0], "start_line": 2, "end_line": 2},
+                            {"source_id": IDS[1], "start_line": 1, "end_line": 1},
+                        ],
+                    },
+                    {
+                        "question": "How do the shown lines compare?",
+                        "required_facts": ["Cork absorbs drops.", "Clay has a groove."],
+                        "gold_spans": [
+                            {"source_id": IDS[0], "start_line": 1, "end_line": 3},
+                            {"source_id": IDS[1], "start_line": 1, "end_line": 1},
+                        ],
+                    },
+                ],
+                "notes": "",
+            }),
+            "provider": kwargs["provider"],
+            "model": None,
+        }
+
+    videos = {
+        IDS[0]: {
+            "title": IDS[0],
+            "duration_seconds": 45,
+            "full_transcript": {
+                "segments": [
+                    {"start": 0, "end": 5, "text": "Cork absorbs drops at the rim."},
+                    {"start": 10, "end": 15, "text": "This middle line is omitted from the sample."},
+                    {"start": 20, "end": 25, "text": "Press the cork lid firmly."},
+                ],
+            },
+        },
+        IDS[1]: {
+            "title": IDS[1],
+            "duration_seconds": 45,
+            "full_transcript": {
+                "segments": [{"start": 4, "end": 5, "text": "Clay has a groove."}],
+            },
+        },
+    }
+    service = LabelDraftService(
+        ROOT, tmp_path / "runtime", tmp_path / "eval", videos.get, drafter, lambda: "test-time"
+    )
+    job = service.start_job("multi_source_qa", IDS[:2], "en")
+    result = wait_for_job(service, job["job_id"])
+    assert result["status"] == "completed", result
+    assert "[0002]" not in calls[0]["user_message"]
+    draft = service.get_draft(result["draft_id"])
+    assert [row["question"] for row in draft["items"]] == ["How do the shown lines compare?"]
 
 
 def test_collection_themes_validate_membership_through_review(tmp_path, monkeypatch):

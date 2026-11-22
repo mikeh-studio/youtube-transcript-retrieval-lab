@@ -107,6 +107,50 @@ def test_collection_scope_and_semantic_judge_are_independent(fixture, reply_form
     }
 
 
+def test_collection_eval_ignores_not_returned_theme_placeholders(fixture):
+    placeholder = {
+        "theme_index": 1,
+        "title": "Wax decorations",
+        "summary": "",
+        "perspectives": [],
+        "status": "not_returned",
+    }
+    mixed = {
+        **fixture["collection"],
+        "themes": [placeholder, *fixture["collection"]["themes"]],
+    }
+
+    def judge(**request):
+        payload = json.loads(request["user_message"])
+        assert [row["id"] for row in payload["predicted_themes"]] == ["T1"]
+        assert [row["title"] for row in payload["predicted_themes"]] == ["Lid moisture control"]
+        return {"text": json.dumps(_judge_decisions())}
+
+    assert score_collection(
+        mixed, gold_spans=fixture["qa"]["gold_spans"],
+        gold_themes=fixture["gold_themes"], judge_llm=judge,
+    ) == {
+        "answer_source_coverage": 1.0,
+        "answer_span_recall": 1.0,
+        "theme_recall": 0.5,
+        "stance_source_precision": 0.5,
+    }
+
+    def unexpected_judge(**_):
+        pytest.fail("Judge should not be called when every theme is not_returned")
+
+    all_missing = {**fixture["collection"], "themes": [placeholder]}
+    assert score_collection(
+        all_missing, gold_spans=fixture["qa"]["gold_spans"],
+        gold_themes=fixture["gold_themes"], judge_llm=unexpected_judge,
+    ) == {
+        "answer_source_coverage": 0.0,
+        "answer_span_recall": 0.0,
+        "theme_recall": 0.0,
+        "stance_source_precision": None,
+    }
+
+
 @pytest.mark.parametrize(
     "reply_format",
     [

@@ -69,6 +69,12 @@ videos, then retrieves chunks only from them. The router builds identity
 ranks videos by dense aggregation plus lexical RRF. Router artifacts are stored
 separately from the chunk index and rebuilt when video inputs change.
 
+For a multilingual query expansion, each language variant uses the same
+relevance formula before shortlisting and during fusion. The score is the
+aggregated embedding cosine plus 0.25 times normalized token overlap. Translated
+variants use the same weights as the original. Each candidate's
+`variant_hits` includes the raw signals and the combined `relevance_score`.
+
 ```json
 {
   "question": "How does fermentation timing affect the starter?",

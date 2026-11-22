@@ -11,6 +11,7 @@ from pathlib import Path
 
 from local_preview.conversation_turns import detect_turns
 from local_preview.local_files import json_bytes, write_atomic
+from local_preview.section_rule import NO_SECTION_TARGET, SECTION_RULE
 from local_preview.transcript_lines import (
     fingerprint_lines,
     format_lines,
@@ -20,7 +21,7 @@ from multilingual.source_model import is_youtube, normalize_source, timestamp_ur
 from pipelines.export_library import parse_json
 
 
-KEY_AREAS_VERSION = 1
+KEY_AREAS_VERSION = 2
 SINGLE_PASS_MAX_CHARS = 16_000
 WINDOW_MAX_CHARS = 7_000
 MAX_PARSE_RETRIES = 2
@@ -38,6 +39,12 @@ Use inclusive global line IDs. Give every line to one section in chronological
 order. Cite only lines that support the point and belong to its section. List
 speakers only when the cited transcript shows the name or has an explicit turn
 label. Participant names in metadata are spelling hints only."""
+
+_SECTION_GUIDANCE = (
+    f"{SECTION_RULE} {NO_SECTION_TARGET} "
+    "Fold ad reads into the preceding section. "
+    "Include opening ad reads in the first section."
+)
 
 
 class KeyAreasGenerationError(RuntimeError):
@@ -194,7 +201,7 @@ def _consolidate(sections, min_seconds, limit):
         elif (
             duration(merged[-1]) < min_seconds
             or duration(section) < min_seconds
-            or len(merged) == limit
+            or (limit is not None and len(merged) == limit)
         ):
             previous = merged[-1]
             title = (
@@ -218,7 +225,7 @@ def build_key_areas(
     llm,
     provider,
     model,
-    max_sections=8,
+    max_sections=None,
     min_section_seconds=90,
 ):
     """Generate contiguous line ranges and resolve all citations locally."""
@@ -226,8 +233,10 @@ def build_key_areas(
     if not lines:
         raise ValueError("video has no timed transcript lines")
     if (
-        type(max_sections) is not int
-        or max_sections < 1
+        (
+            max_sections is not None
+            and (type(max_sections) is not int or max_sections < 1)
+        )
         or type(min_section_seconds) not in (int, float)
         or not 0 <= min_section_seconds < math.inf
     ):
@@ -239,10 +248,7 @@ def build_key_areas(
         {"title": source_meta.get("title", ""), "participants": participants},
         ensure_ascii=False,
     )
-    system = (
-        f"{_SYSTEM_PROMPT}\nWrite prose in {language}. Use at most {max_sections} "
-        f"sections. Aim for sections of at least {min_section_seconds:g} seconds."
-    )
+    system = f"{_SYSTEM_PROMPT}\n{_SECTION_GUIDANCE}\nWrite prose in {language}."
     retries = 0
 
     def request(message):
@@ -276,14 +282,20 @@ def build_key_areas(
         drafts = []
         for window in _windows(rendered):
             draft, _ = request(
-                "Draft at most three sections and two key points per section "
-                f"for this window only. Metadata: {context}\n"
+                "Apply the section rule to the transcript in this window. "
+                "Keep partial blocks at window edges for the merge. If the window "
+                "starts with an ad read, note its global line range in the draft overview. "
+                f"Metadata: {context}\n"
                 f"BEGIN TRANSCRIPT\n{window}\nEND TRANSCRIPT"
             )
             drafts.append(draft)
         window_count = len(drafts)
         data, response = request(
             "Merge these window drafts into one episode overview and section plan. "
+            "Join fragments of the same block and keep a boundary wherever the "
+            "show changes blocks, including across windows. "
+            "Use leading ad ranges noted in the drafts to extend the preceding "
+            "section where one exists. "
             "Use the original global line IDs and preserve the supporting citations. "
             "A long line may continue across windows under the same ID. "
             f"Metadata: {context}\nBEGIN WINDOW DRAFTS\n"

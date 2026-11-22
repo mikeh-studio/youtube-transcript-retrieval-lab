@@ -123,8 +123,10 @@ def _collection_evidence(prediction):
         "citation_id", "collection citation",
     )
     claims, cited = [], []
-    for theme_number, theme in enumerate(objects(prediction["themes"], "themes"), 1):
-        theme_id = f"T{theme_number}"
+    for theme in objects(prediction["themes"], "themes"):
+        if theme.get("status") == "not_returned":
+            continue
+        theme_id = f"T{len(claims) + 1}"
         perspectives = []
         for number, item in enumerate(objects(theme["perspectives"], "perspectives"), 1):
             evidence = []
