@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from local_preview import collection_summary
 from local_preview.collection_summary import CollectionSummaryError, build_collection_summary
 from tests.test_eval_generator_api import _request, local_api
 from tests.test_local_api_summary_and_retrieval import _make_service
@@ -107,7 +108,7 @@ def test_citations_are_resolved_by_theme_and_declared_source():
     )]
     assert result["coverage"] == {
         "sources_selected": 2, "sources_cited": 2, "citation_validity": 2 / 9,
-        "retries": 0, "not_returned": 0,
+        "retries": 0, "not_returned": 0, "clusters": 2, "cluster_sizes": [2],
     }
     catalog = {row["citation_id"]: row for row in result["evidence_catalog"]}
     assert set(catalog) == {"E1", "E2", "E3"}
@@ -115,7 +116,8 @@ def test_citations_are_resolved_by_theme_and_declared_source():
     assert catalog["E1"]["start_seconds"] == 3.5 and catalog["E1"]["end_seconds"] == 5
 
 
-def test_greedy_clustering_is_stable_and_ranks_sources_then_duration():
+def test_greedy_clustering_is_stable_and_ranks_sources_then_duration(monkeypatch):
+    monkeypatch.setattr(collection_summary, "CLUSTER_MIN_COSINE", 0.80)
     source_sections = {
         IDS[0]: [_section("Shared"), _section("Long solo", 20, 200)],
         IDS[1]: [_section("At cutoff"), _section("Medium solo", 30, 80)],
@@ -157,6 +159,54 @@ def test_greedy_clustering_is_stable_and_ranks_sources_then_duration():
     assert run(IDS) == run(IDS[::-1]) == expected
 
 
+def test_cluster_reads_the_current_threshold_constant(monkeypatch):
+    sections = [
+        {"query": "Cork", "source_id": IDS[0], "start": 0, "end": 10},
+        {"query": "Wax", "source_id": IDS[1], "start": 0, "end": 10},
+    ]
+
+    def embed(_):
+        return [[1, 0], [0.8, 0.6]]
+
+    monkeypatch.setattr(collection_summary, "CLUSTER_MIN_COSINE", 0.75)
+    assert collection_summary._cluster(sections, embed) == [sections]
+    monkeypatch.setattr(collection_summary, "CLUSTER_MIN_COSINE", 0.85)
+    assert collection_summary._cluster(sections, embed) == [[section] for section in sections]
+
+
+def test_cluster_sizes_follow_returned_themes_after_cut_and_evidence_filtering():
+    basis = {
+        title: [int(column == index) for column in range(5)]
+        for index, title in enumerate(("Bark", "Clay", "Wax", "Twine", "Paper"))
+    }
+    source_sections = {
+        IDS[0]: [_section(title) for title in basis] + [_section("Wax", 50, 60)],
+        IDS[1]: [_section(title) for title in ("Bark", "Clay", "Wax")],
+    }
+    queries = []
+
+    def retrieve(*, query, **_):
+        title = query.split()[0]
+        queries.append(title)
+        return {"results": [] if title == "Bark" else [_retrieved(IDS[0])]}
+
+    result = _build(
+        key_areas_fn=lambda source_id, **_: {"sections": source_sections[source_id]},
+        embed_fn=lambda texts: [basis[text.split()[0]] for text in texts],
+        retrieve_fn=retrieve,
+        max_themes=4,
+        llm=lambda **_: {"text": json.dumps({"overview": "Materials.", "themes": [
+            _theme(index=2),  # This candidate has no cited perspectives.
+            _theme(_perspective(IDS[0], ["E3"]), index=3),
+        ]})},
+    )
+    assert queries == ["Wax", "Bark", "Clay", "Twine"]
+    assert [theme["theme_index"] for theme in result["themes"]] == [1, 3]
+    assert result["themes"][0]["status"] == "not_returned"
+    assert result["coverage"]["clusters"] == 5
+    assert result["coverage"]["cluster_sizes"] == [3, 1]
+
+
 def test_no_evidence_skips_synthesis():
     def unexpected(**_):
         pytest.fail("Synthesis should not be called for an empty catalog")
@@ -166,6 +216,8 @@ def test_no_evidence_skips_synthesis():
     assert result["themes"] == result["evidence_catalog"] == []
     assert result["coverage"]["sources_cited"] == 0
     assert result["coverage"]["retries"] == result["coverage"]["not_returned"] == 0
+    assert result["coverage"]["clusters"] == 1
+    assert result["coverage"]["cluster_sizes"] == []
 
 
 def _three_themes(llm):
@@ -365,6 +417,8 @@ def test_collection_route_uses_cached_key_areas_and_processor(monkeypatch):
         assert payload["model"] == request["model"]
         assert payload["coverage"]["sources_cited"] == 2
         assert payload["coverage"]["retries"] == payload["coverage"]["not_returned"] == 0
+        assert payload["coverage"]["clusters"] == 1
+        assert payload["coverage"]["cluster_sizes"] == [2]
         assert len(calls) == expected_call_count
 
     client, server = socket.socketpair()

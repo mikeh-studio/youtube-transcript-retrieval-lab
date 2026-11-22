@@ -65,6 +65,7 @@ from local_preview.audio_media import VIDEO_TYPES, serve_media  # noqa: E402
 from local_preview.collection_summary import (  # noqa: E402
     CollectionSummaryError,
     build_collection_summary,
+    collection_embedding_fn,
     collection_source_ids,
 )
 from local_preview.feeds import preview_feed  # noqa: E402
@@ -4976,9 +4977,7 @@ class LocalRAGService:
             model=model,
             key_areas_fn=self.generate_key_areas,
             retrieve_fn=self.retrieve,
-            embed_fn=lambda texts: library.processor.generate_embeddings(
-                [{"embed_text": text} for text in texts]
-            ),
+            embed_fn=collection_embedding_fn(library.processor),
             llm=self._llm_text_response,
         )
 

@@ -197,6 +197,24 @@ and playback URL. The server drops references outside the theme or the
 perspective's source, then omits perspectives that have no valid citation.
 `coverage` reports selected and cited source counts and the share of proposed
 references that pass validation. The share is zero when there are no references.
+`coverage.clusters` is the number of clusters before the theme limit.
+`coverage.cluster_sizes` gives the number of sections in each returned theme's
+cluster, in response order, including any `not_returned` placeholders.
+
+The following command compares clustering thresholds using cached key areas.
+
+```sh
+python -m evals.summary.cluster_sweep --data-dir data \
+  --source-ids example-a,example-b --source-ids example-c,example-d \
+  --language en --thresholds 0.80,0.85,0.88,0.90 \
+  --out evals/reports/collection-clusters.json
+```
+
+Use the app's embedding model settings with a local model snapshot. The command
+uses only cached key areas and local embeddings. If several entries match a
+source and language, filter by cache key with `--provider` and `--model`. The
+report records ranked cluster sizes, distinct-source counts, and source IDs for
+every threshold, along with cache and embedding metadata.
 
 ### Speech-to-text evaluation
 

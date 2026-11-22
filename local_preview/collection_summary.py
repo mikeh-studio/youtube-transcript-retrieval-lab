@@ -2,6 +2,7 @@
 
 import json
 import math
+from functools import partial
 
 from local_preview.grounded_answer import build_citation_catalog
 from multilingual.source_model import normalize_source, timestamp_url
@@ -61,13 +62,27 @@ def _unit(vector):
     return tuple(value / norm for value in vector) if norm else tuple(vector)
 
 
-def _cluster(sections, embed_fn):
+def collection_embedding_fn(processor):
+    """Adapt the library's passage embedder for collection section text."""
+
+    def embed(texts):
+        return processor.generate_embeddings([{"embed_text": text} for text in texts])
+
+    return embed
+
+
+def embed_collection_sections(sections, embed_fn):
+    """Embed and normalize a collection's sections in their original order."""
     if not sections:
         return []
     vectors = [_unit(vector) for vector in embed_fn([row["query"] for row in sections])]
     if len(vectors) != len(sections) or len({len(vector) for vector in vectors}) != 1:
         raise RuntimeError("Collection section embeddings have inconsistent dimensions")
+    return vectors
 
+
+def cluster_collection_sections(sections, vectors, *, min_cosine):
+    """Cluster embedded sections and rank by source breadth and duration."""
     clusters = []
     for section, vector in zip(sections, vectors):
         # Fixed first members keep cluster assignment independent of later additions.
@@ -76,7 +91,7 @@ def _cluster(sections, embed_fn):
             for seed, _ in clusters
         ]
         best = max(range(len(scores)), key=scores.__getitem__, default=None)
-        if best is None or scores[best] < CLUSTER_MIN_COSINE:
+        if best is None or scores[best] < min_cosine:
             clusters.append((vector, [section]))
         else:
             clusters[best][1].append(section)
@@ -88,6 +103,29 @@ def _cluster(sections, embed_fn):
         )
 
     return sorted((members for _, members in clusters), key=rank)
+
+
+def _cluster(sections, embed_fn):
+    return cluster_collection_sections(
+        sections, embed_collection_sections(sections, embed_fn),
+        min_cosine=CLUSTER_MIN_COSINE,
+    )
+
+
+def collection_sections(source_ids, key_areas_fn):
+    """Flatten key areas in the source and section order used for clustering."""
+    sections = []
+    for source_id in sorted(source_ids):
+        for section in key_areas_fn(source_id=source_id)["sections"]:
+            sections.append({
+                "source_id": source_id,
+                "title": section["title"],
+                "summary": section["summary"],
+                "start": section["start"],
+                "end": section["end"],
+                "query": f'{section["title"]} {section["summary"]}',
+            })
+    return sections
 
 
 def _catalog(rows, selected):
@@ -238,24 +276,14 @@ def build_collection_summary(
     if focus is not None and not isinstance(focus, str):
         raise ValueError("focus must be text")
 
-    sections = []
-    for source_id in sorted(source_ids):
-        key_areas = key_areas_fn(
-            source_id=source_id, language=language, provider=provider, model=model
-        )
-        for section in key_areas["sections"]:
-            sections.append({
-                "source_id": source_id,
-                "title": section["title"],
-                "summary": section["summary"],
-                "start": section["start"],
-                "end": section["end"],
-                "query": f'{section["title"]} {section["summary"]}',
-            })
-
+    sections = collection_sections(
+        source_ids, partial(key_areas_fn, language=language, provider=provider, model=model)
+    )
+    clusters = _cluster(sections, embed_fn)
     candidates, theme_catalogs, evidence_catalog = [], {}, {}
+    cluster_sizes = {}
     selected = set(source_ids)
-    for cluster in _cluster(sections, embed_fn)[:max_themes]:
+    for cluster in clusters[:max_themes]:
         seed = cluster[0]
         retrieved = retrieve_fn(
             query=seed["query"], video_ids=list(source_ids), k=8, retrieval_mode="hybrid"
@@ -269,6 +297,7 @@ def build_collection_summary(
             continue
         index = len(candidates) + 1
         theme_catalogs[index] = catalog
+        cluster_sizes[index] = len(cluster)
         candidates.append({
             "theme_index": index,
             "sections": [
@@ -303,5 +332,7 @@ def build_collection_summary(
             "citation_validity": validity,
             "retries": retries,
             "not_returned": len(candidates) - len(rows_by_index),
+            "clusters": len(clusters),
+            "cluster_sizes": [cluster_sizes[theme["theme_index"]] for theme in themes],
         },
     }
