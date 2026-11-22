@@ -334,6 +334,7 @@ timeout.
 | --- | --- |
 | `anchor_resolution_rate` | Resolved anchors divided by items with known timestamp provenance. |
 | `ts_hit@15s`, `ts_hit@30s`, `ts_mae_s` | Inclusive hit rates and mean absolute error between predicted start and the matched point's onset. Judgments supply the matches when present. Otherwise the timestamp proxy makes a deterministic one-to-one pairing within 30 seconds of a gold span. |
+| `ts_in_span` | Share of matched pairs whose predicted start falls inside any span of the matched gold point, with inclusive bounds and no margin. Uses the same pairs as the timestamp hit rates. |
 | `keypoint_span_recall@30s` | Share of gold points with any predicted start between 30 seconds before a span begins and 30 seconds after it ends. A prediction may cover multiple points for this proxy. |
 | `duplicate_anchor_rate` | Resolved anchors beyond the first use of the same start/end pair, divided by resolved anchors. |
 | `language_match_rate` | Share of item texts matching the gold language by Japanese or Latin script. Mixed script containing Japanese characters counts as Japanese. |
