@@ -709,8 +709,8 @@ def test_untranslated_fallback_keeps_source_query_language_for_grounding():
 @pytest.mark.parametrize(
     "request_overrides, expected_k, expected_route",
     [
-        pytest.param({}, 8, "video_first", id="multi-vector-default"),
-        pytest.param({"k": 10}, 10, "video_first", id="explicit-k"),
+        pytest.param({}, 10, "video_first", id="multi-vector-default"),
+        pytest.param({"k": 7}, 7, "video_first", id="explicit-k"),
         pytest.param({"k": 10, "top_k": 6}, 6, "video_first", id="top-k-precedence"),
         pytest.param({"k": 20}, 12, "video_first", id="explicit-k-clamped"),
         pytest.param({"video_id": "video123456"}, 5, "plain", id="single-video"),
