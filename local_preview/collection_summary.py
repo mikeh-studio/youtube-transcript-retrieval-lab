@@ -9,7 +9,7 @@ from multilingual.source_model import normalize_source, timestamp_url
 from pipelines.export_library import parse_json
 
 
-CLUSTER_MIN_COSINE = 0.80
+CLUSTER_MIN_COSINE = 0.85
 STANCES = ("agrees", "differs", "adds", "only_here")
 
 SYSTEM_PROMPT = """Summarize a collection using only the supplied evidence.

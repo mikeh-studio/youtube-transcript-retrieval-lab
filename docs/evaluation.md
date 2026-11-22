@@ -184,7 +184,7 @@ and transcript fingerprint. The response indicates cache reuse in `cached`.
 `POST /v1/summaries/collection` accepts `source_ids` (2–12 distinct indexed
 IDs), `language` (`en` or `ja`), an optional `focus` string, `provider`, and
 `model`. It reuses cached key areas and clusters section embeddings at cosine
-similarity 0.80. Up to eight clusters are ranked by distinct source count, then
+similarity 0.85. Up to eight clusters are ranked by distinct source count, then
 total section duration. Each theme retrieves up to eight hybrid transcript
 matches within the selection. The focus guides synthesis over that evidence.
 
