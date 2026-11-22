@@ -280,6 +280,39 @@ def test_invalid_json_on_retry_is_an_error(initial):
     assert list(replies) == []
 
 
+@pytest.mark.parametrize(
+    "retry_reply",
+    [
+        '{"overview": "Truncated", "themes": [',
+        '{"overview": null, "themes": []}',
+        '{"overview": "Bad themes", "themes": "none"}',
+    ],
+)
+def test_malformed_retry_preserves_valid_themes_from_first_response(retry_reply):
+    first = _theme(_perspective(IDS[0], ["E1"]), index=1, title="Cork")
+    replies = iter([
+        {
+            "provider": "first-provider",
+            "model": "first-model",
+            "text": json.dumps({"overview": "Jar covers", "themes": [first]}),
+        },
+        {"provider": "retry-provider", "model": "retry-model", "text": retry_reply},
+    ])
+    result = _three_themes(lambda **_: next(replies))
+    assert list(replies) == []
+    assert result["provider"] == "first-provider"
+    assert result["model"] == "first-model"
+    assert result["overview"] == "Jar covers"
+    assert result["themes"] == [
+        first,
+        {"theme_index": 2, "title": "Wax", "summary": "", "perspectives": [], "status": "not_returned"},
+        {"theme_index": 3, "title": "Cloth", "summary": "", "perspectives": [], "status": "not_returned"},
+    ]
+    assert result["coverage"]["retries"] == 1
+    assert result["coverage"]["not_returned"] == 2
+    assert result["coverage"]["sources_cited"] == result["coverage"]["citation_validity"] == 1
+
+
 def test_collection_route_uses_cached_key_areas_and_processor(monkeypatch):
     calls = []
     service = _make_service()

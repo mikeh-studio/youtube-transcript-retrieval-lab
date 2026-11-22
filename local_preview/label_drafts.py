@@ -136,7 +136,7 @@ def _keypoints(generated, sources):
             "INVALID_DRAFTER_OUTPUT", "The drafter must propose 5 to 8 key points.", 502
         )
     source = sources[0]
-    line_map = transcript_line_map(source)
+    line_map = {line["line"]: line for line in source["sample"]}
     seen = set()
     items = []
     for candidate in candidates:

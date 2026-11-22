@@ -1,6 +1,6 @@
 """Draft and validate cross-source label fields against the selected transcripts."""
 
-from local_preview.transcript_lines import format_lines, transcript_line_map
+from local_preview.transcript_lines import format_lines
 
 
 def _prompt(instructions, sources, language):
@@ -108,7 +108,7 @@ def _resolve_spans(spans, line_maps):
             type(first) is int and type(last) is int
             and first <= last and first in lines and last in lines
         ):
-            raise ValueError("Gold spans must reference ordered transcript line IDs for their source.")
+            raise ValueError("Gold spans must reference ordered line IDs shown for their source.")
         resolved.append({"source_id": source_id, "start": lines[first]["start"],
                          "end": lines[last]["end"]})
     return resolved
@@ -138,7 +138,7 @@ def _canonical_candidates(generated, sources, *, key, limit, name, validate):
 def canonical_qa(generated, sources):
     """Turn draft line references into canonical gold spans."""
     line_maps = {
-        source["source_id"]: transcript_line_map(source)
+        source["source_id"]: {line["line"]: line for line in source["sample"]}
         for source in sources
     }
 

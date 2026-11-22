@@ -128,18 +128,25 @@ test("keeps Library selections across filters and renders cited collection persp
       ok: true,
       source_ids: VIDEOS.map((video) => video.video_id),
       overview: "Two ways to hang a lantern.",
-      themes: [{
-        title: "Fastening a lantern", summary: "Both designs use a loop.",
-        perspectives: [
-          { source_id: VIDEOS[1].video_id, stance: "differs", statement: "Tie a separate loop.", citations: ["E2"] },
-          { source_id: VIDEOS[0].video_id, stance: "agrees", statement: "Use the folded loop.", citations: ["E1"] },
-        ],
-      }],
+      themes: [
+        {
+          theme_index: 1,
+          title: "Fastening a lantern", summary: "Both designs use a loop.",
+          perspectives: [
+            { source_id: VIDEOS[1].video_id, stance: "differs", statement: "Tie a separate loop.", citations: ["E2"] },
+            { source_id: VIDEOS[0].video_id, stance: "agrees", statement: "Use the folded loop.", citations: ["E1"] },
+          ],
+        },
+        {
+          theme_index: 2,
+          title: "Trimming the rim", summary: "", perspectives: [], status: "not_returned",
+        },
+      ],
       evidence_catalog: [
         { citation_id: "E1", video_id: VIDEOS[0].video_id, start_seconds: 12, end_seconds: 18, url: firstUrl },
         { citation_id: "E2", video_id: VIDEOS[1].video_id, start_seconds: 65, end_seconds: 72, url: secondUrl },
       ],
-      coverage: { sources_selected: 2, sources_cited: 2, citation_validity: 0.8 },
+      coverage: { sources_selected: 2, sources_cited: 2, citation_validity: 0.8, retries: 1, not_returned: 1 },
     },
   }));
 
@@ -169,7 +176,27 @@ test("keeps Library selections across filters and renders cited collection persp
   await expect(theme.getByText("Use the folded loop.")).toBeVisible();
   await expect(theme.getByRole("link", { name: `${VIDEOS[0].title} at 0:12` })).toHaveAttribute("href", firstUrl);
   await expect(theme.getByRole("link", { name: `${VIDEOS[1].title} at 1:05` })).toHaveAttribute("href", secondUrl);
+  const missing = page.getByRole("article").filter({ hasText: "Trimming the rim" });
+  await expect(missing.getByText("Not returned", { exact: true })).toBeVisible();
+  await expect(missing.getByText("The provider did not return this candidate theme.")).toBeVisible();
+  await expect(page.getByText("No themes with citations were found for this selection.")).toHaveCount(0);
   await expect(page.getByText("Sources cited 2 of 2 · Citation validity 80%")).toBeVisible();
+
+  await page.route("**/v1/summaries/collection", (route) => route.fulfill({
+    json: {
+      ok: true,
+      source_ids: VIDEOS.map((video) => video.video_id),
+      overview: "",
+      themes: [{
+        theme_index: 1, title: "Trimming the rim", summary: "", perspectives: [], status: "not_returned",
+      }],
+      evidence_catalog: [],
+      coverage: { sources_selected: 2, sources_cited: 0, citation_validity: 0, retries: 1, not_returned: 1 },
+    },
+  }));
+  await page.getByRole("button", { name: "Generate collection summary" }).click();
+  await expect(page.getByText("No themes with citations were found for this selection.")).toBeVisible();
+  await expect(page.getByRole("article").filter({ hasText: "Trimming the rim" }).getByText("Not returned", { exact: true })).toBeVisible();
 });
 
 test("scrolls through 40 collection themes without overflowing on a phone", async ({ page }) => {

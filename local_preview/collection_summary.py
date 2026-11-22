@@ -115,10 +115,12 @@ def _catalog(rows, selected):
 def _synthesize_themes(candidates, *, source_ids, focus, language, llm, provider, model):
     pending = candidates
     rows_by_index = {}
-    overview = None
+    response = {}
+    overview = ""
+    has_overview = False
     correction = ""
     for retries in range(2):
-        response = llm(
+        reply = llm(
             provider=provider, model=model, max_tokens=4096, temperature=0,
             system_prompt=f"{SYSTEM_PROMPT}\nWrite all prose in {language}.{correction}",
             user_message=json.dumps(
@@ -127,19 +129,31 @@ def _synthesize_themes(candidates, *, source_ids, focus, language, llm, provider
             ),
         )
         try:
-            decoded = parse_json(response["text"])
+            decoded = parse_json(reply["text"])
         except (KeyError, TypeError, ValueError) as exc:
+            if rows_by_index:
+                break
             if retries:
                 raise CollectionSummaryError("The provider returned invalid collection JSON.") from exc
             correction = "\nThe previous response was invalid JSON. Return a valid JSON object."
             continue
 
-        if not isinstance(decoded, dict) or not isinstance(decoded.get("overview"), str):
+        has_valid_overview = isinstance(decoded, dict) and (
+            isinstance(decoded.get("overview"), str)
+            or (has_overview and "overview" not in decoded)
+        )
+        if not has_valid_overview:
+            if rows_by_index:
+                break
             raise CollectionSummaryError("The provider returned an invalid collection overview.")
         rows = decoded.get("themes")
         if not isinstance(rows, list):
+            if rows_by_index:
+                break
             raise CollectionSummaryError("The provider returned an invalid collection themes array.")
-        if overview is None:
+        response = reply
+        has_overview = True
+        if not overview and isinstance(decoded.get("overview"), str):
             overview = _text(decoded["overview"])
 
         pending_indices = {candidate["theme_index"] for candidate in pending}

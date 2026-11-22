@@ -427,6 +427,19 @@ def test_section_draft_keeps_sections_on_lines_left_out_of_a_sampled_transcript(
     assert [(item["start"], item["end"]) for item in draft["items"]] == [(0.25, 34), (49, 90)]
     assert all("lines" not in source and "sample" not in source for source in draft["sources"])
 
+    # Key-point citations must still refer to lines shown in the prompt sample.
+    codex.output = {
+        "key_points": [
+            point("Omitted onset.", onset=2, first=1, last=3),
+            point("Omitted start.", onset=3, first=2, last=3),
+            point("Omitted end.", onset=3, first=3, last=4),
+            point("Sole omitted line.", onset=2, first=2, last=2),
+            point("Shown line.", onset=3, first=1, last=5),
+        ],
+    }
+    keypoint_draft = make_draft(service)
+    assert [item["text"] for item in keypoint_draft["items"]] == ["Shown line."]
+
 
 def test_section_draft_resolves_lines_and_publishes_reviewed_boundary_seconds(workflow, monkeypatch):
     service, codex, source = workflow

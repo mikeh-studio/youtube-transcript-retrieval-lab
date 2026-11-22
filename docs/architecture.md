@@ -67,7 +67,8 @@ candidate and checks returned citations against that candidate's evidence.
 The server retries once for missing indices or invalid JSON. It returns cited
 themes in candidate order, with `status: "not_returned"` and empty `perspectives`
 for any indices still missing. The `coverage` block records `retries` and
-`not_returned`. Invalid JSON on the retry produces `COLLECTION_SUMMARY_FAILED`.
+`not_returned`. Invalid JSON on the retry produces `COLLECTION_SUMMARY_FAILED`
+when no themes were returned.
 
 ## Frontend
 

@@ -266,6 +266,9 @@ function readCollectionSelection() {
 function CollectionResult({ result, titles }) {
   const { overview, themes, evidence_catalog: evidence, coverage } = result;
   const citations = new Map(evidence.map((row) => [row.citation_id, row]));
+  const citedCount = themes.filter(
+    (theme) => theme.status !== "not_returned" && theme.perspectives.length > 0
+  ).length;
 
   return (
     <section className="panel">
@@ -274,48 +277,54 @@ function CollectionResult({ result, titles }) {
       <p className="lab-hint" aria-label="Source coverage">
         Sources cited {coverage.sources_cited} of {coverage.sources_selected} · Citation validity {percent.format(coverage.citation_validity)}
       </p>
-      {!themes.length ? <p className="search-empty">No themes with citations were found for this selection.</p> : null}
+      {!citedCount ? <p className="search-empty">No themes with citations were found for this selection.</p> : null}
       <div className="search-cards">
-        {themes.map((theme, index) => (
-          <article className="search-card summary-section" key={index}>
-            <h3>{theme.title}</h3>
-            <p>{theme.summary}</p>
-            {Object.entries(STANCE_LABELS).map(([stance, label]) => {
-              const perspectives = theme.perspectives.filter((row) => row.stance === stance);
-              return perspectives.length ? (
-                <div className="summary-stance" key={stance}>
-                  <h4>{label}</h4>
-                  <ul className="summary-points">
-                    {perspectives.map((row) => {
-                      const title = titles.get(row.source_id) || row.source_id;
-                      return (
-                        <li key={row.source_id}>
-                          <strong>{title}</strong>
-                          <p>{row.statement}</p>
-                          <div className="summary-inline">
-                            {row.citations.map((id) => {
-                              const citation = citations.get(id);
-                              const url = safeExternalUrl(citation?.url);
-                              if (!url || citation.video_id !== row.source_id) {
-                                return null;
-                              }
-                              const time = formatSeconds(citation.start_seconds);
-                              return (
-                                <a key={id} href={url} target="_blank" rel="noopener noreferrer" aria-label={`${title} at ${time}`}>
-                                  {time}
-                                </a>
-                              );
-                            })}
-                          </div>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </div>
-              ) : null;
-            })}
-          </article>
-        ))}
+        {themes.map((theme, index) => {
+          const notReturned = theme.status === "not_returned";
+          return (
+            <article className="search-card summary-section" key={theme.theme_index ?? index}>
+              <div className="summary-section-heading">
+                <h3>{theme.title}</h3>
+                {notReturned ? <span className="lab-chip">Not returned</span> : null}
+              </div>
+              <p>{notReturned ? "The provider did not return this candidate theme." : theme.summary}</p>
+              {Object.entries(STANCE_LABELS).map(([stance, label]) => {
+                const perspectives = theme.perspectives.filter((row) => row.stance === stance);
+                return perspectives.length ? (
+                  <div className="summary-stance" key={stance}>
+                    <h4>{label}</h4>
+                    <ul className="summary-points">
+                      {perspectives.map((row) => {
+                        const title = titles.get(row.source_id) || row.source_id;
+                        return (
+                          <li key={row.source_id}>
+                            <strong>{title}</strong>
+                            <p>{row.statement}</p>
+                            <div className="summary-inline">
+                              {row.citations.map((id) => {
+                                const citation = citations.get(id);
+                                const url = safeExternalUrl(citation?.url);
+                                if (!url || citation.video_id !== row.source_id) {
+                                  return null;
+                                }
+                                const time = formatSeconds(citation.start_seconds);
+                                return (
+                                  <a key={id} href={url} target="_blank" rel="noopener noreferrer" aria-label={`${title} at ${time}`}>
+                                    {time}
+                                  </a>
+                                );
+                              })}
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                ) : null;
+              })}
+            </article>
+          );
+        })}
       </div>
     </section>
   );
