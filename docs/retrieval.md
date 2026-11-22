@@ -68,6 +68,8 @@ videos, then retrieves chunks only from them. The router builds identity
 (title and channel), overview, and timestamped section vectors for each video and
 ranks videos by dense aggregation plus lexical RRF. Router artifacts are stored
 separately from the chunk index and rebuilt when video inputs change.
+With `video_routing: "multi_vector"` and no `video_id`, Ask defaults to eight
+chunks unless `k` or `top_k` is supplied.
 
 For a multilingual query expansion, each language variant uses the same
 relevance formula before shortlisting and during fusion. The score is the

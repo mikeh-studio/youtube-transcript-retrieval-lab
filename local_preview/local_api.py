@@ -161,6 +161,7 @@ LEXICAL_TOKENIZER_MORPH_VERSION = "ja_morph_v1"
 LEXICAL_TOKENIZER_BIGRAM_VERSION = "ja_bigram_v0"
 RETRIEVAL_MODES = {"hybrid", "dense", "lexical"}
 VIDEO_ROUTING_MODES = {"none", "multi_vector"}
+DEFAULT_MULTI_VECTOR_ASK_K = 8
 DEFAULT_VIDEO_ROUTING_TOP_K = 3
 MAX_VIDEO_ROUTING_TOP_K = 10
 MAX_SEARCH_VIDEO_SCOPE = 500
@@ -9337,7 +9338,6 @@ class Handler(BrowserBoundary, BaseHTTPRequestHandler):
                         400,
                     )
                     return
-                k = max(1, min(int(body.get("top_k", body.get("k", 5))), 12))
                 language = body.get("language")
                 video_id = str(body.get("video_id") or "").strip() or None
                 retrieval_mode = (
@@ -9347,6 +9347,9 @@ class Handler(BrowserBoundary, BaseHTTPRequestHandler):
                 video_routing = str(
                     body.get("video_routing") or "none"
                 ).strip().lower()
+                use_video_routing = video_routing == "multi_vector" and not video_id
+                default_k = DEFAULT_MULTI_VECTOR_ASK_K if use_video_routing else 5
+                k = max(1, min(int(body.get("top_k", body.get("k", default_k))), 12))
                 provider = (
                     str(body.get("provider") or DEFAULT_ASK_PROVIDER).strip().lower()
                 )
@@ -9396,7 +9399,7 @@ class Handler(BrowserBoundary, BaseHTTPRequestHandler):
                     body.get("agentic", body.get("agentic_retrieval")),
                     default=_env_flag(AGENTIC_RETRIEVAL_ENV),
                 )
-                if video_routing == "multi_vector" and not video_id:
+                if use_video_routing:
                     video_top_k = max(
                         1,
                         min(
