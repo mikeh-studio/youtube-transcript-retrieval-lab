@@ -10,8 +10,6 @@ from pipelines.export_library import parse_json
 
 
 CLUSTER_MIN_COSINE = 0.85
-COLLECTION_EVIDENCE_PER_THEME = 8
-COLLECTION_SOURCE_QUERIES = 3
 STANCES = ("agrees", "differs", "adds", "only_here")
 
 SYSTEM_PROMPT = """Summarize a collection using only the supplied evidence.
@@ -128,27 +126,6 @@ def collection_sections(source_ids, key_areas_fn):
                 "query": f'{section["title"]} {section["summary"]}',
             })
     return sections
-
-
-def _theme_queries(cluster, source_ids):
-    sections_by_source = {}
-    for section in cluster:
-        sections_by_source.setdefault(section["source_id"], []).append(section)
-
-    def duration(section):
-        return section["end"] - section["start"]
-
-    ranked_sources = sorted(
-        sections_by_source,
-        key=lambda source_id: (-math.fsum(map(duration, sections_by_source[source_id])), source_id),
-    )[:COLLECTION_SOURCE_QUERIES]
-    per_source_k = max(2, 6 // len(ranked_sources))
-    queries = [
-        (max(sections_by_source[source_id], key=duration)["query"], [source_id], per_source_k)
-        for source_id in ranked_sources
-    ]
-    queries.append((cluster[0]["query"], list(source_ids), COLLECTION_EVIDENCE_PER_THEME))
-    return queries
 
 
 def _catalog(rows, selected):
@@ -305,26 +282,17 @@ def build_collection_summary(
     clusters = _cluster(sections, embed_fn)
     candidates, theme_catalogs, evidence_catalog = [], {}, {}
     cluster_sizes = {}
-    retrieval_queries = 0
     selected = set(source_ids)
     for cluster in clusters[:max_themes]:
-        retrieved = []
-        for query, scope, k in _theme_queries(cluster, source_ids):
-            response = retrieve_fn(query=query, video_ids=scope, k=k, retrieval_mode="hybrid")
-            retrieval_queries += 1
-            retrieved.extend(response["results"][:k])
+        seed = cluster[0]
+        retrieved = retrieve_fn(
+            query=seed["query"], video_ids=list(source_ids), k=8, retrieval_mode="hybrid"
+        )
         catalog = {}
-        seen = set()
-        for evidence in _catalog(retrieved, selected):
-            key = (evidence["video_id"], evidence["start_seconds"], evidence["end_seconds"])
-            if key in seen:
-                continue
-            seen.add(key)
+        for evidence in _catalog(retrieved["results"][:8], selected):
             ref = f"E{len(evidence_catalog) + 1}"
             entry = {**evidence, "citation_id": ref}
             catalog[ref] = evidence_catalog[ref] = entry
-            if len(catalog) == COLLECTION_EVIDENCE_PER_THEME:
-                break
         if not catalog:
             continue
         index = len(candidates) + 1
@@ -366,6 +334,5 @@ def build_collection_summary(
             "not_returned": len(candidates) - len(rows_by_index),
             "clusters": len(clusters),
             "cluster_sizes": [cluster_sizes[theme["theme_index"]] for theme in themes],
-            "retrieval_queries": retrieval_queries,
         },
     }

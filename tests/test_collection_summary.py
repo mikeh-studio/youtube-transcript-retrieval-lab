@@ -44,7 +44,7 @@ def _build(source_ids=IDS[:2], **overrides):
         "language": "en", "focus": "Materials", "provider": "chatgpt", "model": "fixture",
         "key_areas_fn": lambda **_: {"sections": [_section("Cork")]},
         "embed_fn": lambda queries: [[1, 0] for _ in queries],
-        "retrieve_fn": lambda video_ids, **_: {"results": [_retrieved(source_id) for source_id in video_ids]},
+        "retrieve_fn": lambda **_: {"results": [_retrieved(IDS[0]), _retrieved(IDS[1])]},
         "llm": lambda **_: {"text": json.dumps({
             "overview": "Cork can cover a jar.",
             "themes": [_theme(_perspective(IDS[0], ["E1"]))],
@@ -64,8 +64,8 @@ def test_scope_is_validated_before_calls(ids):
 
 def test_citations_are_resolved_by_theme_and_declared_source():
     def retrieve(**request):
-        if len(request["video_ids"]) == 1:
-            return {"results": []}
+        assert request["video_ids"] == IDS[:2]
+        assert request["k"] == 8 and request["retrieval_mode"] == "hybrid"
         if request["query"].startswith("A"):
             return {"results": [
                 _retrieved("other"), _retrieved(IDS[0]), _retrieved(IDS[1], 8, 12),
@@ -109,91 +109,11 @@ def test_citations_are_resolved_by_theme_and_declared_source():
     assert result["coverage"] == {
         "sources_selected": 2, "sources_cited": 2, "citation_validity": 2 / 9,
         "retries": 0, "not_returned": 0, "clusters": 2, "cluster_sizes": [2],
-        "retrieval_queries": 6,
     }
     catalog = {row["citation_id"]: row for row in result["evidence_catalog"]}
     assert set(catalog) == {"E1", "E2", "E3"}
     assert catalog["E1"]["url"] == f"https://www.youtube.com/watch?v={IDS[0]}&t=3s"
     assert catalog["E1"]["start_seconds"] == 3.5 and catalog["E1"]["end_seconds"] == 5
-
-
-@pytest.mark.parametrize(("source_count", "expected_k", "source_order"), [
-    (1, 6, [0]),
-    (2, 3, [1, 0]),
-    (3, 2, [1, 0, 2]),
-    (4, 2, [1, 0, 2]),
-])
-def test_collection_search_uses_longest_section_of_each_top_source(source_count, expected_k, source_order):
-    sources = [*IDS, "lid-demo-d"]
-    sections = [
-        [_section("Cork", 0, 4), _section("Cork seal", 20, 34)],
-        [_section("Wax seal", 0, 12), _section("Wax", 30, 40)],
-        [_section("Cloth cover", 0, 18)],
-        [_section("Clay lid", 0, 17)],
-    ]
-    sections_by_source = dict(zip(sources, sections[:source_count]))
-    calls = []
-
-    def retrieve(**request):
-        calls.append(request)
-        return {"results": []}
-
-    selected = sources[::-1]
-    result = _build(
-        selected,
-        key_areas_fn=lambda source_id, **_: {"sections": sections_by_source.get(source_id, [])},
-        retrieve_fn=retrieve,
-    )
-    titles = ["Cork seal", "Wax seal", "Cloth cover"]
-    assert calls == [
-        {"query": f"{titles[index]} Notes about {titles[index]}.", "video_ids": [sources[index]],
-         "k": expected_k, "retrieval_mode": "hybrid"}
-        for index in source_order
-    ] + [{"query": "Cork Notes about Cork.", "video_ids": selected, "k": 8, "retrieval_mode": "hybrid"}]
-    assert result["coverage"]["retrieval_queries"] == len(calls)
-
-
-def test_collection_search_deduplicates_and_fills_evidence_in_query_order():
-    a, b, c = IDS
-    first = _retrieved(a, 1, 3)
-    duplicate = {**first, "text": "A second note about the same cork lid."}
-    second = _retrieved(a, 5, 7)
-    source_b = [_retrieved(b, start, start + 2) for start in (1, 5, 9)]
-    shared_fill = [_retrieved(c, 1, 3), _retrieved(a, 1, 4), _retrieved(a, 6, 7)]
-    results = {
-        (a,): [first, duplicate, second],
-        (b,): source_b,
-        tuple(IDS): [duplicate, source_b[0], *shared_fill, _retrieved(c, 9, 11)],
-    }
-    calls = []
-    candidates = []
-
-    def retrieve(*, video_ids, **_):
-        calls.append(video_ids)
-        return {"results": results[tuple(video_ids)]}
-
-    def llm(**request):
-        candidates.extend(json.loads(request["user_message"])["candidates"])
-        return {"text": json.dumps({"overview": "", "themes": [_theme()]})}
-
-    result = _build(
-        IDS,
-        key_areas_fn=lambda source_id, **_: {"sections": [] if source_id == c else [_section("Lids")]},
-        retrieve_fn=retrieve,
-        llm=llm,
-    )
-    assert calls == [[a], [b], IDS]
-    assert result["coverage"]["retrieval_queries"] == 3
-    expected = [first, second, *source_b, *shared_fill]
-    assert [
-        (row["video_id"], row["start_seconds"], row["end_seconds"], row["text"])
-        for row in result["evidence_catalog"]
-    ] == [(row["video_id"], row["start"], row["end"], row["text"]) for row in expected]
-    assert len(candidates) == 1
-    assert candidates[0]["evidence"] == [
-        {"id": f"E{index}", "source_id": row["video_id"], "text": row["text"]}
-        for index, row in enumerate(expected, start=1)
-    ]
 
 
 def test_greedy_clustering_is_stable_and_ranks_sources_then_duration(monkeypatch):
@@ -219,9 +139,8 @@ def test_greedy_clustering_is_stable_and_ranks_sources_then_duration(monkeypatch
         queries = []
 
         def retrieve(**request):
-            if len(request["video_ids"]) > 1:
-                queries.append(request["query"])
-            return {"results": [_retrieved(request["video_ids"][0])]}
+            queries.append(request["query"])
+            return {"results": [_retrieved(IDS[0])]}
 
         def llm(**request):
             candidates = json.loads(request["user_message"])["candidates"]
@@ -266,11 +185,10 @@ def test_cluster_sizes_follow_returned_themes_after_cut_and_evidence_filtering()
     }
     queries = []
 
-    def retrieve(*, query, video_ids, **_):
+    def retrieve(*, query, **_):
         title = query.split()[0]
-        if len(video_ids) > 1:
-            queries.append(title)
-        return {"results": [_retrieved(IDS[0])] if title != "Bark" and IDS[0] in video_ids else []}
+        queries.append(title)
+        return {"results": [] if title == "Bark" else [_retrieved(IDS[0])]}
 
     result = _build(
         key_areas_fn=lambda source_id, **_: {"sections": source_sections[source_id]},
@@ -287,7 +205,6 @@ def test_cluster_sizes_follow_returned_themes_after_cut_and_evidence_filtering()
     assert result["themes"][0]["status"] == "not_returned"
     assert result["coverage"]["clusters"] == 5
     assert result["coverage"]["cluster_sizes"] == [3, 1]
-    assert result["coverage"]["retrieval_queries"] == 11
 
 
 def test_no_evidence_skips_synthesis():
@@ -502,7 +419,6 @@ def test_collection_route_uses_cached_key_areas_and_processor(monkeypatch):
         assert payload["coverage"]["retries"] == payload["coverage"]["not_returned"] == 0
         assert payload["coverage"]["clusters"] == 1
         assert payload["coverage"]["cluster_sizes"] == [2]
-        assert payload["coverage"]["retrieval_queries"] == 3
         assert len(calls) == expected_call_count
 
     client, server = socket.socketpair()
