@@ -185,8 +185,11 @@ and transcript fingerprint. The response indicates cache reuse in `cached`.
 IDs), `language` (`en` or `ja`), an optional `focus` string, `provider`, and
 `model`. It reuses cached key areas and clusters section embeddings at cosine
 similarity 0.85. Up to eight clusters are ranked by distinct source count, then
-total section duration. Each theme retrieves up to eight hybrid transcript
-matches within the selection. The focus guides synthesis over that evidence.
+total section duration. Each theme runs hybrid searches for up to three sources
+ranked by total section duration in the cluster. Each search uses that source's
+longest section. A shared search uses the cluster's first section across all
+selected sources to fill the remaining slots, up to eight distinct transcript
+chunks per theme. The focus guides synthesis over that evidence.
 
 The response includes `overview`, `themes`, and an `evidence_catalog`. A theme
 has `title`, `summary`, and `perspectives`. Each perspective contains a
@@ -200,6 +203,8 @@ references that pass validation. The share is zero when there are no references.
 `coverage.clusters` is the number of clusters before the theme limit.
 `coverage.cluster_sizes` gives the number of sections in each returned theme's
 cluster, in response order, including any `not_returned` placeholders.
+`coverage.retrieval_queries` counts all per-source and shared searches for the
+collection.
 
 The following command compares clustering thresholds using cached key areas.
 
