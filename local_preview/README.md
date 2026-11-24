@@ -14,7 +14,7 @@ python local_preview/local_api.py
 Open:
 
 - `http://127.0.0.1:8000/catalog.html` - Catalog (needs `CONTENT_LIBRARY_CATALOG_URL`)
-- `http://127.0.0.1:8000/index.html` - Library, Search (`#/qa`), and Settings (`#/settings`)
+- `http://127.0.0.1:8000/index.html` - Library, Search (`#/qa`), What’s new (`#/whats-new`), and Settings (`#/settings`)
 - `http://127.0.0.1:8000/evaluation.html` - Evaluation
 - `http://127.0.0.1:8000/chunking.html` - Settings → Chunking
 - `http://127.0.0.1:8000/evidence.html` - Settings → Data quality
@@ -32,6 +32,7 @@ YT_RAG_FORCE_HASH_EMBEDDINGS=1 python local_preview/local_api.py
 - Catalog: a read-only view of discovered videos from the optional private catalog service.
 - Library: YouTube video and playlist transcript ingestion, and a table of indexed videos with chunk counts, chunking status, and catalog review status.
 - Search: Find evidence groups timestamped passages by video, expands canonical transcript context, and generates optional citation-backed answers from a saved selection. Compare retrieval runs two setups on the same query with relevance labels, per-query metrics, optional reranking, and retrieval traces. Compare supports `hybrid`, `dense`, `lexical`, and deterministic agentic retrieval.
+- [What’s new](../docs/digest.md): follow feeds, check for releases, and build a cited digest from indexed sources.
 - Evaluation: review explicitly imported saved CLI/API reports, ranking and answer metrics, citations, token usage, and supplied costs. Query sets, labels, retrieval runs, and Codex-drafted datasets remain in the linked Query sets workbench.
 - Settings: browser defaults, provider configuration status (no keys), and links to Catalog, Chunking, Data quality (evidence curation reports), Search feedback (`relevant` / `not_relevant` labels from Search), and Local video OCR for files you own or have permission to process.
 - Study (secondary): flashcards, topic maps, Explain Topic notes, summaries, run history, and quality checks.
@@ -125,9 +126,10 @@ YouTube audio is never downloaded.
 }
 ```
 
-Search sends these fields automatically when **Video scope** is
-**All videos**. Routing details, selected video IDs, fallbacks, and latency are
-returned under `retrieval_details.video_routing`.
+Direct API clients can request this routing with the fields above. The response
+includes selected video IDs, fallbacks, and latency under `retrieval_details.video_routing`.
+In the browser, Find runs `/v1/search` and answers from selected passages
+through `/v1/evidence/answer`.
 
 ## Agentic Search
 

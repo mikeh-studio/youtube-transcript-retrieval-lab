@@ -63,8 +63,8 @@ insufficient-evidence answer behavior still applies.
 
 ## Video-first routing
 
-When Search runs over **All videos**, `/v1/ask` first shortlists relevant
-videos, then retrieves chunks only from them. The router builds identity
+A library-wide `/v1/ask` request with `video_routing: "multi_vector"` first
+shortlists relevant videos, then retrieves chunks from them. The router builds identity
 (title and channel), overview, and timestamped section vectors for each video and
 ranks videos by dense aggregation plus lexical RRF. Router artifacts are stored
 separately from the chunk index and rebuilt when video inputs change.
