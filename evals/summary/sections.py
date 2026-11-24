@@ -85,6 +85,13 @@ def section_counts(gold, prediction):
                 "boundary_hits_30s": _matched(expected, actual, 30),
                 "window_diff_errors": errors,
                 "window_diff_windows": windows,
+                "gold_sections": len(reference),
+                "predicted_sections": len(sections),
+                "section_count_sources": 1,
+                # Off when the plan has fewer than half or more than twice gold's sections.
+                "section_count_off": int(
+                    not len(reference) <= 2 * len(sections) <= 4 * len(reference)
+                ),
             }
         )
     return counts
@@ -107,5 +114,11 @@ def section_metrics(counts):
         windows = counts["window_diff_windows"]
         metrics["window_diff"] = (
             counts["window_diff_errors"] / windows if windows else None
+        )
+        metrics["section_count_ratio"] = (
+            counts["predicted_sections"] / counts["gold_sections"]
+        )
+        metrics["section_count_off_rate"] = (
+            counts["section_count_off"] / counts["section_count_sources"]
         )
     return metrics

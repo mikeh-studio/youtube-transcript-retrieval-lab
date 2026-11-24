@@ -361,6 +361,7 @@ timeout.
 | `boundary_f1@15s`, `boundary_f1@30s` | Compare internal section start times in seconds, excluding each plan's first section. Greedily pair the closest boundaries within the tolerance, one-to-one. F1 is twice the match count divided by the total boundary count, or 1 if both counts are zero. |
 | `window_diff` | Share of windows with different gold and predicted boundary counts. Use one-second bins and a window width of half the mean gold section length, rounded down and clamped to fit the timeline. |
 | `section_coverage` | Union of predicted section time spans divided by source duration. |
+| `section_count_ratio`, `section_count_off_rate` | Predicted sections divided by gold sections, pooled over sources. The off rate is the share of sources with fewer than half or more than twice the gold section count. Both are reported without a floor; they separate under- or over-splitting from misplaced boundaries. |
 
 Results contain per-source counts and per-system micro-aggregates. Rates
 with a zero denominator are unavailable. Span proximity measures timestamp
