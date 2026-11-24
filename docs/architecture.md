@@ -5,7 +5,7 @@ browser UI. It stores everything on disk under `data/` and in the browser.
 
 ```text
 Browser UI (local_preview/web), one shared nav (lab-nav.js)
-  React shell (index.html): Library, Search, Study, Local video
+  React shell (index.html): Library, Search, What’s new, Settings, Study, Local video
   Pages: catalog, evaluation, chunking, evidence (Data quality), reviews (Search feedback)
       |  same-origin requests with session cookie + CSRF token
       v
@@ -30,7 +30,27 @@ multilingual/
 local files (data/, gitignored) and browser storage
 ```
 
-## Search workbench flow
+## Find and answer from selected passages
+
+Find retrieves ranked passages through `POST /v1/search`. Search defaults to Find, with explicit Compare mode for retrieval experiments.
+The reader expands original canonical passages and neighboring context. Reading
+a neighbor does not select it; collapsing it does not discard an explicit
+selection. Library handoff retains source scope.
+
+The optional answer action uses `/v1/evidence/snapshots`, `/context`, `/estimate`
+and `/answer`. Server snapshots bind the question, source fingerprints and exact
+passages; answers use that selection without a fresh retrieval or fallback video.
+Deleted/reindexed sources and changed provider/model/language/budget invalidate
+the selection or estimate. Issued citations are resolved to canonical text and
+timestamp URLs. These are integrity checks, not semantic quality certification.
+
+Snapshots and estimates are bounded, process-local records. Restarting the
+server requires a fresh selection/estimate. Token estimates use an explicit
+character heuristic; USD estimates currently remain unavailable, and generation
+requires acknowledgement. No generation happens merely by opening a report or
+reviewing an estimate.
+
+## Compare retrieval runs
 
 1. **Scope.** All indexed videos, chosen videos, or a catalog filter. For a
    catalog filter, the browser reads matching catalog items and keeps only the
@@ -45,10 +65,9 @@ local files (data/, gitignored) and browser storage
    saved with `POST /v1/feedback/search-review` and loaded back with
    `GET /v1/feedback/search-review?query=…`.
 
-## Answer flow
+## Direct API answer flow (`POST /v1/ask`)
 
-1. **Scope.** The request targets selected videos, or all videos. For all
-   videos, the multi-vector router ranks videos by identity, overview, and
+1. **Scope.** The request targets selected videos, or all videos. For a library-wide request with multi-vector routing enabled, the multi-vector router ranks videos by identity, overview, and
    section vectors (dense aggregation plus lexical RRF) and keeps the top few.
 2. **Retrieve.** Plain search runs dense, lexical, or hybrid retrieval. Agentic
    search chooses a tool, checks evidence sufficiency, may switch tools, and
@@ -73,7 +92,7 @@ when no themes were returned.
 ## Frontend
 
 The navigation is defined once in `local_preview/web/lab-nav.js`: Library,
-Search, Evaluation, and Settings. Search contains Find evidence and Compare
+Search, [What’s new](digest.md), Evaluation, and Settings. Search contains Find evidence and Compare
 retrieval. Catalog, chunking, data quality, feedback, local video, and Study
 remain available through Settings. The React shell imports the shared navigation;
 standalone pages use `renderLabNav()`. Browser tests check both layouts.
@@ -144,25 +163,7 @@ two runtimes. The export contract alone does not imply production migration,
 automatic synchronization or availability of the private implementation. The
 public app and its base test suite do not require private repository access.
 
-## Selected-evidence workspace
-
-Search defaults to Find, with explicit Compare mode for retrieval experiments.
-The reader expands original canonical passages and neighboring context. Reading
-a neighbor does not select it; collapsing it does not discard an explicit
-selection. Library handoff retains source scope.
-
-The optional answer action uses `/v1/evidence/snapshots`, `/context`, `/estimate`
-and `/answer`. Server snapshots bind the question, source fingerprints and exact
-passages; answers use that selection without a fresh retrieval or fallback video.
-Deleted/reindexed sources and changed provider/model/language/budget invalidate
-the selection or estimate. Issued citations are resolved to canonical text and
-timestamp URLs. These are integrity checks, not semantic quality certification.
-
-Snapshots and estimates are bounded, process-local records. Restarting the
-server requires a fresh selection/estimate. Token estimates use an explicit
-character heuristic; USD estimates currently remain unavailable, and generation
-requires acknowledgement. No generation happens merely by opening a report or
-reviewing an estimate.
+## Evaluation report storage
 
 `evaluation_reports.py` imports supported report envelopes into a sanitized,
 content-addressed runtime store. Report adapters do not run frozen evaluations

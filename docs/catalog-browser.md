@@ -1,40 +1,28 @@
 # Local catalog browser
 
-Open **http://127.0.0.1:8000/catalog.html** after starting the real backend:
+Open **Settings → General → Catalog metadata** or visit `/catalog.html` on the local
+server. Browse discovered videos by language, topic, or review status. Open a
+record for its provenance and review blockers. Browsing requires no YouTube API key.
+
+Library shows catalog status alongside indexed videos. In **Search → Compare**,
+a catalog filter scopes retrieval to matching videos already in the local index.
+Discovery alone does not index a transcript.
+
+## Connect the optional catalog
+
+Start the private catalog service separately on loopback with its schema 0008
+catalog projection. Point the public app at its numeric loopback address and port:
 
 ```sh
-# Private service must run separately on loopback with catalog schema 0008.
 export CONTENT_LIBRARY_CATALOG_URL=http://127.0.0.1:8100
 python local_preview/local_api.py
 ```
 
-The Catalog link in the app opens discovered video metadata, language/topic/status
-filters, stable pagination, provenance and review blockers. These are catalog
-records; searchability is explicitly not checked. There are no ingestion or review
-write controls. No YouTube API key is needed to browse previously cataloged entries.
-Missing private-service configuration produces an unavailable state.
-
-The public repository owns only this read client and UI. The private library owns
-PostgreSQL storage, discovery adapters, review evidence, ontology, and evaluation.
-The client accepts only a dedicated safe projection at fixed list/detail paths.
-Reviewer identities, reasons, artifact references/hashes, source configuration and
-transcript text are rejected. The upstream must be an explicit numeric loopback URL
-with a port; redirects and environment HTTP proxies are disabled. The client has a
-5-second caller deadline, 3-second socket timeout, 2 MB response cap and four worker
-slots. Responses are no-store. A slow worker retains its bounded slot until it ends.
-BrowserBoundary already rejects untrusted Host/port, Origin and forwarded headers
-before route dispatch. The ingestion-unlock navigation flag is onboarding based on
-localStorage and existing indexed videos, not authentication; Catalog intentionally
-remains available before any ingestion. This is an operator-local interface without multiuser authentication; do not expose
-it through a tunnel or network listener.
-
-Ontology filters use explicit `library/v1` reviewed terms. They do not change live
-semantic ranking. Unknown and expired metadata remain explicit. At the earliest
-metadata or permit expiry, displayed data is cleared and reloaded; timers use the
-server snapshot time and a monotonic browser clock, so local wall-clock skew cannot
-cause a refresh loop. Responses already expired in transit are discarded; failed reloads
-do not restore stale values. Readiness is a snapshot of reviewed preconditions,
-never authorization to fetch or ingest a transcript.
+Without the service, Catalog displays an unavailable state. Library and Search
+can still use the local index. The public client provides read-only list and
+detail views. It rejects private fields and clears displayed data when metadata
+or permits expire. Review readiness records preconditions only. Keep both
+services on loopback. See the [browser request boundary](../BROWSER_SECURITY.md).
 
 ## Validation
 
@@ -44,7 +32,8 @@ client restrictions, projection rejection, capacity, redirects and real HTTP err
 `npm ci && npm run build:web` uses the lockfile and refreshes the checked-in bundle.
 
 For opt-in browser verification, use a disposable private database with the synthetic
-fixture described in the private repo's checks report. Start both real services:
+catalog fixture from the private service. The [browser check](../scripts/validate_catalog_flow.cjs)
+lists the expected records, filter counts, and detail assertions. Start both services:
 
 ```sh
 CATALOG_FLOW_URL=http://127.0.0.1:8000 \
