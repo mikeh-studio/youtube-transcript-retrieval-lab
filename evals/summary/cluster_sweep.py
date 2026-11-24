@@ -14,6 +14,7 @@ from local_preview.collection_summary import (
     collection_source_ids,
     embed_collection_sections,
 )
+from local_preview.environment import load_app_environment
 from local_preview.key_areas import KEY_AREAS_VERSION
 from local_preview.local_files import json_bytes, write_atomic
 from multilingual.source_model import SOURCE_ID_RE
@@ -100,6 +101,7 @@ def _read_cached_key_areas(data_dir, source_id, *, language, provider, model):
 
 
 def _local_processor():
+    load_app_environment(ROOT)
     os.environ["HF_HUB_OFFLINE"] = "1"
     try:
         from multilingual.text_processing import TextProcessor
@@ -139,10 +141,12 @@ def main(argv=None, *, embed_fn=None):
     args = parser.parse_args(argv)
 
     try:
-        out = args.out.resolve()
-        if not out.is_relative_to(ROOT.resolve() / "evals" / "reports"):
+        out = args.out
+        if not out.resolve().is_relative_to(ROOT.resolve() / "evals" / "reports"):
             raise ValueError("--out must be under evals/reports/")
         require_private(out)
+        if out.exists() or out.is_symlink():
+            raise ValueError("Report already exists. Choose a new --out path.")
         source_sets = [collection_source_ids(value.split(",")) for value in args.source_ids]
         cached = {
             source_id: _read_cached_key_areas(
@@ -173,7 +177,7 @@ def main(argv=None, *, embed_fn=None):
                 for ids in source_sets
             ],
         }
-        write_atomic(out, json_bytes(report))
+        write_atomic(out, json_bytes(report), overwrite=False)
     except (ValueError, OSError, RuntimeError) as exc:
         parser.exit(2, f"collection cluster sweep: {exc}\n")
 

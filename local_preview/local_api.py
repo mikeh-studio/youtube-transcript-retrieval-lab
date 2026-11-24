@@ -44,20 +44,14 @@ except Exception:  # pragma: no cover
     openai = None
     OpenAI = None
 
-try:
-    from dotenv import load_dotenv
-except Exception:  # pragma: no cover
-    load_dotenv = None
-
-
 ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+from local_preview.environment import load_app_environment  # noqa: E402
+
 _SKIP_GLOBAL_SERVICE = os.environ.get("YT_RAG_SKIP_GLOBAL_SERVICE", "").strip().lower()
-if load_dotenv is not None:
-    load_dotenv(ROOT_DIR / ".env")
-    load_dotenv(ROOT_DIR / ".env.local", override=True)
+load_app_environment(ROOT_DIR)
 
 from browser_boundary import BrowserBoundary  # noqa: E402
 from local_preview.audio_ingest import AudioIngestQueue, IngestJob  # noqa: E402

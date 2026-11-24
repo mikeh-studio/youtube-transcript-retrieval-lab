@@ -210,8 +210,9 @@ python -m evals.summary.cluster_sweep --data-dir data \
   --out evals/reports/collection-clusters.json
 ```
 
-Use the app's embedding model settings with a local model snapshot. The command
-uses only cached key areas and local embeddings. If several entries match a
+The sweep loads the app's `.env` defaults and `.env.local` overrides, then
+forces offline model loading. Use a local model snapshot and a fresh `--out`
+path for each run. If several cached key-area entries match a
 source and language, filter by cache key with `--provider` and `--model`. The
 report records ranked cluster sizes, distinct-source counts, and source IDs for
 every threshold, along with cache and embedding metadata.
