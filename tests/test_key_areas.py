@@ -171,6 +171,25 @@ def test_default_keeps_all_drafted_blocks_and_requires_ad_coverage():
     assert "Include opening ad reads in the first section." in system
     assert "Leave ad reads out" not in system
     assert "at most" not in system
+    assert key_areas.WINDOW_EDGE_RULE not in system + llm.calls[0]["user_message"]
+    assert key_areas.MERGE_EDGE_RULE not in system + llm.calls[0]["user_message"]
+
+
+def test_window_edge_flags_reach_the_merge_call():
+    segments = _segments(["La " * 1000 for _ in range(6)])
+    tail = {**_section(1, 2), "continues_after": True}
+    head = {**_section(3, 4), "continues_before": True}
+    llm = FakeLLM(
+        _draft(tail),
+        _draft(head),
+        _draft(_section(5, 6)),
+        _draft(_section(1, 6, _point([2]))),
+    )
+    result = _build(segments, llm)
+    merge = llm.calls[-1]["user_message"]
+    assert '"continues_after": true' in merge
+    assert '"continues_before": true' in merge
+    assert [(row["start_line"], row["end_line"]) for row in result["sections"]] == [(1, 6)]
 
 
 def test_windowing_keeps_global_ids_and_uses_one_merge_call():
@@ -188,6 +207,11 @@ def test_windowing_keeps_global_ids_and_uses_one_merge_call():
         assert NO_SECTION_TARGET in call["system_prompt"]
         assert "Fold ad reads into the preceding section." in call["system_prompt"]
         assert "at most" not in call["system_prompt"] + call["user_message"]
+    for call in llm.calls[:3]:
+        assert key_areas.WINDOW_EDGE_RULE in call["user_message"]
+        assert key_areas.MERGE_EDGE_RULE not in call["user_message"]
+    assert key_areas.MERGE_EDGE_RULE in llm.calls[3]["user_message"]
+    assert key_areas.WINDOW_EDGE_RULE not in llm.calls[3]["user_message"]
     for index, call in enumerate(llm.calls[:3]):
         window = (
             call["user_message"]
