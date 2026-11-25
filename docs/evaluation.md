@@ -415,22 +415,34 @@ gates.
 ### Key areas, Ask and collection floors
 
 The owner approved these regression floors on 2026-11-24. They use the same
-generator and judge as the summary baseline. Key areas use the same 9 sources and
-71 key points, plus 120 owner-reviewed sections (gold SHA-256
+generator and judge as the summary baseline. Key-area gold covers the same 9
+sources and 71 key points, plus 120 owner-reviewed sections (gold SHA-256
 `700b5aa5632b67f1b9a8ce12f3f847b41c28c4766b4e785ca5eb7d2025699f73`). Key-area
 floors were set after two independent generations. Each floor sits at least
 twice the run-to-run spread below the lower run. Judged floors apply after the
 owner audits the matching judge sample. Until then, their baselines are not
 published.
 
+The key-area baseline is the current pipeline (`KEY_AREAS_VERSION` 3) on 8 of the
+9 sources, 63 key points (gold subset SHA-256
+`2b46ef26fff01698595dd2c2d54132b37dc7a46a4cfa6e3c1057ceda911e1e5c`). The
+214-minute source is excluded because its generation exceeds the five-minute
+provider timeout.
+
+| Item | Value |
+| --- | --- |
+| Predictions | SHA-256 `0c6ab70160783d920b3c5f15f3962a1d1dc65bea199611c4524ea717bf73d53a` |
+| Judgments | `claude_cli:sonnet`, `strict_claims_v2`. SHA-256 `bbc61bf6dc9c6b86782ff49e1e34e1e224a7258ae813204ce0929f5925db4966` |
+| Judge audit | On 2026-11-25 the owner agreed with 19 of 20 sampled decisions (0.95): 8 of 8 matches and 11 of 12 faithfulness grades. In the one disagreement, the judge graded an item supported, but its claim described passing chatter rather than the discussion. |
+
 | Key areas | Baseline | Regression floor |
 | --- | ---: | ---: |
-| `faithfulness_rate` (judged) | pending audit | 0.95 |
-| `keypoint_recall_w` (judged) | pending audit | 0.90 |
-| `ts_in_span` | 0.868 | 0.80 |
-| `keypoint_span_recall@30s` | 0.958 | 0.90 |
-| `boundary_f1@30s` | 0.427 | 0.38 |
-| `section_coverage` | 0.999 | 0.99 |
+| `faithfulness_rate` (judged) | 0.986 | 0.95 |
+| `keypoint_recall_w` (judged) | 0.966 | 0.90 |
+| `ts_in_span` | 0.918 | 0.80 |
+| `keypoint_span_recall@30s` | 1.000 | 0.90 |
+| `boundary_f1@30s` | 0.553 | 0.38 |
+| `section_coverage` | 0.998 | 0.99 |
 | `anchor_resolution_rate`, `language_match_rate` | 1.000 | 1.00 |
 
 `ts_hit@15s`, `ts_hit@30s`, `window_diff`, `section_count_ratio` and
@@ -438,8 +450,6 @@ published.
 their first cited line rather than the gold onset, so `ts_in_span` replaces
 `ts_hit@30s` as their timestamp gate. `keypoint_precision` has no floor. One-to-one
 matching caps it at the gold point count divided by the prediction count.
-The longest source (214 minutes) can exceed the five-minute provider timeout
-during generation. In that case, the run reports that source as failed.
 
 Ask uses 12 cross-source questions with `video_routing: "multi_vector"` and the
 default of ten chunks. One question moves a rate by about 0.08.
