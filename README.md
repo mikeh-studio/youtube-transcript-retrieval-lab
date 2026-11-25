@@ -1,6 +1,6 @@
 # Media Retrieval Lab: Video & Podcast Search, Q&A and Summaries
 
-[![CI](https://github.com/mikeh-studio/youtube-transcript-retrieval-lab/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/mikeh-studio/youtube-transcript-retrieval-lab/actions/workflows/ci.yml)
+[![CI](https://github.com/mikeh-studio/media-retrieval-lab/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/mikeh-studio/media-retrieval-lab/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 **Find the original moment behind a question.** Search English and Japanese
