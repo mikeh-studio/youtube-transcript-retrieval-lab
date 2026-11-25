@@ -1,1 +1,1 @@
-"""Offline benchmarks for YouTube Transcript Retrieval Lab."""
+"""Offline benchmarks for Media Retrieval Lab."""

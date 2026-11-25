@@ -15,7 +15,7 @@ const DEFAULT_LOCALE = "en-US";
 // ------------------------------------------------------------------
 const I18N = {
   "en-US": {
-    pageTitle: "Retrieval Lab | Chunking",
+    pageTitle: "Media Retrieval Lab | Chunking",
     localeLabel: "Language",
     heroTitle: "Chunking Strategy Comparison",
     heroSubtitle: "Compare chunking strategies side-by-side and measure their effect on search results.",
@@ -54,7 +54,7 @@ const I18N = {
     paramOverlapFraction: "Overlap Fraction",
   },
   "ja-JP": {
-    pageTitle: "Retrieval Lab | チャンキング",
+    pageTitle: "Media Retrieval Lab | チャンキング",
     localeLabel: "言語",
     heroTitle: "チャンキング戦略比較",
     heroSubtitle: "チャンキング戦略を並べて比較し、検索結果への影響を測定します。",

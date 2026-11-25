@@ -2792,12 +2792,30 @@ th {
     overflow-x: auto;
   }
 
+  .appbar > .brand {
+    flex-shrink: 0;
+  }
+
+  .appbar > .brand p {
+    white-space: nowrap;
+  }
+
   .appbar-nav {
     display: none;
   }
 
   .locale-switch {
     margin-left: auto;
+  }
+
+  /* Keep the label for screen readers; the select is self-explanatory on narrow screens. */
+  .locale-switch > span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
   }
 
   .section-head {
@@ -3025,7 +3043,7 @@ th {
 }
 
 /* ------------------------------------------------------------------
-   Retrieval Lab: Library and Search workbench
+   Media Retrieval Lab: Library and Search workbench
    ------------------------------------------------------------------ */
 .app-nav-link.locked,
 .bottom-tab-link.locked,

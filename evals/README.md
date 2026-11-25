@@ -1,4 +1,4 @@
-# YouTube Transcript Retrieval Lab Benchmarks
+# Media Retrieval Lab Benchmarks
 
 This package provides a reproducible offline benchmark for transcript retrieval.
 It runs without YouTube access, provider keys, Hugging Face downloads, or paid API

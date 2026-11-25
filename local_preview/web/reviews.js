@@ -48,7 +48,7 @@ const els = {
 
 const I18N = {
   "en-US": {
-    pageTitle: "Retrieval Lab | Search feedback",
+    pageTitle: "Media Retrieval Lab | Search feedback",
     localeLabel: "Language",
     heroTitle: "Search feedback",
     heroSubtitle: "Inspect relevance feedback on search results, filter by video, and export it.",
@@ -84,7 +84,7 @@ const I18N = {
     partialVideoLoadError: "Video summary load failed. Showing reviews without video filter stats.",
   },
   "ja-JP": {
-    pageTitle: "Retrieval Lab | 検索フィードバック",
+    pageTitle: "Media Retrieval Lab | 検索フィードバック",
     localeLabel: "言語",
     heroTitle: "検索フィードバック",
     heroSubtitle: "検索結果への関連性フィードバックを確認し、動画で絞り込み、CSVをエクスポートします。",
