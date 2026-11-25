@@ -11,8 +11,8 @@ def json_bytes(payload):
     )
 
 
-def write_atomic(path, content):
-    """Replace a file with complete owner-readable and owner-writable bytes."""
+def write_atomic(path, content, *, overwrite=True):
+    """Publish complete owner-only bytes, optionally requiring an unused path."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as temp:
         temp_path = Path(temp.name)
@@ -20,6 +20,9 @@ def write_atomic(path, content):
             temp_path.chmod(0o600)
             temp.write(content)
             temp.close()
-            temp_path.replace(path)
+            if overwrite:
+                temp_path.replace(path)
+            else:
+                path.hardlink_to(temp_path)
         finally:
             temp_path.unlink(missing_ok=True)

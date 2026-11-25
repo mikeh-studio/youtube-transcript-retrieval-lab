@@ -184,7 +184,7 @@ and transcript fingerprint. The response indicates cache reuse in `cached`.
 `POST /v1/summaries/collection` accepts `source_ids` (2–12 distinct indexed
 IDs), `language` (`en` or `ja`), an optional `focus` string, `provider`, and
 `model`. It reuses cached key areas and clusters section embeddings at cosine
-similarity 0.80. Up to eight clusters are ranked by distinct source count, then
+similarity 0.85. Up to eight clusters are ranked by distinct source count, then
 total section duration. Each theme retrieves up to eight hybrid transcript
 matches within the selection. The focus guides synthesis over that evidence.
 
@@ -197,6 +197,25 @@ and playback URL. The server drops references outside the theme or the
 perspective's source, then omits perspectives that have no valid citation.
 `coverage` reports selected and cited source counts and the share of proposed
 references that pass validation. The share is zero when there are no references.
+`coverage.clusters` is the number of clusters before the theme limit.
+`coverage.cluster_sizes` gives the number of sections in each returned theme's
+cluster, in response order, including any `not_returned` placeholders.
+
+The following command compares clustering thresholds using cached key areas.
+
+```sh
+python -m evals.summary.cluster_sweep --data-dir data \
+  --source-ids example-a,example-b --source-ids example-c,example-d \
+  --language en --thresholds 0.80,0.85,0.88,0.90 \
+  --out evals/reports/collection-clusters.json
+```
+
+The sweep loads the app's `.env` defaults and `.env.local` overrides, then
+forces offline model loading. Use a local model snapshot and a fresh `--out`
+path for each run. If several cached key-area entries match a
+source and language, filter by cache key with `--provider` and `--model`. The
+report records ranked cluster sizes, distinct-source counts, and source IDs for
+every threshold, along with cache and embedding metadata.
 
 ### Speech-to-text evaluation
 
@@ -334,6 +353,7 @@ timeout.
 | --- | --- |
 | `anchor_resolution_rate` | Resolved anchors divided by items with known timestamp provenance. |
 | `ts_hit@15s`, `ts_hit@30s`, `ts_mae_s` | Inclusive hit rates and mean absolute error between predicted start and the matched point's onset. Judgments supply the matches when present. Otherwise the timestamp proxy makes a deterministic one-to-one pairing within 30 seconds of a gold span. |
+| `ts_in_span` | Share of matched pairs whose predicted start falls inside any span of the matched gold point, with inclusive bounds and no margin. Uses the same pairs as the timestamp hit rates. |
 | `keypoint_span_recall@30s` | Share of gold points with any predicted start between 30 seconds before a span begins and 30 seconds after it ends. A prediction may cover multiple points for this proxy. |
 | `duplicate_anchor_rate` | Resolved anchors beyond the first use of the same start/end pair, divided by resolved anchors. |
 | `language_match_rate` | Share of item texts matching the gold language by Japanese or Latin script. Mixed script containing Japanese characters counts as Japanese. |
@@ -342,6 +362,7 @@ timeout.
 | `boundary_f1@15s`, `boundary_f1@30s` | Compare internal section start times in seconds, excluding each plan's first section. Greedily pair the closest boundaries within the tolerance, one-to-one. F1 is twice the match count divided by the total boundary count, or 1 if both counts are zero. |
 | `window_diff` | Share of windows with different gold and predicted boundary counts. Use one-second bins and a window width of half the mean gold section length, rounded down and clamped to fit the timeline. |
 | `section_coverage` | Union of predicted section time spans divided by source duration. |
+| `section_count_ratio`, `section_count_off_rate` | Predicted sections divided by gold sections, pooled over sources. The off rate is the share of sources with fewer than half or more than twice the gold section count. Both are reported without a floor; they separate under- or over-splitting from misplaced boundaries. |
 
 Results contain per-source counts and per-system micro-aggregates. Rates
 with a zero denominator are unavailable. Span proximity measures timestamp
@@ -390,6 +411,69 @@ exact files.
 The floors sit a few points below the baseline. One item out of 45 moves a
 rate by about 0.02, and repeated generations vary. The goals are targets, not
 gates.
+
+### Key areas, Ask and collection floors
+
+The owner approved these regression floors on 2026-11-24. They use the same
+generator and judge as the summary baseline. Key-area gold covers the same 9
+sources and 71 key points, plus 120 owner-reviewed sections (gold SHA-256
+`700b5aa5632b67f1b9a8ce12f3f847b41c28c4766b4e785ca5eb7d2025699f73`). Key-area
+floors were set after two independent generations. Each floor sits at least
+twice the run-to-run spread below the lower run. Judged floors apply after the
+owner audits the matching judge sample. Until then, their baselines are not
+published.
+
+The key-area baseline is the current pipeline (`KEY_AREAS_VERSION` 3) on 8 of the
+9 sources, 63 key points (gold subset SHA-256
+`2b46ef26fff01698595dd2c2d54132b37dc7a46a4cfa6e3c1057ceda911e1e5c`). The
+214-minute source is excluded because its generation exceeds the five-minute
+provider timeout.
+
+| Item | Value |
+| --- | --- |
+| Predictions | SHA-256 `0c6ab70160783d920b3c5f15f3962a1d1dc65bea199611c4524ea717bf73d53a` |
+| Judgments | `claude_cli:sonnet`, `strict_claims_v2`. SHA-256 `bbc61bf6dc9c6b86782ff49e1e34e1e224a7258ae813204ce0929f5925db4966` |
+| Judge audit | On 2026-11-25 the owner agreed with 19 of 20 sampled decisions (0.95): 8 of 8 matches and 11 of 12 faithfulness grades. In the one disagreement, the judge graded an item supported, but its claim described passing chatter rather than the discussion. |
+
+| Key areas | Baseline | Regression floor |
+| --- | ---: | ---: |
+| `faithfulness_rate` (judged) | 0.986 | 0.95 |
+| `keypoint_recall_w` (judged) | 0.966 | 0.90 |
+| `ts_in_span` (judged pairing) | 0.918 | 0.80 |
+| `keypoint_span_recall@30s` | 1.000 | 0.90 |
+| `boundary_f1@30s` | 0.553 | 0.38 |
+| `section_coverage` | 0.998 | 0.99 |
+| `anchor_resolution_rate`, `language_match_rate` | 1.000 | 1.00 |
+
+`ts_in_span` uses judge matches (`timestamp_pairing: judge`, 56 of 61 pairs). Compare it with the floor only under that pairing; the span proxy pairs points differently and gives 0.810 (51 of 63) on the same predictions.
+
+`ts_hit@15s`, `ts_hit@30s`, `window_diff`, `section_count_ratio` and
+`section_count_off_rate` are reported without a floor. Key-area points start at
+their first cited line rather than the gold onset, so `ts_in_span` replaces
+`ts_hit@30s` as their timestamp gate. `keypoint_precision` has no floor. One-to-one
+matching caps it at the gold point count divided by the prediction count.
+
+Ask uses 12 cross-source questions with `video_routing: "multi_vector"` and the
+default of ten chunks. One question moves a rate by about 0.08.
+
+| Ask | Baseline | Regression floor |
+| --- | ---: | ---: |
+| Gold-source routing recall | 0.833 | 0.70 |
+| `answer_source_coverage` | 0.417 | 0.30 |
+| `answer_span_recall` | 0.333 | 0.20 |
+
+Collections use three owner-labeled sets (one Japanese, two English) with 12 gold
+themes each. They run at a cosine threshold of 0.85, without a focus. The
+baseline below uses version 2 key areas; version 3 changes the sections supplied
+to clustering, so the collections have not yet been re-run on it.
+
+| Collections | Baseline | Regression floor |
+| --- | ---: | ---: |
+| Summaries with no failure and no `not_returned` theme | 3/3 | 3/3 |
+| `theme_recall` (judged) | pending audit | 0.45 |
+| `stance_source_precision` (judged) | pending audit | 0.75 |
+
+Collection span recall is not gated until a focused run exists.
 
 ## Assisted labeling
 

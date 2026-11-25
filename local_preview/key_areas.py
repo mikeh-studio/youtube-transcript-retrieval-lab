@@ -21,7 +21,7 @@ from multilingual.source_model import is_youtube, normalize_source, timestamp_ur
 from pipelines.export_library import parse_json
 
 
-KEY_AREAS_VERSION = 2
+KEY_AREAS_VERSION = 3
 SINGLE_PASS_MAX_CHARS = 16_000
 WINDOW_MAX_CHARS = 7_000
 MAX_PARSE_RETRIES = 2
@@ -40,6 +40,20 @@ order. Cite only lines that support the point and belong to its section. List
 speakers only when the cited transcript shows the name or has an explicit turn
 label. Participant names in metadata are spelling hints only."""
 
+WINDOW_EDGE_RULE = (
+    "The 90-second fold rule does not apply at this window's edges. If a block "
+    "begins near the end of the window, start a section at its first line even "
+    "if it is short, and set \"continues_after\": true on that last section. Set "
+    "\"continues_before\": true on a first section that may continue a block from "
+    "the previous window."
+)
+MERGE_EDGE_RULE = (
+    "When a draft's last section has continues_after and the next draft's first "
+    "section has continues_before, join them into one section that starts at the "
+    "earlier start line if they are the same block; otherwise keep the boundary at "
+    "the earlier section's start line. Apply the 90-second fold rule only after "
+    "joining."
+)
 _SECTION_GUIDANCE = (
     f"{SECTION_RULE} {NO_SECTION_TARGET} "
     "Fold ad reads into the preceding section. "
@@ -283,7 +297,8 @@ def build_key_areas(
         for window in _windows(rendered):
             draft, _ = request(
                 "Apply the section rule to the transcript in this window. "
-                "Keep partial blocks at window edges for the merge. If the window "
+                "Keep partial blocks at window edges for the merge. "
+                f"{WINDOW_EDGE_RULE} If the window "
                 "starts with an ad read, note its global line range in the draft overview. "
                 f"Metadata: {context}\n"
                 f"BEGIN TRANSCRIPT\n{window}\nEND TRANSCRIPT"
@@ -294,6 +309,7 @@ def build_key_areas(
             "Merge these window drafts into one episode overview and section plan. "
             "Join fragments of the same block and keep a boundary wherever the "
             "show changes blocks, including across windows. "
+            f"{MERGE_EDGE_RULE} "
             "Use leading ad ranges noted in the drafts to extend the preceding "
             "section where one exists. "
             "Use the original global line IDs and preserve the supporting citations. "

@@ -73,11 +73,12 @@ def _counts(gold, prediction, decisions):
             if row["decision"] is not None
         }
     )
-    errors = [
-        abs(item["start"] - points_by_id[matches[item["id"]]]["onset"])
+    timestamp_pairs = [
+        (points_by_id[matches[item["id"]]], item["start"])
         for item in items
         if item["id"] in matches
     ]
+    errors = [abs(start - point["onset"]) for point, start in timestamp_pairs]
     counts = Counter(
         {
             "sources": 1,
@@ -88,7 +89,11 @@ def _counts(gold, prediction, decisions):
             ),
             "resolved_anchors": len(anchors),
             "duplicate_anchors": len(anchors) - len(anchor_keys),
-            "timestamp_pairs": len(errors),
+            "timestamp_pairs": len(timestamp_pairs),
+            "timestamp_in_span": sum(
+                any(span["start"] <= start <= span["end"] for span in point["spans"])
+                for point, start in timestamp_pairs
+            ),
             "timestamp_hits_15s": sum(error <= 15 for error in errors),
             "timestamp_hits_30s": sum(error <= 30 for error in errors),
             "timestamp_error_sum_s": fsum(errors),
@@ -131,6 +136,7 @@ def _metrics(counts, judged, window_policy, prompt_version):
         "anchor_resolution_rate": rate("resolved_anchors", "known_anchor_sources"),
         "ts_hit@15s": rate("timestamp_hits_15s", "timestamp_pairs"),
         "ts_hit@30s": rate("timestamp_hits_30s", "timestamp_pairs"),
+        "ts_in_span": rate("timestamp_in_span", "timestamp_pairs"),
         "ts_mae_s": rate("timestamp_error_sum_s", "timestamp_pairs"),
         "keypoint_span_recall@30s": rate("span_recalled", "gold_points"),
         "duplicate_anchor_rate": rate("duplicate_anchors", "resolved_anchors"),

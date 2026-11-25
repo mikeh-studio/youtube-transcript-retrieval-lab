@@ -52,6 +52,7 @@ def test_literal_proxy_scores(inputs):
             "anchor_resolution_rate": 4 / 6,
             "ts_hit@15s": 2 / 4,
             "ts_hit@30s": 3 / 4,
+            "ts_in_span": 2 / 4,
             "ts_mae_s": 90 / 4,
             "keypoint_span_recall@30s": 4 / 6,
             "duplicate_anchor_rate": 1 / 4,
@@ -83,6 +84,7 @@ def test_judged_scores_use_semantic_matches_even_outside_span(inputs):
             "anchor_resolution_rate": 4 / 6,
             "ts_hit@15s": 2 / 5,
             "ts_hit@30s": 3 / 5,
+            "ts_in_span": 2 / 5,
             "ts_mae_s": 140 / 5,
             "keypoint_span_recall@30s": 4 / 6,
             "duplicate_anchor_rate": 1 / 4,
@@ -97,6 +99,40 @@ def test_judged_scores_use_semantic_matches_even_outside_span(inputs):
     )
     assert system["judge"]["model"] == "fake-judge"
     assert system["sources"]["synthetic_en"]["metrics"]["ts_mae_s"] == 95 / 3
+
+
+def test_in_span_checks_the_judged_point_only(inputs):
+    gold, predictions = inputs
+    rows = read_jsonl(JUDGMENTS)
+    # The first prediction starts in the shield span. Match it to the gauge.
+    swapped_matches = {"e1": "gauge", "e3": "shield"}
+    for row in rows:
+        if row["kind"] == "match" and row["item_id"] in swapped_matches:
+            row["decision"] = swapped_matches[row["item_id"]]
+    judgments = validate_judgments(rows, gold, predictions)
+    system = score(gold, predictions, judgments)["systems"]["synthetic"]
+    result = system["sources"]["synthetic_en"]
+    assert result["counts"]["timestamp_pairs"] == 3
+    assert result["counts"]["timestamp_in_span"] == 0
+    assert result["metrics"]["ts_in_span"] == 0
+
+
+@pytest.mark.parametrize(
+    ("start", "in_span"), [(19, 0), (20, 1), (27, 1), (34, 1), (35, 0), (67, 1)]
+)
+def test_in_span_uses_inclusive_bounds_on_each_span(inputs, start, in_span):
+    gold, predictions = inputs
+    source = "synthetic_en"
+    point = gold[source]["key_points"][0]
+    point["spans"].append({"start": 60, "end": 75})
+    gold[source]["key_points"] = [point]
+    prediction = predictions["synthetic", source]
+    prediction["items"] = [{**prediction["items"][0], "start": start, "end": start + 10}]
+
+    result = score(gold, predictions)["systems"]["synthetic"]["sources"][source]
+    assert result["counts"]["timestamp_pairs"] == 1
+    assert result["counts"]["timestamp_in_span"] == in_span
+    assert result["metrics"]["ts_in_span"] == in_span
 
 
 def test_span_proxy_uses_each_prediction_once_but_recall_checks_all_spans(inputs):
@@ -116,8 +152,12 @@ def test_empty_item_lists_keep_unavailable_rates(inputs):
     gold, predictions = inputs
     for row in predictions.values():
         row["items"] = []
-    metrics = score(gold, predictions)["systems"]["synthetic"]["aggregate"]["metrics"]
+    aggregate = score(gold, predictions)["systems"]["synthetic"]["aggregate"]
+    assert aggregate["counts"]["timestamp_pairs"] == 0
+    assert aggregate["counts"]["timestamp_in_span"] == 0
+    metrics = aggregate["metrics"]
     assert metrics["ts_mae_s"] is None
+    assert metrics["ts_in_span"] is None
     assert metrics["anchor_resolution_rate"] is None
     assert metrics["language_match_rate"] is None
     assert metrics["keypoint_span_recall@30s"] == 0
@@ -399,8 +439,13 @@ def test_score_report_cli_is_offline_and_refuses_overwrite(
     flags = ["--judgments", str(JUDGMENTS)]
     runner.main(cli_args("report", out) + flags)
     results = out / "results.json"
-    assert json.loads(results.read_text())["audit_sample"]["count"] == 14
+    report = json.loads(results.read_text())
+    assert report["audit_sample"]["count"] == 14
+    aggregate = report["systems"]["synthetic"]["aggregate"]
+    assert aggregate["counts"]["timestamp_in_span"] == 2
+    assert aggregate["metrics"]["ts_in_span"] == 2 / 5
     summary = (out / "summary.md").read_text()
+    assert "- `ts_hit@30s` 0.6000\n- `ts_in_span` 0.4000\n" in summary
     assert "0.85" in summary
     assert "`window_policy` `anchor_only_v1`" in summary
     assert "`prompt_version` `lenient_v1`" in summary

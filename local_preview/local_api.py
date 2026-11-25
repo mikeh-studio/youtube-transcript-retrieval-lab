@@ -44,20 +44,14 @@ except Exception:  # pragma: no cover
     openai = None
     OpenAI = None
 
-try:
-    from dotenv import load_dotenv
-except Exception:  # pragma: no cover
-    load_dotenv = None
-
-
 ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+from local_preview.environment import load_app_environment  # noqa: E402
+
 _SKIP_GLOBAL_SERVICE = os.environ.get("YT_RAG_SKIP_GLOBAL_SERVICE", "").strip().lower()
-if load_dotenv is not None:
-    load_dotenv(ROOT_DIR / ".env")
-    load_dotenv(ROOT_DIR / ".env.local", override=True)
+load_app_environment(ROOT_DIR)
 
 from browser_boundary import BrowserBoundary  # noqa: E402
 from local_preview.audio_ingest import AudioIngestQueue, IngestJob  # noqa: E402
@@ -65,6 +59,7 @@ from local_preview.audio_media import VIDEO_TYPES, serve_media  # noqa: E402
 from local_preview.collection_summary import (  # noqa: E402
     CollectionSummaryError,
     build_collection_summary,
+    collection_embedding_fn,
     collection_source_ids,
 )
 from local_preview.feeds import preview_feed  # noqa: E402
@@ -161,6 +156,7 @@ LEXICAL_TOKENIZER_MORPH_VERSION = "ja_morph_v1"
 LEXICAL_TOKENIZER_BIGRAM_VERSION = "ja_bigram_v0"
 RETRIEVAL_MODES = {"hybrid", "dense", "lexical"}
 VIDEO_ROUTING_MODES = {"none", "multi_vector"}
+DEFAULT_MULTI_VECTOR_ASK_K = 10
 DEFAULT_VIDEO_ROUTING_TOP_K = 3
 MAX_VIDEO_ROUTING_TOP_K = 10
 MAX_SEARCH_VIDEO_SCOPE = 500
@@ -4975,9 +4971,7 @@ class LocalRAGService:
             model=model,
             key_areas_fn=self.generate_key_areas,
             retrieve_fn=self.retrieve,
-            embed_fn=lambda texts: library.processor.generate_embeddings(
-                [{"embed_text": text} for text in texts]
-            ),
+            embed_fn=collection_embedding_fn(library.processor),
             llm=self._llm_text_response,
         )
 
@@ -9337,7 +9331,6 @@ class Handler(BrowserBoundary, BaseHTTPRequestHandler):
                         400,
                     )
                     return
-                k = max(1, min(int(body.get("top_k", body.get("k", 5))), 12))
                 language = body.get("language")
                 video_id = str(body.get("video_id") or "").strip() or None
                 retrieval_mode = (
@@ -9347,6 +9340,9 @@ class Handler(BrowserBoundary, BaseHTTPRequestHandler):
                 video_routing = str(
                     body.get("video_routing") or "none"
                 ).strip().lower()
+                use_video_routing = video_routing == "multi_vector" and not video_id
+                default_k = DEFAULT_MULTI_VECTOR_ASK_K if use_video_routing else 5
+                k = max(1, min(int(body.get("top_k", body.get("k", default_k))), 12))
                 provider = (
                     str(body.get("provider") or DEFAULT_ASK_PROVIDER).strip().lower()
                 )
@@ -9396,7 +9392,7 @@ class Handler(BrowserBoundary, BaseHTTPRequestHandler):
                     body.get("agentic", body.get("agentic_retrieval")),
                     default=_env_flag(AGENTIC_RETRIEVAL_ENV),
                 )
-                if video_routing == "multi_vector" and not video_id:
+                if use_video_routing:
                     video_top_k = max(
                         1,
                         min(

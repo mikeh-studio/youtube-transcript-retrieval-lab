@@ -108,6 +108,12 @@ def test_judge_audit_import_and_all_disagree(monkeypatch, workflow):
     draft = payload["draft"]
     assert draft["language"] == "mixed" and draft["task"] == "judge_audit"
     assert len(draft["items"]) == 2
+    for source in draft["sources"]:
+        expected = service.source_getter(source["source_id"])
+        if isinstance(expected, dict):
+            assert source["title"] == expected["title"] and source["playback"]
+        else:
+            assert source["title"] == source["source_id"] and source["playback"] is None
     draft_path = f"/v1/labels/drafts/{draft['draft_id']}"
     item = next(item for item in draft["items"] if item["judgment"]["kind"] == "faithfulness")
     status, payload = request("GET", f"{draft_path}/context?item={item['id']}")
@@ -164,3 +170,23 @@ def test_label_post_requires_browser_session(monkeypatch, path):
             SimpleNamespace(server_address=("127.0.0.1", 8000)),
         )
         assert client.recv(4096).startswith(b"HTTP/1.0 403")
+
+
+def test_audit_draft_picks_up_sources_indexed_after_import(workflow):
+    service, _, source = workflow
+    gold, _ = load_gold(GOLD, MANIFEST)
+    predictions = load_predictions(PREDICTIONS, gold)
+    rows = audit_sample(gold, predictions, load_judgments(JUDGMENTS, gold, predictions))[:2]
+    draft = service.import_judge_audit(rows)
+    assert all(row["playback"] is None for row in draft["sources"])
+    first = draft["items"][0]["id"]
+    service.save_review(draft["draft_id"], [{"id": first, "decision": "approved"}])
+
+    indexed = {row["source_id"]: {**source, "title": f"Indexed {row['source_id']}"}
+               for row in draft["sources"]}
+    service.source_getter = indexed.get
+    for reopened in (service.get_draft(draft["draft_id"]), service.import_judge_audit(rows)):
+        assert reopened["draft_id"] == draft["draft_id"]
+        assert reopened["items"][0]["review"]["decision"] == "approved"
+        for row in reopened["sources"]:
+            assert row["title"] == f"Indexed {row['source_id']}" and row["playback"]

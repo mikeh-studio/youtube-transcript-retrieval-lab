@@ -639,8 +639,8 @@ class LabelDraftService:
             "created_at": now,
             "updated_at": now,
             "sources": [
-                {"source_id": source_id, "title": source_id, "source_fingerprint": fingerprint,
-                 "playback": None}
+                {"source_id": source_id, "source_fingerprint": fingerprint,
+                 **self._audit_source(source_id)}
                 for source_id, fingerprint in fingerprints.items()
             ],
             "notes": "",
@@ -657,6 +657,17 @@ class LabelDraftService:
             _write_atomic(self._draft_path(draft_id), _json_bytes(draft))
             return self._with_status(draft)
 
+    def _audit_source(self, source_id):
+        """Title and playback for a library source; the audit works without them."""
+        source = self.source_getter(source_id)
+        if not isinstance(source, dict):
+            return {"title": source_id, "playback": None}
+        record = {**(source.get("source") or {}), "video_id": source_id}
+        return {
+            "title": str(source.get("title") or source_id),
+            "playback": playback_target(record),
+        }
+
     def _draft_path(self, draft_id):
         if not re.fullmatch(r"draft_[a-f0-9]{32}", draft_id):
             raise LabelDraftError("DRAFT_NOT_FOUND", "Label draft was not found.", 404)
@@ -664,11 +675,20 @@ class LabelDraftService:
 
     def _load_draft(self, draft_id):
         try:
-            return json.loads(self._draft_path(draft_id).read_bytes())
+            draft = json.loads(self._draft_path(draft_id).read_bytes())
         except FileNotFoundError as exc:
             raise LabelDraftError(
                 "DRAFT_NOT_FOUND", "Label draft was not found.", 404
             ) from exc
+        if draft.get("task") == "judge_audit":
+            # Sources indexed after the import (or drafts saved before titles and
+            # playback were resolved) pick up library metadata when reopened.
+            draft["sources"] = [
+                {**source, **self._audit_source(source["source_id"])}
+                if source.get("playback") is None else source
+                for source in draft["sources"]
+            ]
+        return draft
 
     def _dataset_paths(self, draft):
         dataset_id = draft["draft_id"].replace("draft_", "dataset_", 1)

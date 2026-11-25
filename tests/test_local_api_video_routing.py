@@ -706,12 +706,25 @@ def test_untranslated_fallback_keeps_source_query_language_for_grounding():
     }
 
 
-def test_ask_route_uses_video_first_only_for_all_videos(monkeypatch):
+@pytest.mark.parametrize(
+    "request_overrides, expected_k, expected_route",
+    [
+        pytest.param({}, 10, "video_first", id="multi-vector-default"),
+        pytest.param({"k": 7}, 7, "video_first", id="explicit-k"),
+        pytest.param({"k": 10, "top_k": 6}, 6, "video_first", id="top-k-precedence"),
+        pytest.param({"k": 20}, 12, "video_first", id="explicit-k-clamped"),
+        pytest.param({"video_id": "video123456"}, 5, "plain", id="single-video"),
+        pytest.param({"video_routing": "none"}, 5, "plain", id="unrouted-default"),
+    ],
+)
+def test_ask_route_uses_video_first_only_for_all_videos(
+    monkeypatch, request_overrides, expected_k, expected_route
+):
     calls = []
 
     class StubService:
         def retrieve_video_first(self, question, **kwargs):
-            calls.append((question, kwargs))
+            calls.append(("video_first", kwargs))
             return {
                 "retrieval": {
                     "retrieval_mode": "hybrid",
@@ -725,6 +738,13 @@ def test_ask_route_uses_video_first_only_for_all_videos(monkeypatch):
                 },
                 "agentic_outcome": None,
             }
+
+        def retrieve(self, question, **kwargs):
+            calls.append(("plain", kwargs))
+            return {"retrieval_mode": "hybrid", "details": {}, "results": []}
+
+        def save_ask_history(self, row):
+            pass
 
         def ask_with_sources(self, question, sources, **kwargs):
             return {
@@ -746,8 +766,9 @@ def test_ask_route_uses_video_first_only_for_all_videos(monkeypatch):
             "question": "Which video explains starters?",
             "video_routing": "multi_vector",
             "video_top_k": 4,
-            "agentic": True,
+            "agentic": expected_route == "video_first",
             "provider": "chatgpt",
+            **request_overrides,
         },
     )
 
@@ -755,10 +776,16 @@ def test_ask_route_uses_video_first_only_for_all_videos(monkeypatch):
 
     assert handler.response_status == 200
     assert len(calls) == 1
-    assert calls[0][1]["video_top_k"] == 4
-    assert calls[0][1]["agentic"] is True
-    assert calls[0][1]["provider"] == "chatgpt"
-    assert handler.response_payload["retrieval_details"]["video_routing"]["enabled"]
+    route, kwargs = calls[0]
+    assert route == expected_route
+    assert kwargs["k"] == handler.response_payload["k"] == expected_k
+    if route == "video_first":
+        assert kwargs["video_top_k"] == 4
+        assert kwargs["agentic"] is True
+        assert kwargs["provider"] == "chatgpt"
+        assert handler.response_payload["retrieval_details"]["video_routing"]["enabled"]
+    else:
+        assert kwargs["video_id"] == request_overrides.get("video_id")
 
 
 def test_citations_keep_youtube_source_separate_from_source_type():

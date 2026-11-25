@@ -37,6 +37,8 @@ def test_section_metrics_against_hand_computed_fixture():
         "boundary_f1@30s": 4 / 5,
         "window_diff": 59 / 100,
         "section_coverage": 101 / 120,
+        "section_count_ratio": 4 / 3,
+        "section_count_off_rate": 0,
     }
     for entry in (source, aggregate):
         assert {metric: entry["metrics"][metric] for metric in expected} == expected
@@ -64,6 +66,38 @@ def test_section_metrics_handle_empty_predictions_and_missing_reference():
     metrics = no_ref["systems"]["single"]["aggregate"]["metrics"]
     assert metrics["section_coverage"] == 100 / 120
     assert "boundary_f1@15s" not in metrics
+
+
+def test_section_count_ratio_pools_sources_and_flags_under_and_over_splits():
+    def gold(count):
+        return {
+            "key_points": [],
+            "sections": [{"start": 10 * index} for index in range(count)],
+            "duration_s": 100,
+            "language": "en",
+        }
+
+    def plan(count):
+        return {
+            "items": [],
+            "sections": [
+                {"start": 10 * index, "end": 10 * index + 10} for index in range(count)
+            ],
+        }
+
+    golds = {"under": gold(4), "even": gold(4), "edge": gold(3), "over": gold(2)}
+    plans = {"under": plan(1), "even": plan(4), "edge": plan(6), "over": plan(5)}
+    result = score(golds, {("key_areas", key): plans[key] for key in golds})
+    sources = result["systems"]["key_areas"]["sources"]
+    aggregate = result["systems"]["key_areas"]["aggregate"]
+
+    # 1 of 4 is under half; 6 of 3 is exactly twice and stays in range.
+    assert {key: sources[key]["counts"]["section_count_off"] for key in golds} == {
+        "under": 1, "even": 0, "edge": 0, "over": 1,
+    }
+    assert sources["under"]["metrics"]["section_count_ratio"] == 1 / 4
+    assert aggregate["metrics"]["section_count_ratio"] == 16 / 13
+    assert aggregate["metrics"]["section_count_off_rate"] == 2 / 4
 
 
 def test_generate_cli_flattens_citations_and_preserves_sections(tmp_path, monkeypatch):
