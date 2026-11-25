@@ -329,7 +329,8 @@ function renderItem() {
   $("noveltyKeys").hidden = !isNovelty();
   $("notes").textContent = draft.notes ? `Draft notes · ${draft.notes}` : "";
   $("notes").hidden = !draft.notes;
-  const url = audio || audit || !source ? "" : timestampUrl(source, section || isNovelty() ? label.start : label.onset);
+  const urlStart = audit ? judgment.start : section || isNovelty() ? label.start : label.onset;
+  const url = audio || !source ? "" : timestampUrl(source, urlStart);
   $("timestamp").hidden = !url;
   if (url) $("timestamp").href = url;
   else $("timestamp").removeAttribute("href");

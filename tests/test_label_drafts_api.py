@@ -108,6 +108,12 @@ def test_judge_audit_import_and_all_disagree(monkeypatch, workflow):
     draft = payload["draft"]
     assert draft["language"] == "mixed" and draft["task"] == "judge_audit"
     assert len(draft["items"]) == 2
+    for source in draft["sources"]:
+        expected = service.source_getter(source["source_id"])
+        if isinstance(expected, dict):
+            assert source["title"] == expected["title"] and source["playback"]
+        else:
+            assert source["title"] == source["source_id"] and source["playback"] is None
     draft_path = f"/v1/labels/drafts/{draft['draft_id']}"
     item = next(item for item in draft["items"] if item["judgment"]["kind"] == "faithfulness")
     status, payload = request("GET", f"{draft_path}/context?item={item['id']}")
