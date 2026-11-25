@@ -439,11 +439,13 @@ provider timeout.
 | --- | ---: | ---: |
 | `faithfulness_rate` (judged) | 0.986 | 0.95 |
 | `keypoint_recall_w` (judged) | 0.966 | 0.90 |
-| `ts_in_span` | 0.918 | 0.80 |
+| `ts_in_span` (judged pairing) | 0.918 | 0.80 |
 | `keypoint_span_recall@30s` | 1.000 | 0.90 |
 | `boundary_f1@30s` | 0.553 | 0.38 |
 | `section_coverage` | 0.998 | 0.99 |
 | `anchor_resolution_rate`, `language_match_rate` | 1.000 | 1.00 |
+
+`ts_in_span` uses judge matches (`timestamp_pairing: judge`, 56 of 61 pairs). Compare it with the floor only under that pairing; the span proxy pairs points differently and gives 0.810 (51 of 63) on the same predictions.
 
 `ts_hit@15s`, `ts_hit@30s`, `window_diff`, `section_count_ratio` and
 `section_count_off_rate` are reported without a floor. Key-area points start at
@@ -461,7 +463,9 @@ default of ten chunks. One question moves a rate by about 0.08.
 | `answer_span_recall` | 0.333 | 0.20 |
 
 Collections use three owner-labeled sets (one Japanese, two English) with 12 gold
-themes each. They run at a cosine threshold of 0.85, without a focus.
+themes each. They run at a cosine threshold of 0.85, without a focus. The
+baseline below uses version 2 key areas; version 3 changes the sections supplied
+to clustering, so the collections have not yet been re-run on it.
 
 | Collections | Baseline | Regression floor |
 | --- | ---: | ---: |

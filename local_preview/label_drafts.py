@@ -675,11 +675,20 @@ class LabelDraftService:
 
     def _load_draft(self, draft_id):
         try:
-            return json.loads(self._draft_path(draft_id).read_bytes())
+            draft = json.loads(self._draft_path(draft_id).read_bytes())
         except FileNotFoundError as exc:
             raise LabelDraftError(
                 "DRAFT_NOT_FOUND", "Label draft was not found.", 404
             ) from exc
+        if draft.get("task") == "judge_audit":
+            # Sources indexed after the import (or drafts saved before titles and
+            # playback were resolved) pick up library metadata when reopened.
+            draft["sources"] = [
+                {**source, **self._audit_source(source["source_id"])}
+                if source.get("playback") is None else source
+                for source in draft["sources"]
+            ]
+        return draft
 
     def _dataset_paths(self, draft):
         dataset_id = draft["draft_id"].replace("draft_", "dataset_", 1)

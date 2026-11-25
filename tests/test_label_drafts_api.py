@@ -170,3 +170,23 @@ def test_label_post_requires_browser_session(monkeypatch, path):
             SimpleNamespace(server_address=("127.0.0.1", 8000)),
         )
         assert client.recv(4096).startswith(b"HTTP/1.0 403")
+
+
+def test_audit_draft_picks_up_sources_indexed_after_import(workflow):
+    service, _, source = workflow
+    gold, _ = load_gold(GOLD, MANIFEST)
+    predictions = load_predictions(PREDICTIONS, gold)
+    rows = audit_sample(gold, predictions, load_judgments(JUDGMENTS, gold, predictions))[:2]
+    draft = service.import_judge_audit(rows)
+    assert all(row["playback"] is None for row in draft["sources"])
+    first = draft["items"][0]["id"]
+    service.save_review(draft["draft_id"], [{"id": first, "decision": "approved"}])
+
+    indexed = {row["source_id"]: {**source, "title": f"Indexed {row['source_id']}"}
+               for row in draft["sources"]}
+    service.source_getter = indexed.get
+    for reopened in (service.get_draft(draft["draft_id"]), service.import_judge_audit(rows)):
+        assert reopened["draft_id"] == draft["draft_id"]
+        assert reopened["items"][0]["review"]["decision"] == "approved"
+        for row in reopened["sources"]:
+            assert row["title"] == f"Indexed {row['source_id']}" and row["playback"]
