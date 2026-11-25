@@ -412,6 +412,55 @@ The floors sit a few points below the baseline. One item out of 45 moves a
 rate by about 0.02, and repeated generations vary. The goals are targets, not
 gates.
 
+### Key areas, Ask and collection floors
+
+The owner approved these regression floors on 2026-11-24. They use the same
+generator and judge as the summary baseline. Key areas use the same 9 sources and
+71 key points, plus 120 owner-reviewed sections (gold SHA-256
+`700b5aa5632b67f1b9a8ce12f3f847b41c28c4766b4e785ca5eb7d2025699f73`). Key-area
+floors were set after two independent generations. Each floor sits at least
+twice the run-to-run spread below the lower run. Judged floors apply after the
+owner audits the matching judge sample. Until then, their baselines are not
+published.
+
+| Key areas | Baseline | Regression floor |
+| --- | ---: | ---: |
+| `faithfulness_rate` (judged) | pending audit | 0.95 |
+| `keypoint_recall_w` (judged) | pending audit | 0.90 |
+| `ts_in_span` | 0.868 | 0.80 |
+| `keypoint_span_recall@30s` | 0.958 | 0.90 |
+| `boundary_f1@30s` | 0.427 | 0.38 |
+| `section_coverage` | 0.999 | 0.99 |
+| `anchor_resolution_rate`, `language_match_rate` | 1.000 | 1.00 |
+
+`ts_hit@15s`, `ts_hit@30s`, `window_diff`, `section_count_ratio` and
+`section_count_off_rate` are reported without a floor. Key-area points start at
+their first cited line rather than the gold onset, so `ts_in_span` replaces
+`ts_hit@30s` as their timestamp gate. `keypoint_precision` has no floor. One-to-one
+matching caps it at the gold point count divided by the prediction count.
+The longest source (214 minutes) can exceed the five-minute provider timeout
+during generation. In that case, the run reports that source as failed.
+
+Ask uses 12 cross-source questions with `video_routing: "multi_vector"` and the
+default of ten chunks. One question moves a rate by about 0.08.
+
+| Ask | Baseline | Regression floor |
+| --- | ---: | ---: |
+| Gold-source routing recall | 0.833 | 0.70 |
+| `answer_source_coverage` | 0.417 | 0.30 |
+| `answer_span_recall` | 0.333 | 0.20 |
+
+Collections use three owner-labeled sets (one Japanese, two English) with 12 gold
+themes each. They run at a cosine threshold of 0.85, without a focus.
+
+| Collections | Baseline | Regression floor |
+| --- | ---: | ---: |
+| Summaries with no failure and no `not_returned` theme | 3/3 | 3/3 |
+| `theme_recall` (judged) | pending audit | 0.45 |
+| `stance_source_precision` (judged) | pending audit | 0.75 |
+
+Collection span recall is not gated until a focused run exists.
+
 ## Assisted labeling
 
 `local_preview/review_agent_workflow.py` batches live `/v1/search` results,
