@@ -79,7 +79,49 @@ reviewing an estimate.
    `insufficient_evidence`; the response includes confidence and the retrieval
    trace under `retrieval_details`.
 
-## Collection summaries
+## Summaries API
+
+### Episode key areas (`POST /v1/summaries/key-areas`)
+
+`POST /v1/summaries/key-areas` accepts `source_id` or `video_id`, plus
+optional `language` (`en` by default, or `ja`), `provider` and `model`.
+Provider and model defaults follow transcript summaries.
+
+The response contains `overview.tldr` and `sections`. Each section
+has `title`, `summary`, inclusive `start_line` and `end_line`, a time span in
+seconds, and `key_points`. Each key point has `text`, `evidence_lines`,
+individual `evidence` time spans, `speakers`, an overall `start` and `end`,
+and a playback `url`. Sections partition the numbered transcript. Their
+timestamps preserve caption gaps and overlaps. An empty `speakers` array
+means no proposed name was supported by its cited lines or their turn labels.
+
+`quality` reports the share of proposed citation references that fall in range,
+the share of transcript lines covered, counts of boundary repairs and discarded
+points, and `anchor_mode: "line_ids"`. Results are cached under
+`data/cache/key_areas/<source_id>.json` by version, language, provider, model,
+and transcript fingerprint. The response indicates cache reuse in `cached`.
+
+### Collection summaries (`POST /v1/summaries/collection`)
+
+`POST /v1/summaries/collection` accepts `source_ids` (2–12 distinct indexed
+IDs), `language` (`en` or `ja`), an optional `focus` string, `provider`, and
+`model`. It reuses cached key areas and clusters section embeddings at cosine
+similarity 0.85. Up to eight clusters are ranked by distinct source count, then
+total section duration. Each theme retrieves up to eight hybrid transcript
+matches within the selection. The focus guides synthesis over that evidence.
+
+The response includes `overview`, `themes`, and an `evidence_catalog`. A theme
+has `title`, `summary`, and `perspectives`. Each perspective contains a
+`source_id`, a `stance` (`agrees`, `differs`, `adds`, or `only_here`), a
+`statement`, and `citations` such as `["E1"]`. Resolve each ID against
+`evidence_catalog[].citation_id` for its transcript excerpt, timestamp in seconds,
+and playback URL. The server drops references outside the theme or the
+perspective's source, then omits perspectives that have no valid citation.
+`coverage` reports selected and cited source counts and the share of proposed
+references that pass validation. The share is zero when there are no references.
+`coverage.clusters` is the number of clusters before the theme limit.
+`coverage.cluster_sizes` gives the number of sections in each returned theme's
+cluster, in response order, including any `not_returned` placeholders.
 
 `POST /v1/summaries/collection` assigns a one-based `theme_index` to each
 candidate and checks returned citations against that candidate's evidence.

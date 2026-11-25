@@ -1,22 +1,30 @@
 # Evaluation
 
-The lab measures retrieval in three ways: an offline benchmark that needs no
-network or keys, an interactive workspace for labeling real results, and tooling that
-turns reviewed evidence into reusable datasets.
+The lab measures retrieval, summaries and answers against labeled evidence. An
+offline benchmark needs no network or keys; real evaluations use reviewed labels
+on local transcripts that stay out of the repository.
 
-**Illustrative UI demo — not measured benchmark results.**
+## Results at a glance
 
-![Mocked demo report showing populated acceptance targets, ranking metrics and quality](media/evaluation-review.jpg)
+| Area | Data | Result | Details |
+| --- | --- | --- | --- |
+| Retrieval ranking | 42 English and Japanese question forms over 7 recordings; model-judged labels | nDCG@10: dense 0.626, hybrid 0.590. Translating cross-language questions adds +0.33 for BM25. | [Development study](evaluation-development-study.md) |
+| Episode key areas | 8 long-form episodes; 63 owner-reviewed key points and section boundaries | Faithfulness 0.986, weighted key-point recall 0.966, boundary F1@30s 0.553. The owner agreed with 19 of 20 audited judge decisions. | [Floors](#key-areas-ask-and-collection-floors) |
+| Cross-source Ask | 12 questions spanning 2–3 videos | Answer source coverage 0.417, answer span recall 0.333 | [Floors](#key-areas-ask-and-collection-floors) |
+| Collection summaries | 3 sets with 12 gold themes each | 3 of 3 complete; judged scores await an audit | [Floors](#key-areas-ask-and-collection-floors) |
+| Answer quality | — | Not yet scored | [Limits](#limits) |
 
-This screenshot uses [mocked demonstration data](examples/evaluation-demo.json),
-not measured evaluation results. Import that JSON through **Import report** to
-reproduce the populated view. Its values, grades, tokens, costs and AUC candidate
-pool description are illustrative; no model or benchmark was run. Real reports
-continue to show missing grades and measurements as unavailable. The dashboard
-uses English review labels; the bilingual reader and Query sets workbench also
-provide a language picker. Original transcript quotations retain their language.
+Each regression floor sits below its baseline by at least twice the observed
+run-to-run spread. Summary scores from an LLM judge are published only after the
+owner audits a sample of its decisions. The retrieval study's labels are
+model-judged and not yet human-audited.
 
 ## Saved run review
+
+![Evaluation dashboard populated with mocked demo values](media/evaluation-review.jpg)
+
+The screenshot uses [mocked demo data](examples/evaluation-demo.json), not measured
+results; import that JSON through **Import report** to explore the populated view.
 
 **Evaluation** opens the local run-review dashboard at `/evaluation.html`.
 Import an explicitly selected JSON report to review immutable local snapshots;
@@ -158,64 +166,6 @@ multi-source tasks default to `codex_cli` with its usual model. An explicit
 `YT_RAG_LABEL_DRAFTER` applies to them too, so `claude_cli` drafts with `opus`
 unless `YT_RAG_LABEL_DRAFTER_MODEL` names another model. To keep the gold
 independent, use a drafter that is not the system under evaluation.
-
-### Episode key areas API
-
-`POST /v1/summaries/key-areas` accepts `source_id` or `video_id`, plus
-optional `language` (`en` by default, or `ja`), `provider` and `model`.
-Provider and model defaults follow transcript summaries.
-
-The version 1 response contains `overview.tldr` and `sections`. Each section
-has `title`, `summary`, inclusive `start_line` and `end_line`, a time span in
-seconds, and `key_points`. Each key point has `text`, `evidence_lines`,
-individual `evidence` time spans, `speakers`, an overall `start` and `end`,
-and a playback `url`. Sections partition the numbered transcript. Their
-timestamps preserve caption gaps and overlaps. An empty `speakers` array
-means no proposed name was supported by its cited lines or their turn labels.
-
-`quality` reports the share of proposed citation references that fall in range,
-the share of transcript lines covered, counts of boundary repairs and discarded
-points, and `anchor_mode: "line_ids"`. Results are cached under
-`data/cache/key_areas/<source_id>.json` by version, language, provider, model,
-and transcript fingerprint. The response indicates cache reuse in `cached`.
-
-### Collection summaries API
-
-`POST /v1/summaries/collection` accepts `source_ids` (2–12 distinct indexed
-IDs), `language` (`en` or `ja`), an optional `focus` string, `provider`, and
-`model`. It reuses cached key areas and clusters section embeddings at cosine
-similarity 0.85. Up to eight clusters are ranked by distinct source count, then
-total section duration. Each theme retrieves up to eight hybrid transcript
-matches within the selection. The focus guides synthesis over that evidence.
-
-The response includes `overview`, `themes`, and an `evidence_catalog`. A theme
-has `title`, `summary`, and `perspectives`. Each perspective contains a
-`source_id`, a `stance` (`agrees`, `differs`, `adds`, or `only_here`), a
-`statement`, and `citations` such as `["E1"]`. Resolve each ID against
-`evidence_catalog[].citation_id` for its transcript excerpt, timestamp in seconds,
-and playback URL. The server drops references outside the theme or the
-perspective's source, then omits perspectives that have no valid citation.
-`coverage` reports selected and cited source counts and the share of proposed
-references that pass validation. The share is zero when there are no references.
-`coverage.clusters` is the number of clusters before the theme limit.
-`coverage.cluster_sizes` gives the number of sections in each returned theme's
-cluster, in response order, including any `not_returned` placeholders.
-
-The following command compares clustering thresholds using cached key areas.
-
-```sh
-python -m evals.summary.cluster_sweep --data-dir data \
-  --source-ids example-a,example-b --source-ids example-c,example-d \
-  --language en --thresholds 0.80,0.85,0.88,0.90 \
-  --out evals/reports/collection-clusters.json
-```
-
-The sweep loads the app's `.env` defaults and `.env.local` overrides, then
-forces offline model loading. Use a local model snapshot and a fresh `--out`
-path for each run. If several cached key-area entries match a
-source and language, filter by cache key with `--provider` and `--model`. The
-report records ranked cluster sizes, distinct-source counts, and source IDs for
-every threshold, along with cache and embedding metadata.
 
 ### Speech-to-text evaluation
 
@@ -379,6 +329,24 @@ review**, choose **Judge audit**, and import that JSONL file. Mark every decisio
 rate. Publish judged numbers only if owner agreement on the audit sample is
 at least **0.85**. The sample contains only machine decisions and their review
 inputs until an owner records their judgments.
+
+### Collection clustering sweep
+
+This command compares collection clustering thresholds using cached key areas.
+
+```sh
+python -m evals.summary.cluster_sweep --data-dir data \
+  --source-ids example-a,example-b --source-ids example-c,example-d \
+  --language en --thresholds 0.80,0.85,0.88,0.90 \
+  --out evals/reports/collection-clusters.json
+```
+
+The sweep loads the app's `.env` defaults and `.env.local` overrides, then
+forces offline model loading. Use a local model snapshot and a fresh `--out`
+path for each run. If several cached key-area entries match a
+source and language, filter by cache key with `--provider` and `--model`. The
+report records ranked cluster sizes, distinct-source counts, and source IDs for
+every threshold, along with cache and embedding metadata.
 
 ### Summary baseline
 

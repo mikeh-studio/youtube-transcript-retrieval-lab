@@ -45,6 +45,8 @@ features. Node.js is only needed to rebuild the frontend, not to run the app.
 | **Inspect evidence** | Read passages and context, follow timestamps, and select sources for an optional answer. |
 | **Search → Evaluation** | Label results in Compare; open **+ Query sets** in Evaluation for datasets; import saved reports for review. |
 | **Answer** | Review selected sources and the token budget, then generate an optional cited answer. |
+| **Key areas** | Split an episode into the show's own sections, each with key points that cite transcript lines and link to the moment. |
+| **Collection summaries** | Compare 2–12 videos by theme, with each source's stance cited to its own passages. |
 
 The optional **Catalog** reads metadata from a separate private service. It is
 not required for the public workbench; catalog discovery does not automatically
@@ -85,17 +87,19 @@ LeBron James and Steve Nash. It shows full original passages from the real local
 backend, not a generated answer. Rankings can include irrelevant passages and
 miss required context; this is an unjudged workflow example, not measured accuracy.
 
-## Evaluation status
+## Evaluation
 
-| Area | Current evidence |
+Results come from labeled evidence on local transcripts that stay out of the
+repository.
+
+| Area | Result |
 | --- | --- |
-| Regression fixture | Small Japanese fixture with hand-authored dense scores. [Methods and limits](docs/evaluation.md#offline-benchmark). |
-| Real retrieval pilot | Offline, pinned-model runner for supplied private transcript chunks and reviewed judgments. [Run and interpret it](evals/REAL_EVAL.md). |
-| Development study | [Seven-arm EN+JA results](docs/evaluation-development-study.md): model-judged, private-input study; not reproducible from this checkout and separate from the public general-purpose runner. No held-out accuracy claim. |
-| Retrieval defaults | Baseline RRF; experimental profiles and reranking are opt-in. |
-| Independent answer evaluation | Answer quality/cost remains incomplete. The 85% source-selection and underspecification-handling targets are unverified. |
+| Retrieval ranking | On 42 English and Japanese question forms, nDCG@10 is 0.626 for dense and 0.590 for hybrid search. Translating cross-language questions adds +0.33 for BM25. Labels are model-judged. [Development study](docs/evaluation-development-study.md) |
+| Episode key areas | On 8 long-form episodes with owner-reviewed gold: faithfulness 0.986, weighted key-point recall 0.966, section boundary F1@30s 0.553. The owner agreed with 19 of 20 audited judge decisions. |
+| Answer quality | Not yet scored. |
 
-Run the offline fixture without network access, model downloads or provider keys:
+[Results, regression floors and methods](docs/evaluation.md). Run the offline
+fixture without network access, model downloads or provider keys:
 
 ```bash
 python -m evals.runner \
@@ -104,64 +108,13 @@ python -m evals.runner \
   --out evals/reports/latest
 ```
 
-Fixture scores do not establish real-world retrieval accuracy. Mechanical
-citation checks do not establish claim support or answer completeness.
-[Evaluation methods](docs/evaluation.md) explain labels, saved runs and limits.
-
-## Reviewing saved reports
-
-**Illustrative UI demo: every metric in the screenshot below is fabricated,
-not a measured evaluation result.** Evaluation can review public benchmark and
-CLI/API reports, including reports from the optional private MCP companion.
-Importing a companion report does not install or run the companion's MCP tools.
-
-![Illustrative Evaluation dashboard with mocked acceptance, ranking, quality and cost values](docs/media/evaluation-review.jpg)
-
-Import the [synthetic demo report](docs/examples/evaluation-demo.json) to explore
-the populated dashboard. Real reports keep missing grades pending. The reader
-supports English/Japanese controls; the saved-report dashboard currently uses
-English review labels, so its header has no language picker. Both share the
-same brand and navigation. See the [UI review findings](docs/design/evidence-workspace-review.md)
-for the separate AI-agent review and validation limits.
-
 ## Experimental MCP companion
 
-A separate **private, experimental companion** explores exposing versioned
-transcript evidence to AI assistants through the Model Context Protocol (MCP).
-It is not included in this public quick start and is not the backend of the
-browser workbench's normal search.
+A separate, experimental companion explores giving AI assistants read-only
+access to transcript evidence through the Model Context Protocol (MCP). It is not
+part of this quick start. [Architecture and boundaries](docs/architecture.md#experimental-mcp-companion).
 
-```mermaid
-flowchart TD
-    Q[Question and video scope] --> A[AI assistant]
-    A -->|Requests evidence| M[Read-only MCP tools]
-    M <--> L[Versioned transcript library]
-    M -->|Original passages and source IDs| A
-    A --> D[Draft answer with citations]
-    D --> C[Optional client checks IDs and exact quotes]
-    C --> R[Answer with source links]
-    R --> H[Review relevance and completeness]
-```
-
-The assistant writes the draft; MCP provides the tool interface. The optional
-client validates issued identifiers and exact quoted text and renders source
-links. Ordinary MCP clients do not automatically inherit those checks. People
-still assess relevance, completeness and speaker/event attribution.
-
-The companion uses a separate PostgreSQL/pgvector runtime. Moving a library
-between the two systems requires an explicit
-[versioned export/import contract](docs/contracts/youtube-library-export-v1.md);
-there is no automatic synchronization. [Companion architecture and boundaries](docs/architecture.md#experimental-mcp-companion).
-
-## Recent improvements and limits
-
-The workspace now separates Find from Compare, expands original transcript
-evidence, and binds optional answers to selected canonical passages. Evaluation
-reviews explicitly imported reports. Query sets, labels and Codex-drafted
-datasets live in the **Query sets workbench**, linked from Evaluation.
-Settings keeps safe browser defaults separate from server credentials. Library
-deletions persist across restarts, and cached model revisions guard index compatibility.
-[Model configuration](docs/configuration.md#embeddings) explains the settings.
+## Limits
 
 - Public setup works independently of the optional private catalog and MCP service.
 - Interactive labels are single-reviewer; benchmark fixture results are not a statistically representative corpus evaluation.
