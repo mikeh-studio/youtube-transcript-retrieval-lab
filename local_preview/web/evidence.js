@@ -72,7 +72,7 @@ const els = {
 
 const I18N = {
   "en-US": {
-    pageTitle: "Retrieval Lab | Data quality",
+    pageTitle: "Media Retrieval Lab | Data quality",
     localeLabel: "Language",
     heroTitle: "Data quality",
     heroSubtitle: "Inspect curated transcript chunks, retrieval eligibility decisions, and pipeline run metadata.",
@@ -138,7 +138,7 @@ const I18N = {
     duration: "duration",
   },
   "ja-JP": {
-    pageTitle: "Retrieval Lab | データ品質",
+    pageTitle: "Media Retrieval Lab | データ品質",
     localeLabel: "言語",
     heroTitle: "データ品質",
     heroSubtitle: "キュレーション済みの文字起こしチャンク、検索への採用判定、パイプラインランを確認します。",

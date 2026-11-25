@@ -1,6 +1,6 @@
 # Local App Guide
 
-Run the Retrieval Lab UI and API: catalog browsing, transcript indexing, retrieval testing, and evaluation.
+Run the Media Retrieval Lab UI and API: catalog browsing, transcript indexing, retrieval testing, and evaluation.
 For configuration and design background, see [`docs/`](../docs/architecture.md).
 
 ## Start

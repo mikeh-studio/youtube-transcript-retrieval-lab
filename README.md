@@ -1,10 +1,10 @@
-# YouTube Transcript Retrieval Lab
+# Media Retrieval Lab: Video & Podcast Search, Q&A and Summaries
 
 [![CI](https://github.com/mikeh-studio/youtube-transcript-retrieval-lab/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/mikeh-studio/youtube-transcript-retrieval-lab/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 **Find the original moment behind a question.** Search English and Japanese
-YouTube transcripts locally, compare retrieval strategies, and inspect the
+video and podcast transcripts locally, compare retrieval strategies, and inspect the
 original timestamped evidence before trusting an answer.
 
 ![A Stephen Curry question with ranked transcript passages and links to the original video moments](docs/media/evidence-reader.jpg)

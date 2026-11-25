@@ -116,7 +116,7 @@ const els = {
 
 const I18N = {
   "en-US": {
-    pageTitle: "Retrieval Lab | Evaluate",
+    pageTitle: "Media Retrieval Lab | Evaluate",
     localeLabel: "Language",
     heroTitle: "Retrieval Strategy Evaluation",
     heroSubtitle: "Create query sets, run ranked retrieval snapshots, label results locally, and compare metrics across runs.",
@@ -241,7 +241,7 @@ const I18N = {
     unlabeled: "unlabeled",
   },
   "ja-JP": {
-    pageTitle: "Retrieval Lab | 評価",
+    pageTitle: "Media Retrieval Lab | 評価",
     localeLabel: "言語",
     heroTitle: "セマンティック検索評価",
     heroSubtitle: "クエリセット作成、検索スナップショット実行、ローカルラベリング、ラン比較を行います。",

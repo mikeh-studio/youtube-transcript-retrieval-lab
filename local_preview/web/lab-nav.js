@@ -1,9 +1,9 @@
-// Single source of truth for the Retrieval Lab navigation. The React shell
+// Single source of truth for the Media Retrieval Lab navigation. The React shell
 // imports these definitions; the standalone pages call renderLabNav().
 
 export const LAB_BRAND = {
-  "en-US": { title: "Retrieval Lab", subtitle: "YouTube transcripts" },
-  "ja-JP": { title: "Retrieval Lab", subtitle: "YouTube 文字起こし" },
+  "en-US": { title: "Media Retrieval Lab", subtitle: "Video & podcast search" },
+  "ja-JP": { title: "Media Retrieval Lab", subtitle: "動画・ポッドキャスト検索" },
 };
 
 // Ordered by the lab workflow: discover -> index -> retrieve -> measure.
