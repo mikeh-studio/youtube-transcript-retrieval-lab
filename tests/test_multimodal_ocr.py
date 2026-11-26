@@ -603,3 +603,21 @@ def test_ocr_retriever_accepts_matching_sidecar(tmp_path):
 
     assert len(results) == 1
     assert results[0]["ocr_text"] == "Inflation expectations"
+
+
+def test_grounded_prompt_prefers_cited_partial_answers_over_abstaining():
+    from grounded_answer import build_grounded_answer_messages
+
+    system_prompt, _ = build_grounded_answer_messages(
+        question="How did his shooting develop, and why does the move help?",
+        citations=[{
+            "citation_id": 1, "video_title": "Demo", "timestamp_range_label": "0:10",
+            "url": "https://example.test", "text": "He was not a shooter at first.",
+        }],
+        answer_language="en",
+    )
+    assert "weak, missing, or only partially relevant" not in system_prompt
+    assert "answers some parts of the question, return status='answered'" in system_prompt
+    assert "which parts the excerpts do not cover" in system_prompt
+    assert "only when the excerpts answer no part of the question" in system_prompt
+    assert "End every sentence that states a fact from the evidence with its own markers" in system_prompt

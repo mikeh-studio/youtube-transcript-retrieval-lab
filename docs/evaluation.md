@@ -12,7 +12,7 @@ on local transcripts that stay out of the repository.
 | Episode key areas | 8 long-form episodes; 63 owner-reviewed key points and section boundaries | Faithfulness 0.986, weighted key-point recall 0.966, boundary F1@30s 0.553. The owner agreed with 19 of 20 audited judge decisions. | [Floors](#key-areas-ask-and-collection-floors) |
 | Cross-source Ask | 12 questions spanning 2–3 videos | Answer source coverage 0.417, answer span recall 0.333 | [Floors](#key-areas-ask-and-collection-floors) |
 | Collection summaries | 3 sets with 12 gold themes each | 3 of 3 complete; judged scores await an audit | [Floors](#key-areas-ask-and-collection-floors) |
-| Answer quality | — | Not yet scored | [Limits](#limits) |
+| Answer quality | — | Method added; scores await an owner audit | [Answer quality](#answer-quality) |
 
 Each regression floor sits below its baseline by at least twice the observed
 run-to-run spread. Summary scores from an LLM judge are published only after the
@@ -232,6 +232,60 @@ to `score_collection` for `theme_recall` and `stance_source_precision`.
 The judge compares theme meanings and grades each perspective against its own
 cited excerpts in the context of the theme. A metric is `null` when its
 denominator is empty or it requires a judge and none was supplied.
+
+### Answer quality
+
+`evals.summary.answer_runner` scores the text of saved Ask answers against the
+same reviewed multi-source questions. It splits each answer into sentence
+claims, keeps the inline `[n]` markers each sentence carries, and resolves them
+against the response's own citations. One judge call per answer returns two
+sets of decisions:
+
+- **Facts.** Whether the answer conveys each of the label's `required_facts`.
+  A fact the answer says is missing from the evidence is not conveyed.
+- **Claims.** Each claim is graded only against the excerpts it cites:
+  `supported`, `partial`, `unsupported`, or `no_claim` for text that only says
+  the evidence is missing. The judge also lists which cited excerpts support it.
+
+```bash
+.venv/bin/python -m evals.summary.answer_runner judge \
+  --gold data/evaluation/labels/multi_source_qa/*.jsonl \
+  --predictions evals/reports/ask/predictions.jsonl \
+  --out evals/reports/answer-quality/judgments.jsonl \
+  --judge claude_cli --model sonnet
+.venv/bin/python -m evals.summary.answer_runner report \
+  --gold data/evaluation/labels/multi_source_qa/*.jsonl \
+  --predictions evals/reports/ask/predictions.jsonl \
+  --judgments evals/reports/answer-quality/judgments.jsonl \
+  --out evals/reports/answer-quality/report
+```
+
+Each gold file must sit next to its `.manifest.json`, and its SHA-256 must match.
+Only approved or edited rows are scored. A prediction row binds to a label by
+`label_id`, `selected_source_ids` and the exact question. Judgments record the
+prediction and gold hashes, the prompt version and the exact judge input, so
+`report` rejects stale judgments. `report` without `--judgments` gives only the
+rates that need no judge.
+
+| Metric | Meaning |
+| --- | --- |
+| `required_fact_recall` | Required facts conveyed, pooled over answerable questions, whatever the status |
+| `claim_support_rate` | Graded claims (excluding `no_claim`) fully supported by their own citations |
+| `claim_partial_rate`, `claim_unsupported_rate` | The other graded claims |
+| `claim_uncited_rate` | Graded claims with no resolvable citation marker |
+| `citation_precision` | Resolved (claim, citation) pairs whose excerpt supports the claim |
+| `false_abstention_rate` | Answerable questions returned as `insufficient_evidence` |
+| `correct_abstention_rate` | Unanswerable questions returned as `insufficient_evidence` |
+| `marker_resolution_rate` | Inline markers that resolve to a returned citation |
+| `cited_claim_rate` | Claims that carry at least one marker |
+
+The report breaks the rates down by status and language. `insufficient_evidence`
+responses can still carry a cited partial answer, so their claims and facts are
+scored too. A label is answerable unless it sets `"answerable": false`. The
+current labels are all answerable, so `correct_abstention_rate` is unavailable
+until unanswerable questions are reviewed. `report` writes
+`judge_audit_sample.jsonl` with 20 fact and claim decisions (seed 42). Publish
+judged rates only after the owner agrees with at least 0.85 of them.
 
 ## Summary evaluation
 
@@ -470,5 +524,5 @@ Inspect the output under **Settings → Data quality** (`http://127.0.0.1:8000/e
 
 - Labels come from a single reviewer; inter-rater agreement and adjudication UI
   are not implemented.
-- Answer quality (citation precision, faithfulness, abstention correctness) is
-  not yet scored.
+- Answer-quality scores are unpublished until the owner audits the judge. No
+  unanswerable questions are labeled, so correct abstention is not measured.

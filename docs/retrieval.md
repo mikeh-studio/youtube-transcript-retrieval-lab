@@ -77,6 +77,18 @@ aggregated embedding cosine plus 0.25 times normalized token overlap. Translated
 variants use the same weights as the original. Each candidate's
 `variant_hits` includes the raw signals and the combined `relevance_score`.
 
+Embedding scores are compressed, so the best match in an unrelated language pool
+can score almost as high as a real match. Before merging, each video is scored
+by how far its relevance sits above the median of its own language pool
+(`pool_score`), with raw relevance breaking ties. Set
+`YT_RAG_ROUTING_POOL_NORMALIZATION=none` to merge raw relevance scores instead.
+
+When the routed videos span several languages, chunks from each language search
+are merged by dense similarity, so a weak language search does not take an
+equal share of the evidence. Set `YT_RAG_MULTILINGUAL_CHUNK_MERGE=rrf` to merge
+by rank instead. `retrieval_details.video_routing.fusion` and
+`multilingual_retrieval.fusion` report which methods ran.
+
 ```json
 {
   "question": "How does fermentation timing affect the starter?",
@@ -99,6 +111,12 @@ matches it uses the normalized dense score instead of lexical overlap. The
 response status is `answered`, `insufficient_evidence`, or `error`, with a
 `high`, `medium`, or `low` confidence level. Sampling temperature is kept at
 `0.2` for models that accept it.
+
+When the evidence covers only some parts of a question, the model answers those
+parts with citations, says which parts the excerpts do not cover, adds a warning
+and caps confidence at `medium`. It returns `insufficient_evidence` only when
+the excerpts answer no part of the question or contradict its central premise.
+Every sentence that states a fact carries its own citation markers.
 
 The sufficiency thresholds are hand-tuned and not yet measured by answer-level
 evaluation.
