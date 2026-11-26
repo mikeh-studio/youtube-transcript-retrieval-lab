@@ -495,11 +495,13 @@ def test_mixed_library_routes_to_relevant_videos(
     selected = [f"{relevant_language}-0", f"{relevant_language}-1"]
 
     assert details["selected_video_ids"] == selected
-    assert details["fusion"] == "language_scoped_relevance"
+    assert details["fusion"] == "language_pool_median"
     assert retrieval_calls == [(questions[relevant_language], relevant_language, selected)]
     for candidate in details["candidates"]:
         (hit,) = candidate["variant_hits"]
-        assert candidate["score"] == hit["relevance_score"] == pytest.approx(0.83)
+        assert hit["relevance_score"] == pytest.approx(0.83)
+        # Both relevant sources sit at their pool's median; raw relevance breaks the tie.
+        assert candidate["score"] == hit["pool_score"] == pytest.approx(0.0)
         assert hit["lexical_score"] is None
     # The lexical decoy would make the per-language RRF shortlist.
     assert all(
@@ -915,3 +917,108 @@ def test_multilingual_merge_preserves_stage_diagnostics(
         assert details["stages"]["dense"]["error_type"] == "RuntimeError"
         original_details["en"]["stages"]["dense"]["error_type"] = "changed"
         assert per_language[0]["stages"]["dense"]["error_type"] == "RuntimeError"
+
+
+@pytest.mark.parametrize(
+    "merge, expected",
+    [
+        ("rrf", ["ja_video:0", "en_video:0", "ja_video:1", "en_video:1"]),
+        ("dense", ["en_video:0", "en_video:1", "ja_video:0", "ja_video:1"]),
+        ("", ["en_video:0", "en_video:1", "ja_video:0", "ja_video:1"]),
+    ],
+)
+def test_multilingual_chunk_merge_modes(monkeypatch, merge, expected):
+    """Rank-only fusion interleaves languages; dense merge, the default, follows similarity."""
+    service = _multilingual_service()
+    monkeypatch.setenv(local_api.MULTILINGUAL_CHUNK_MERGE_ENV, merge)
+    monkeypatch.setattr(
+        local_api, "assess_grounded_answer_evidence",
+        lambda **kwargs: {"sufficient": bool(kwargs["rows"]), "reason_code": "fixture"},
+    )
+    dense = {"en": [0.86, 0.85], "ja": [0.80, 0.79]}
+
+    def retrieve(query, **kwargs):
+        language = kwargs["language"]
+        rows = [
+            {"video_id": kwargs["video_ids"][0], "chunk_index": index, "text": query,
+             "language": language, "dense_score": score}
+            for index, score in enumerate(dense[language])
+        ]
+        details = {"status": "ok", "duration_ms": 1.0, "stages": {}}
+        return {"results": rows, "details": details, "retrieval_mode": "hybrid"}
+
+    service.retrieve = retrieve
+    result = service.retrieve_video_first("starter timing", k=4, video_top_k=2, agentic=False)
+    rows = result["retrieval"]["results"]
+    order = [f"{row['video_id']}:{row['chunk_index']}" for row in rows]
+    if merge == "rrf":
+        assert sorted(order) == sorted(expected)
+    else:
+        assert order == expected
+    assert result["retrieval"]["details"]["multilingual_retrieval"]["fusion"] == (merge or "dense")
+
+
+def test_unknown_multilingual_chunk_merge_is_rejected(monkeypatch):
+    service = _multilingual_service()
+    monkeypatch.setenv(local_api.MULTILINGUAL_CHUNK_MERGE_ENV, "weighted")
+    with pytest.raises(ValueError, match="chunk merge"):
+        service.retrieve_video_first("starter timing", k=4, video_top_k=2, agentic=False)
+
+
+def test_dense_chunk_merge_falls_back_to_rank_without_dense_scores(monkeypatch):
+    """Lexical-only searches carry no dense score, so each language's top hit survives."""
+    service = _multilingual_service()
+    monkeypatch.delenv(local_api.MULTILINGUAL_CHUNK_MERGE_ENV, raising=False)
+    monkeypatch.setattr(
+        local_api, "assess_grounded_answer_evidence",
+        lambda **kwargs: {"sufficient": bool(kwargs["rows"]), "reason_code": "fixture"},
+    )
+    lexical = {"en": [0.4, 0.3], "ja": [0.9, 0.8]}
+
+    def retrieve(query, **kwargs):
+        language = kwargs["language"]
+        rows = [
+            {"video_id": kwargs["video_ids"][0], "chunk_index": index, "text": query,
+             "language": language, "dense_score": None, "lexical_score": score}
+            for index, score in enumerate(lexical[language])
+        ]
+        details = {"status": "ok", "duration_ms": 1.0, "stages": {}}
+        return {"results": rows, "details": details, "retrieval_mode": "lexical"}
+
+    service.retrieve = retrieve
+    result = service.retrieve_video_first("starter timing", k=2, video_top_k=2, agentic=False)
+    order = sorted(f"{row['video_id']}:{row['chunk_index']}" for row in result["retrieval"]["results"])
+    assert order == ["en_video:0", "ja_video:0"]
+    fusion = result["retrieval"]["details"]["multilingual_retrieval"]
+    assert fusion["fusion"] == "rrf"
+    assert fusion["requested_fusion"] == "dense"
+
+
+def test_dense_chunk_merge_respects_feedback_and_reranking(monkeypatch):
+    service = _multilingual_service()
+    monkeypatch.delenv(local_api.MULTILINGUAL_CHUNK_MERGE_ENV, raising=False)
+    monkeypatch.setattr(
+        local_api, "assess_grounded_answer_evidence",
+        lambda **kwargs: {"sufficient": bool(kwargs["rows"]), "reason_code": "fixture"},
+    )
+    reranked = {"value": False}
+
+    def retrieve(query, **kwargs):
+        language = kwargs["language"]
+        dense, adjustment = {"en": (0.86, -0.2), "ja": (0.80, 0.0)}[language]
+        rows = [{"video_id": kwargs["video_ids"][0], "chunk_index": 0, "text": query,
+                 "language": language, "dense_score": dense,
+                 "feedback_adjustment": adjustment}]
+        details = {"status": "ok", "duration_ms": 1.0, "stages": {},
+                   "reranker": {"applied": reranked["value"]}}
+        return {"results": rows, "details": details, "retrieval_mode": "hybrid"}
+
+    service.retrieve = retrieve
+    result = service.retrieve_video_first("starter timing", k=2, video_top_k=2, agentic=False)
+    # Negative feedback pushes the stronger English chunk below the Japanese one.
+    assert [row["video_id"] for row in result["retrieval"]["results"]] == ["ja_video", "en_video"]
+    assert result["retrieval"]["details"]["multilingual_retrieval"]["fusion"] == "dense"
+
+    reranked["value"] = True
+    result = service.retrieve_video_first("starter timing", k=2, video_top_k=2, agentic=False)
+    assert result["retrieval"]["details"]["multilingual_retrieval"]["fusion"] == "rrf"

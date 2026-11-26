@@ -168,6 +168,13 @@ RERANKER_MODES = {"none", "cross_encoder"}
 RERANKER_ENV = "YT_RAG_RERANKER"
 _RERANKER_INIT_LOCK = threading.Lock()
 AGENTIC_RETRIEVAL_ENV = "YT_RAG_AGENTIC_RETRIEVAL"
+# How chunks from different language searches are combined: "rrf" merges by rank
+# alone; "dense" ranks every chunk by its cosine similarity to its own query.
+MULTILINGUAL_CHUNK_MERGE_ENV = "YT_RAG_MULTILINGUAL_CHUNK_MERGE"
+MULTILINGUAL_CHUNK_MERGES = ("rrf", "dense")
+# Rank-only merging alternates languages however weak a match is, so chunks
+# from several language searches are merged by dense score unless set to "rrf".
+DEFAULT_MULTILINGUAL_CHUNK_MERGE = "dense"
 HYBRID_OPTIMIZED_WEIGHTS = {
     "dense": 0.475,
     "lexical": 0.475,
@@ -3415,10 +3422,39 @@ class LocalRAGService:
         }
         original_variant = expansion["variants"][0]
 
+        chunk_merge = (
+            os.environ.get(MULTILINGUAL_CHUNK_MERGE_ENV, "").strip().lower()
+            or DEFAULT_MULTILINGUAL_CHUNK_MERGE
+        )
+        if chunk_merge not in MULTILINGUAL_CHUNK_MERGES:
+            raise ValueError(f"Unknown multilingual chunk merge: {chunk_merge!r}")
+
         def merge_retrievals(retrievals):
             if len(retrievals) == 1:
                 return retrievals[0]
             merged: Dict[str, dict] = {}
+            # Dense scores only compare languages when every search produced them;
+            # lexical mode, or a hybrid search that fell back to lexical, ranks by rank.
+            # A cross-encoder order is not reflected in dense scores, so a reranked
+            # search keeps rank fusion too.
+            effective_merge = chunk_merge
+            if chunk_merge == "dense" and (
+                not all(
+                    any(
+                        row.get("dense_score") is not None
+                        for row in scoped_retrieval.get("results") or []
+                    )
+                    for scoped_retrieval in retrievals
+                    if scoped_retrieval.get("results")
+                )
+                or any(
+                    ((scoped_retrieval.get("details") or {}).get("reranker") or {}).get(
+                        "applied"
+                    )
+                    for scoped_retrieval in retrievals
+                )
+            ):
+                effective_merge = "rrf"
             for scoped_retrieval in retrievals:
                 for rank, row in enumerate(
                     scoped_retrieval.get("results") or [],
@@ -3426,9 +3462,20 @@ class LocalRAGService:
                 ):
                     key = self._chunk_identity(row)
                     entry = merged.setdefault(key, dict(row))
-                    entry["multilingual_score"] = float(
-                        entry.get("multilingual_score", 0.0)
-                    ) + (1.0 / (60 + rank))
+                    if effective_merge == "dense":
+                        # Cosine similarity is comparable across language searches;
+                        # rank is not. Lexical-only hits carry no dense score.
+                        # Stored relevance feedback still moves a chunk up or down.
+                        dense = row.get("dense_score")
+                        entry["multilingual_score"] = max(
+                            float(entry.get("multilingual_score", 0.0)),
+                            (float(dense) if dense is not None else 0.0)
+                            + float(row.get("feedback_adjustment") or 0.0),
+                        )
+                    else:
+                        entry["multilingual_score"] = float(
+                            entry.get("multilingual_score", 0.0)
+                        ) + (1.0 / (60 + rank))
             rows = sorted(
                 merged.values(),
                 key=lambda row: (
@@ -3491,7 +3538,8 @@ class LocalRAGService:
                             retrieval.get("_query_language") for retrieval in retrievals
                         ],
                         "result_sets": len(retrievals),
-                        "fusion": "rrf",
+                        "fusion": effective_merge,
+                        "requested_fusion": chunk_merge,
                     },
                 },
                 "results": rows,

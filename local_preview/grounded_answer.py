@@ -245,7 +245,11 @@ def build_grounded_answer_messages(
         "Use only the provided evidence excerpts.\n"
         "Do not invent facts, names, dates, or conclusions.\n"
         "Cite every key claim inline with square-bracket markers like [1] or [2].\n"
-        "If the evidence is weak, missing, or only partially relevant, return status='insufficient_evidence'.\n"
+        "End every sentence that states a fact from the evidence with its own markers, even when consecutive sentences share a source.\n"
+        "If the evidence answers some parts of the question, return status='answered': answer those parts with citations, "
+        "say plainly in the answer which parts the excerpts do not cover, add a warning naming them, and keep confidence at most medium.\n"
+        "If the evidence supports the substance but the question's wording differs slightly, answer and note the difference in a warning instead of abstaining.\n"
+        "Return status='insufficient_evidence' only when the excerpts answer no part of the question, or when they contradict its central premise.\n"
         "If the evidence conflicts, say so in the answer, keep confidence low, and add a warning.\n"
         "Return strict JSON only with this schema:\n"
         "{\n"
@@ -314,6 +318,9 @@ def assess_grounded_answer_evidence(
     query_lang = str(query_language or answer_language or "").strip().lower()
     query_tokens = tokenize_fn(question, query_language or answer_language)
     query_token_set = {token for token in query_tokens if token}
+    part_token_sets = _question_part_token_sets(
+        question, query_language or answer_language, tokenize_fn
+    )
     top_lexical_score = max(
         float(row.get("lexical_score", 0.0) or 0.0) for row in rows or [{}]
     )
@@ -355,22 +362,37 @@ def assess_grounded_answer_evidence(
         weighted_components = [
             (0.15, rank_signal),
         ]
-        if not use_cross_lingual_dense_proxy:
-            weighted_components.append((0.45, overlap_signal))
-            effective_overlap = overlap_ratio
-        else:
-            effective_overlap = dense_signal
-        if scoped_mode in {"dense", "hybrid"}:
-            weighted_components.append((0.25, dense_signal))
-        if scoped_mode in {"lexical", "hybrid"}:
-            weighted_components.append((0.15, lexical_signal))
-
-        weight_sum = sum(weight for weight, _ in weighted_components)
-        evidence_strength = (
-            sum(weight * signal for weight, signal in weighted_components) / weight_sum
-            if weight_sum > 0.0
-            else 0.0
+        # A multi-part question spreads its tokens over several sub-questions, so an
+        # excerpt that fully answers one part can look weak against the whole.
+        part_overlap = max(
+            (len(part & row_token_set) / len(part) for part in part_token_sets),
+            default=0.0,
         )
+        tail_components = []
+        if scoped_mode in {"dense", "hybrid"}:
+            tail_components.append((0.25, dense_signal))
+        if scoped_mode in {"lexical", "hybrid"}:
+            tail_components.append((0.15, lexical_signal))
+
+        def strength(overlap_component):
+            components = weighted_components + overlap_component + tail_components
+            weight_sum = sum(weight for weight, _ in components)
+            return (
+                sum(weight * signal for weight, signal in components) / weight_sum
+                if weight_sum > 0.0
+                else 0.0
+            )
+
+        if not use_cross_lingual_dense_proxy:
+            effective_overlap = overlap_ratio
+            evidence_strength = strength([(0.45, overlap_signal)])
+            part_effective_overlap = max(overlap_ratio, part_overlap)
+            part_evidence_strength = strength(
+                [(0.45, _clamp(part_effective_overlap / 0.6))]
+            )
+        else:
+            effective_overlap = part_effective_overlap = dense_signal
+            evidence_strength = part_evidence_strength = strength([])
         assessed_rows.append(
             {
                 "row": row,
@@ -380,11 +402,73 @@ def assess_grounded_answer_evidence(
                 "dense_signal": dense_signal,
                 "lexical_signal": lexical_signal,
                 "evidence_strength": evidence_strength,
+                "part_effective_overlap": part_effective_overlap,
+                "part_evidence_strength": part_evidence_strength,
             }
         )
 
-    assessed_rows.sort(
-        key=lambda item: (item["evidence_strength"], -item["rank"]),
+    decision = _evidence_decision(
+        assessed_rows, len(rows), answer_language, "evidence_strength", "effective_overlap"
+    )
+    if decision["sufficient"] or not part_token_sets:
+        return decision
+    partial = _evidence_decision(
+        assessed_rows,
+        len(rows),
+        answer_language,
+        "part_evidence_strength",
+        "part_effective_overlap",
+    )
+    if not partial["sufficient"]:
+        return decision
+    return {
+        "sufficient": True,
+        "confidence_cap": "medium" if partial["confidence_cap"] == "high" else partial["confidence_cap"],
+        "warnings": [
+            _warning_text(
+                answer_language,
+                "The excerpts match only part of the question.",
+                "抜粋は質問の一部にしか一致しません。",
+            ),
+            *partial["warnings"],
+        ],
+        "reason_code": "partial_question_support",
+    }
+
+
+def _question_part_token_sets(
+    question: str, language: Optional[str], tokenize_fn: Callable[[str, str], List[str]]
+) -> List[set]:
+    """Token sets for the listed parts of a multi-part question.
+
+    Parts are split at commas, semicolons and English "and"/"or"; a single-part
+    question returns no parts. One-token parts are too generic to count.
+    """
+    parts = [
+        part
+        for part in re.split(r"[,;、，；]|\b(?:and|or)\b", question, flags=re.IGNORECASE)
+        if part.strip()
+    ]
+    if len(parts) < 2:
+        return []
+    token_sets = []
+    for part in parts:
+        tokens = {token for token in tokenize_fn(part, language) if token}
+        if len(tokens) >= 2:
+            token_sets.append(tokens)
+    return token_sets
+
+
+def _evidence_decision(
+    assessed_rows: List[dict],
+    row_count: int,
+    answer_language: str,
+    strength_key: str,
+    overlap_key: str,
+) -> dict:
+    assessed_rows = sorted(
+        assessed_rows,
+        key=lambda item: (item[strength_key], -item["rank"]),
         reverse=True,
     )
     top_row = assessed_rows[0]
@@ -392,14 +476,14 @@ def assess_grounded_answer_evidence(
     supporting_rows = [
         item
         for item in assessed_rows
-        if item["evidence_strength"] >= 0.55 and item["effective_overlap"] >= 0.18
+        if item[strength_key] >= 0.55 and item[overlap_key] >= 0.18
     ]
 
     if len(supporting_rows) >= 2:
         confidence_cap = (
             "high"
-            if top_row["evidence_strength"] >= 0.78
-            and supporting_rows[1]["evidence_strength"] >= 0.60
+            if top_row[strength_key] >= 0.78
+            and supporting_rows[1][strength_key] >= 0.60
             else "medium"
         )
         return {
@@ -410,9 +494,9 @@ def assess_grounded_answer_evidence(
         }
 
     strong_single = (
-        top_row["evidence_strength"] >= 0.72 and top_row["effective_overlap"] >= 0.28
+        top_row[strength_key] >= 0.72 and top_row[overlap_key] >= 0.28
     )
-    weak_runner_up = runner_up is None or runner_up["evidence_strength"] < 0.48
+    weak_runner_up = runner_up is None or runner_up[strength_key] < 0.48
     if strong_single and weak_runner_up:
         return {
             "sufficient": True,
@@ -427,7 +511,7 @@ def assess_grounded_answer_evidence(
             "reason_code": "strong_single_chunk",
         }
 
-    if len(rows) == 1:
+    if row_count == 1:
         warning = _warning_text(
             answer_language,
             "The best retrieved chunk is too weak to support a grounded answer.",
@@ -445,7 +529,7 @@ def assess_grounded_answer_evidence(
         "Retrieved evidence is too thin or weakly matched to answer confidently.",
         "取得された根拠は薄く、質問との一致も弱いため、確信を持って回答できません。",
     )
-    if runner_up and runner_up["evidence_strength"] >= 0.45:
+    if runner_up and runner_up[strength_key] >= 0.45:
         warning = _warning_text(
             answer_language,
             "Retrieved evidence is split across weakly supported chunks.",
