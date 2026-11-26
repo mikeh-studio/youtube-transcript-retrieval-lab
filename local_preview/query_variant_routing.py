@@ -23,13 +23,19 @@ POOL_NORMALIZATIONS = ("zscore", "median")
 DEFAULT_POOL_NORMALIZATION = "median"
 POOL_NORMALIZATION_OFF = ("none", "off")
 MIN_POOL_STDEV = 0.005
+# A pool smaller than this has no useful baseline of its own (a lone video always
+# sits at its own median), so it is scored against every candidate instead.
+MIN_POOL_SIZE = 3
 
 
-def normalize_pool(scores: dict, method: str) -> dict:
-    """Rescore one language pool relative to its own score distribution."""
+def normalize_pool(scores: dict, method: str, reference: Optional[list] = None) -> dict:
+    """Rescore one language pool relative to a score distribution.
+
+    The distribution is the pool's own scores unless ``reference`` is given.
+    """
     if not scores:
         return {}
-    values = list(scores.values())
+    values = list(reference) if reference else list(scores.values())
     if method == "median":
         center = median(values)
         return {key: value - center for key, value in scores.items()}
@@ -80,6 +86,7 @@ def route_query_variants(
     normalize = compare_variants and pool_normalization is not None
     fused = {}
     route_attempts = []
+    routed_variants = []
     for variant in expansion["variants"]:
         routed = route_videos(
             variant["query"],
@@ -99,18 +106,23 @@ def route_query_variants(
                 "latency_ms": routed.get("latency_ms"),
             }
         )
-        if routed.get("used_fallback"):
-            continue
-        candidates = routed.get("results") or []
+        if not routed.get("used_fallback"):
+            routed_variants.append((variant, routed.get("results") or []))
+
+    raw_pools = [
+        {
+            row["video_id"]: video_relevance(row.get("dense_score"), row.get("lexical_score"))
+            for row in candidates
+        }
+        for _, candidates in routed_variants
+    ]
+    all_scores = [score for pool in raw_pools for score in pool.values()]
+    for (variant, candidates), raw_pool in zip(routed_variants, raw_pools):
         pool_scores = (
             normalize_pool(
-                {
-                    row["video_id"]: video_relevance(
-                        row.get("dense_score"), row.get("lexical_score")
-                    )
-                    for row in candidates
-                },
+                raw_pool,
                 pool_normalization,
+                reference=all_scores if len(raw_pool) < MIN_POOL_SIZE else None,
             )
             if normalize
             else {}

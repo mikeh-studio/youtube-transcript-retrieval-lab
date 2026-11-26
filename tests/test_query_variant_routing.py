@@ -117,3 +117,22 @@ def test_penalty_spares_the_best_candidate(monkeypatch):
 
     assert ids() == ["a", "b", "c"]
     assert ids(penalty_spares_best=True) == ["e", "a", "b"]
+
+
+def test_single_video_pool_is_scored_against_all_candidates(monkeypatch):
+    monkeypatch.delenv(query_variant_routing.POOL_NORMALIZATION_ENV, raising=False)
+    expansion = {"variants": [
+        {"query": "q", "language": "en", "kind": "original", "video_ids": ["a", "b", "c", "d"]},
+        {"query": "q", "language": "ja", "kind": "translated", "video_ids": ["j"]},
+    ]}
+    scores = {"en": [("a", 0.46), ("b", 0.45), ("c", 0.44), ("d", 0.30)], "ja": [("j", 0.95)]}
+
+    def route(query, *, top_k, language, video_ids, rank_by_relevance):
+        rows = scores[language][:top_k]
+        return {"video_ids": [v for v, _ in rows], "results": [
+            {"video_id": v, "dense_score": s, "lexical_score": 0.0} for v, s in rows]}
+
+    routed = route_query_variants(expansion, top_k=3, route_videos=route)
+    # A lone video sits at its own median; against every candidate it stands out.
+    assert routed["video_ids"][0] == "j"
+    assert routed["fusion"] == "language_pool_median"

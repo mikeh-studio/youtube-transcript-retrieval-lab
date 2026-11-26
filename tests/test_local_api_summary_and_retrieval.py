@@ -3426,3 +3426,62 @@ def test_evidence_routes_enforce_estimate_and_acknowledgement(monkeypatch):
     response = post('answer', {**body, 'estimate_id': estimate['estimate_id'], 'cost_acknowledged': True})
     assert response.status == 200 and response.data['status'] == 'answered'
     assert calls[0]['max_tokens'] == 111
+
+
+def test_ask_with_sources_lets_evidence_for_one_part_of_a_question_through():
+    """An excerpt that answers one listed part reaches the model as partial support."""
+    service = _make_service(enabled=False)
+    llm_calls = {"count": 0}
+
+    def _llm(**kwargs):
+        llm_calls["count"] += 1
+        return {
+            "provider": "chatgpt",
+            "model": "gpt-4o-mini",
+            "text": json.dumps(
+                {
+                    "status": "answered",
+                    "confidence": "high",
+                    "answer": "Keep the room at 26 degrees [1]. The excerpts do not cover humidity, pressure or airflow.",
+                    "citations": [{"citation_id": 1, "reason": "States the temperature."}],
+                    "warnings": ["Humidity, pressure and airflow are not covered."],
+                    "has_conflict": False,
+                }
+            ),
+        }
+
+    service._llm_text_response = _llm
+    source = {
+        "video_id": "vid1",
+        "video_title": "Proofing",
+        "video_url": "https://www.youtube.com/watch?v=vid1",
+        "language": "en",
+        "chunk_index": 2,
+        "text": "Keep the room at 26 degrees, a warm temperature.",
+        "start": 10.0,
+        "end": 20.0,
+        "url": "https://www.youtube.com/watch?v=vid1&t=10s",
+        "rank": 1,
+        "score": 0.86,
+        "dense_score": 0.86,
+        "lexical_score": 2.0,
+    }
+
+    whole = service.ask_with_sources(
+        "What temperature should the proofing room use?",
+        [dict(source)], provider="chatgpt", retrieval_mode="hybrid",
+    )
+    partial = service.ask_with_sources(
+        "What temperature, humidity, pressure, and airflow should the proofing room use?",
+        [dict(source)], provider="chatgpt", retrieval_mode="hybrid",
+    )
+    unrelated = service.ask_with_sources(
+        "What humidity and airflow does the cellar need?",
+        [dict(source)], provider="chatgpt", retrieval_mode="hybrid",
+    )
+
+    assert whole["status"] == partial["status"] == "answered"
+    assert llm_calls["count"] == 2
+    assert partial["confidence"] == "medium"
+    assert any("part of the question" in warning for warning in partial["warnings"])
+    assert unrelated["status"] == "insufficient_evidence"

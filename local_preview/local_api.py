@@ -3433,6 +3433,18 @@ class LocalRAGService:
             if len(retrievals) == 1:
                 return retrievals[0]
             merged: Dict[str, dict] = {}
+            # Dense scores only compare languages when every search produced them;
+            # lexical mode, or a hybrid search that fell back to lexical, ranks by rank.
+            effective_merge = chunk_merge
+            if chunk_merge == "dense" and not all(
+                any(
+                    row.get("dense_score") is not None
+                    for row in scoped_retrieval.get("results") or []
+                )
+                for scoped_retrieval in retrievals
+                if scoped_retrieval.get("results")
+            ):
+                effective_merge = "rrf"
             for scoped_retrieval in retrievals:
                 for rank, row in enumerate(
                     scoped_retrieval.get("results") or [],
@@ -3440,7 +3452,7 @@ class LocalRAGService:
                 ):
                     key = self._chunk_identity(row)
                     entry = merged.setdefault(key, dict(row))
-                    if chunk_merge == "dense":
+                    if effective_merge == "dense":
                         # Cosine similarity is comparable across language searches;
                         # rank is not. Lexical-only hits carry no dense score.
                         dense = row.get("dense_score")
@@ -3514,7 +3526,8 @@ class LocalRAGService:
                             retrieval.get("_query_language") for retrieval in retrievals
                         ],
                         "result_sets": len(retrievals),
-                        "fusion": chunk_merge,
+                        "fusion": effective_merge,
+                        "requested_fusion": chunk_merge,
                     },
                 },
                 "results": rows,

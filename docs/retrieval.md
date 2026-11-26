@@ -107,7 +107,11 @@ Routing details, selected video IDs, fallbacks, and latency are returned under
 `/v1/ask` sends the retrieved evidence to the selected provider and requires
 strict JSON with numbered citations. The evidence-sufficiency gate classifies
 each chunk against the language the query was tokenized in. For cross-lingual
-matches it uses the normalized dense score instead of lexical overlap. The
+matches it uses the normalized dense score instead of lexical overlap. When a
+question lists several parts (split at commas, semicolons, "and" and "or") and
+no excerpt matches the whole question, an excerpt that matches one part still
+passes with reason `partial_question_support`, a warning and confidence capped
+at `medium`. The
 response status is `answered`, `insufficient_evidence`, or `error`, with a
 `high`, `medium`, or `low` confidence level. Sampling temperature is kept at
 `0.2` for models that accept it.

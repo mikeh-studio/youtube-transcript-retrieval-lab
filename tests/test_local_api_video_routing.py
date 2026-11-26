@@ -963,3 +963,32 @@ def test_unknown_multilingual_chunk_merge_is_rejected(monkeypatch):
     monkeypatch.setenv(local_api.MULTILINGUAL_CHUNK_MERGE_ENV, "weighted")
     with pytest.raises(ValueError, match="chunk merge"):
         service.retrieve_video_first("starter timing", k=4, video_top_k=2, agentic=False)
+
+
+def test_dense_chunk_merge_falls_back_to_rank_without_dense_scores(monkeypatch):
+    """Lexical-only searches carry no dense score, so each language's top hit survives."""
+    service = _multilingual_service()
+    monkeypatch.delenv(local_api.MULTILINGUAL_CHUNK_MERGE_ENV, raising=False)
+    monkeypatch.setattr(
+        local_api, "assess_grounded_answer_evidence",
+        lambda **kwargs: {"sufficient": bool(kwargs["rows"]), "reason_code": "fixture"},
+    )
+    lexical = {"en": [0.4, 0.3], "ja": [0.9, 0.8]}
+
+    def retrieve(query, **kwargs):
+        language = kwargs["language"]
+        rows = [
+            {"video_id": kwargs["video_ids"][0], "chunk_index": index, "text": query,
+             "language": language, "dense_score": None, "lexical_score": score}
+            for index, score in enumerate(lexical[language])
+        ]
+        details = {"status": "ok", "duration_ms": 1.0, "stages": {}}
+        return {"results": rows, "details": details, "retrieval_mode": "lexical"}
+
+    service.retrieve = retrieve
+    result = service.retrieve_video_first("starter timing", k=2, video_top_k=2, agentic=False)
+    order = sorted(f"{row['video_id']}:{row['chunk_index']}" for row in result["retrieval"]["results"])
+    assert order == ["en_video:0", "ja_video:0"]
+    fusion = result["retrieval"]["details"]["multilingual_retrieval"]
+    assert fusion["fusion"] == "rrf"
+    assert fusion["requested_fusion"] == "dense"

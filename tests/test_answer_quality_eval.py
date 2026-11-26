@@ -253,3 +253,13 @@ def test_runner_judges_then_reports_and_rejects_stale_judgments(inputs, monkeypa
     judgments_path.write_text("".join(json.dumps(r) + "\n" for r in rows))
     with pytest.raises(ContractError, match="stale"):
         load_judgments(judgments_path, gold, load_ask_predictions(predictions_path, gold))
+
+
+def test_list_items_keep_their_own_citations():
+    claims = answer_claims("- Curry hit nine threes [1]\n- The Jazz lost by twelve [2]")
+    assert [(c["text"], c["citation_ids"]) for c in claims] == [
+        ("Curry hit nine threes", [1]),
+        ("The Jazz lost by twelve", [2]),
+    ]
+    numbered = answer_claims("1. First point [1]\n2. Second point [2]\n\nA closing note [3]")
+    assert [c["citation_ids"] for c in numbered] == [[1], [2], [3]]

@@ -132,19 +132,34 @@ def _sentences(text_value):
     return pieces
 
 
+# Paragraph breaks and Markdown list items end a claim even without punctuation.
+BLOCK_BREAK_RE = re.compile(r"\n\s*\n|\n(?=[ \t]*(?:[-*•・]|\d+[.)])\s)")
+LIST_MARKER_RE = re.compile(r"^\s*(?:[-*•・]|\d+[.)])\s+")
+
+
 def answer_claims(answer):
-    """Split an answer into sentence claims with the inline citation IDs each carries."""
-    moved = TRAILING_MARKERS_RE.sub(lambda m: m[2] + m[1], answer)
+    """Split an answer into sentence claims with the inline citation IDs each carries.
+
+    Each paragraph and list item is split separately, so citations never cross
+    from one item to the next.
+    """
     claims = []
-    for sentence in _sentences(moved):
-        ids = [int(value) for value in MARKER_RE.findall(sentence)]
-        body = " ".join(MARKER_RE.sub(" ", sentence).split())
-        body = re.sub(r"\s+([.,;:!?。、！？])", r"\1", body)
-        if not re.search(r"\w", body):
-            if ids and claims:
-                claims[-1]["citation_ids"] = sorted({*claims[-1]["citation_ids"], *ids})
-            continue
-        claims.append({"text": body, "citation_ids": sorted(set(ids))})
+    for block in BLOCK_BREAK_RE.split(answer):
+        block = LIST_MARKER_RE.sub("", block)
+        moved = TRAILING_MARKERS_RE.sub(lambda m: m[2] + m[1], block)
+        block_claims = []
+        for sentence in _sentences(moved):
+            ids = [int(value) for value in MARKER_RE.findall(sentence)]
+            body = " ".join(MARKER_RE.sub(" ", sentence).split())
+            body = re.sub(r"\s+([.,;:!?。、！？])", r"\1", body)
+            if not re.search(r"\w", body):
+                if ids and block_claims:
+                    block_claims[-1]["citation_ids"] = sorted(
+                        {*block_claims[-1]["citation_ids"], *ids}
+                    )
+                continue
+            block_claims.append({"text": body, "citation_ids": sorted(set(ids))})
+        claims.extend(block_claims)
     return [{"id": f"C{number}", **claim} for number, claim in enumerate(claims, 1)]
 
 
