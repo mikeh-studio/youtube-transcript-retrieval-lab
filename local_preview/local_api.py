@@ -3435,14 +3435,24 @@ class LocalRAGService:
             merged: Dict[str, dict] = {}
             # Dense scores only compare languages when every search produced them;
             # lexical mode, or a hybrid search that fell back to lexical, ranks by rank.
+            # A cross-encoder order is not reflected in dense scores, so a reranked
+            # search keeps rank fusion too.
             effective_merge = chunk_merge
-            if chunk_merge == "dense" and not all(
-                any(
-                    row.get("dense_score") is not None
-                    for row in scoped_retrieval.get("results") or []
+            if chunk_merge == "dense" and (
+                not all(
+                    any(
+                        row.get("dense_score") is not None
+                        for row in scoped_retrieval.get("results") or []
+                    )
+                    for scoped_retrieval in retrievals
+                    if scoped_retrieval.get("results")
                 )
-                for scoped_retrieval in retrievals
-                if scoped_retrieval.get("results")
+                or any(
+                    ((scoped_retrieval.get("details") or {}).get("reranker") or {}).get(
+                        "applied"
+                    )
+                    for scoped_retrieval in retrievals
+                )
             ):
                 effective_merge = "rrf"
             for scoped_retrieval in retrievals:
@@ -3455,10 +3465,12 @@ class LocalRAGService:
                     if effective_merge == "dense":
                         # Cosine similarity is comparable across language searches;
                         # rank is not. Lexical-only hits carry no dense score.
+                        # Stored relevance feedback still moves a chunk up or down.
                         dense = row.get("dense_score")
                         entry["multilingual_score"] = max(
                             float(entry.get("multilingual_score", 0.0)),
-                            float(dense) if dense is not None else 0.0,
+                            (float(dense) if dense is not None else 0.0)
+                            + float(row.get("feedback_adjustment") or 0.0),
                         )
                     else:
                         entry["multilingual_score"] = float(

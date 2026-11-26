@@ -80,13 +80,17 @@ variants use the same weights as the original. Each candidate's
 Embedding scores are compressed, so the best match in an unrelated language pool
 can score almost as high as a real match. Before merging, each video is scored
 by how far its relevance sits above the median of its own language pool
-(`pool_score`), with raw relevance breaking ties. Set
+(`pool_score`), with raw relevance breaking ties. A pool of fewer than three
+videos is scored against the median of every candidate instead. Set
 `YT_RAG_ROUTING_POOL_NORMALIZATION=none` to merge raw relevance scores instead.
 
 When the routed videos span several languages, chunks from each language search
 are merged by dense similarity, so a weak language search does not take an
-equal share of the evidence. Set `YT_RAG_MULTILINGUAL_CHUNK_MERGE=rrf` to merge
-by rank instead. `retrieval_details.video_routing.fusion` and
+equal share of the evidence. Stored relevance feedback still adjusts each
+chunk's score. If a language search has no dense scores (lexical mode, or a
+hybrid search that fell back to lexical) or was reranked by the cross-encoder,
+chunks are merged by rank. Set `YT_RAG_MULTILINGUAL_CHUNK_MERGE=rrf` to always
+merge by rank. `retrieval_details.video_routing.fusion` and
 `multilingual_retrieval.fusion` report which methods ran.
 
 ```json
