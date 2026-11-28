@@ -20,6 +20,7 @@ if str(LOCAL_PREVIEW_DIR) not in sys.path:
 
 os.environ["YT_RAG_SKIP_GLOBAL_SERVICE"] = "1"
 local_api = importlib.import_module("local_api")
+query_variant_routing = importlib.import_module("query_variant_routing")
 grounded_answer = importlib.import_module("grounded_answer")
 
 
@@ -424,6 +425,8 @@ def test_mixed_library_routes_to_relevant_videos(
 ):
     # This fixture checks the profile router's scores; chunk evidence is tested apart.
     monkeypatch.setenv(local_api.VIDEO_ROUTER_SCORE_ENV, "profile")
+    # Two sources per language with tied scores; no near-tie sources are wanted.
+    monkeypatch.setenv(query_variant_routing.SCORE_MARGIN_ENV, "0")
     questions = {"en": "How do kites float?", "ja": "凧はなぜ浮きますか"}
     relevant_texts = {
         "en": ["Fabric wings catch a breeze.", "Tension keeps the sail stable."],

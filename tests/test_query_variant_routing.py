@@ -75,7 +75,7 @@ def test_pool_normalization_ranks_against_each_language_pool(monkeypatch):
 
     def ids(**kwargs):
         return route_query_variants(POOL_EXPANSION, top_k=3, route_videos=_pool_route,
-                                    **kwargs)
+                                    score_margin=0, **kwargs)
 
     assert ids(pool_normalization="none")["video_ids"] == ["a", "b", "j"]
     zscore = ids(pool_normalization="zscore")
@@ -113,7 +113,7 @@ def test_penalty_spares_the_best_candidate(monkeypatch):
     def ids(**kwargs):
         return route_query_variants(expansion, top_k=3, route_videos=route,
                                     translated_penalty=0.02, pool_normalization="none",
-                                    **kwargs)["video_ids"]
+                                    score_margin=0, **kwargs)["video_ids"]
 
     assert ids() == ["a", "b", "c"]
     assert ids(penalty_spares_best=True) == ["e", "a", "b"]
@@ -174,3 +174,62 @@ def test_percentile_baseline_finds_a_match_in_a_crowded_pool(monkeypatch):
 
 def test_percentile_of_a_one_value_reference_is_that_value():
     assert query_variant_routing.normalize_pool({"a": 0.5}, "percentile") == {"a": 0.0}
+
+
+def _margin_route(scores):
+    expansion = {"variants": [
+        {"query": "q", "language": "en", "kind": "original", "video_ids": [v for v, _ in scores["en"]]},
+        {"query": "q", "language": "ja", "kind": "translated", "video_ids": [v for v, _ in scores["ja"]]},
+    ]}
+
+    def route(query, *, top_k, language, video_ids, rank_by_relevance):
+        rows = scores[language][:top_k]
+        return {"video_ids": [v for v, _ in rows], "results": [
+            {"video_id": v, "dense_score": s, "lexical_score": 0.0} for v, s in rows]}
+
+    return expansion, route
+
+
+MARGIN_SCORES = {
+    "en": [("a", 0.90), ("b", 0.85), ("c", 0.848), ("d", 0.847), ("e", 0.846), ("f", 0.845),
+           ("g", 0.80)],
+    "ja": [("j", 0.70)],
+}
+
+
+def test_score_margin_routes_near_ties_up_to_three_extra(monkeypatch):
+    monkeypatch.delenv(query_variant_routing.SCORE_MARGIN_ENV, raising=False)
+    expansion, route = _margin_route(MARGIN_SCORES)
+
+    def ids(**kwargs):
+        return route_query_variants(expansion, top_k=2, route_videos=route,
+                                    pool_normalization="none", **kwargs)["video_ids"]
+
+    # "b" is the last routed source; c, d and e sit within 0.005 of it, f is a fourth extra.
+    assert ids() == ["a", "b", "c", "d", "e"]
+    assert ids(score_margin=0.0025) == ["a", "b", "c"]
+    assert ids(score_margin=0) == ["a", "b"]
+    assert ids(max_results=4) == ["a", "b", "c", "d"]
+    monkeypatch.setenv(query_variant_routing.SCORE_MARGIN_ENV, "0")
+    assert ids() == ["a", "b"]
+
+
+def test_score_margin_is_ignored_for_rank_fusion():
+    expansion = {"variants": [{"query": "q", "language": "en", "kind": "original",
+                               "video_ids": ["a", "b", "c"]}]}
+
+    def route(query, *, top_k, language, video_ids, rank_by_relevance):
+        rows = [("a", 0.9), ("b", 0.9), ("c", 0.9)][:top_k]
+        return {"video_ids": [v for v, _ in rows], "results": [
+            {"video_id": v, "dense_score": s, "lexical_score": 0.0} for v, s in rows]}
+
+    routed = route_query_variants(expansion, top_k=2, route_videos=route, score_margin=1.0)
+    assert routed["video_ids"] == ["a", "b"]
+
+
+def test_negative_score_margin_is_rejected():
+    import pytest
+
+    expansion, route = _margin_route(MARGIN_SCORES)
+    with pytest.raises(ValueError, match="score margin"):
+        route_query_variants(expansion, top_k=2, route_videos=route, score_margin=-0.1)

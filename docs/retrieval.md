@@ -64,7 +64,7 @@ insufficient-evidence answer behavior still applies.
 ## Video-first routing
 
 A library-wide `/v1/ask` request with `video_routing: "multi_vector"` first
-shortlists relevant videos (five unless `video_top_k` is set), then retrieves
+shortlists relevant videos (five unless `video_top_k` is set, plus near ties), then retrieves
 chunks from them. The router builds identity (title and channel), overview, and
 timestamped section vectors for each video. Router artifacts are stored
 separately from the chunk index and rebuilt when video inputs change.
@@ -92,6 +92,11 @@ match, while a low percentile follows the pool's unrelated sources. A pool of
 fewer than three videos is scored against every candidate instead. Set
 `YT_RAG_ROUTING_POOL_NORMALIZATION` to `median` or `zscore` for the older
 baselines, or to `none` to merge raw relevance scores.
+
+In a crowded topic the right source often scores just below the cut, so up to
+three more sources are routed when their score is within 0.005 of the last
+routed one, to at most ten. Set `YT_RAG_ROUTING_SCORE_MARGIN` to change the
+margin, or to `0` to route exactly `video_top_k` sources.
 
 When the routed videos span several languages, chunks from each language search
 are merged by rank, alternating between languages. Set

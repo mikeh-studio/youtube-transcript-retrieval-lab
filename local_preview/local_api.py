@@ -1218,7 +1218,10 @@ class LocalRAGService:
     def _route_query_variants(self, expansion: dict, *, top_k: int) -> dict:
         """Return the video shortlist for the expanded query."""
         return route_query_variants(
-            expansion, top_k=top_k, route_videos=self.route_videos
+            expansion,
+            top_k=top_k,
+            route_videos=self.route_videos,
+            max_results=MAX_VIDEO_ROUTING_TOP_K,
         )
 
     @staticmethod
