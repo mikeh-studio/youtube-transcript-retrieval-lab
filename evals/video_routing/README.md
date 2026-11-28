@@ -67,8 +67,10 @@ report = run_adapter(dataset, adapter)
 ```
 
 Only the label-free `videos` collection is passed to the production adapter.
-The adapter also builds a channel-name-ablated router for the comparison
-metrics.
+The adapter selects videos with the same hybrid profile-and-chunk scoring as
+Ask; pass `router_score="profile"` to measure the profile-only router. It also
+builds a channel-name-ablated router for the comparison metrics, scored the
+same way.
 
 For already captured results:
 

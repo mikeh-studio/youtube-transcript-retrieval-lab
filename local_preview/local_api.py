@@ -102,8 +102,7 @@ from multilingual.source_model import (  # noqa: E402
 from multilingual.text_processing import LANGUAGE_CONFIG  # noqa: E402
 from multilingual.video_routing import (  # noqa: E402
     MultiVectorVideoRouter,
-    blend_chunk_scores,
-    chunk_route_scores,
+    route_with_chunk_scores,
 )
 from multilingual.video_library import TranscriptRequestPaused  # noqa: E402
 from multilingual.youtube_metadata import (  # noqa: E402
@@ -1015,8 +1014,13 @@ class LocalRAGService:
         try:
             router = self._get_video_router()
             if router_score == "hybrid":
-                routed = self._route_videos_hybrid(
-                    router, query, top_k=top_k, language=language, video_ids=video_ids
+                routed = route_with_chunk_scores(
+                    router,
+                    self.engine.library,
+                    query,
+                    top_k=top_k,
+                    language=language,
+                    video_ids=video_ids,
                 )
             else:
                 routed = router.search(
@@ -1039,51 +1043,6 @@ class LocalRAGService:
             }
         routed["latency_ms"] = round((time.perf_counter() - started_at) * 1000, 3)
         return routed
-
-    def _route_videos_hybrid(
-        self,
-        router: MultiVectorVideoRouter,
-        query: str,
-        *,
-        top_k: int,
-        language: Optional[str],
-        video_ids: Optional[List[str]],
-    ) -> dict:
-        """Rank every scoped video by profile and chunk evidence, then shortlist."""
-        library = self.engine.library
-        scoped = [
-            video_id
-            for video_id in (library.videos if video_ids is None else video_ids)
-            if video_id in library.videos
-        ]
-        profiled = router.search(
-            query,
-            top_k=max(int(top_k), len(scoped)),
-            language=language,
-            video_ids=video_ids,
-            rank_by_relevance=True,
-        )
-        if profiled.get("used_fallback") or not scoped:
-            return {**profiled, "results": profiled.get("results", [])[:top_k],
-                    "video_ids": profiled.get("video_ids", [])[:top_k]}
-        chunk_count = sum(len(library.videos[video_id].get("chunks") or []) for video_id in scoped)
-        try:
-            chunk_hits = library.search(
-                query,
-                k=chunk_count,
-                language=language,
-                video_ids=None if video_ids is None else scoped,
-            )
-        except Exception as exc:
-            # Profile scores alone still give a usable shortlist.
-            return {
-                **profiled,
-                "results": profiled.get("results", [])[:top_k],
-                "video_ids": profiled.get("video_ids", [])[:top_k],
-                "chunk_scores_available": False,
-                "chunk_score_error": str(exc),
-            }
-        return blend_chunk_scores(profiled, chunk_route_scores(chunk_hits), top_k=top_k)
 
     @staticmethod
     def _canonical_video_language(value: Optional[str], fallback: str = "en") -> str:

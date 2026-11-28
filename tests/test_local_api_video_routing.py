@@ -1046,12 +1046,8 @@ def test_blend_chunk_scores_lifts_a_video_covered_in_one_passage():
         ],
         "used_fallback": False,
     }
-    chunk_hits = [
-        {"video_id": "c", "score": 0.90}, {"video_id": "c", "score": 0.86},
-        {"video_id": "a", "score": 0.82}, {"video_id": "b", "score": 0.81},
-        {"video_id": "a", "score": 0.78},
-    ]
-    scores = chunk_route_scores(chunk_hits)
+    best = {"c": [0.90, 0.86], "a": [0.82, 0.78], "b": [0.81]}
+    scores = chunk_route_scores(best)
     assert scores["c"] == pytest.approx(0.7 * 0.90 + 0.3 * 0.86)
     assert scores["b"] == pytest.approx(0.81)
 
@@ -1088,7 +1084,9 @@ def _hybrid_service(search):
                 "results": rows[:top_k], "used_fallback": False}
 
     service = local_api.LocalRAGService.__new__(local_api.LocalRAGService)
-    service.engine = SimpleNamespace(library=SimpleNamespace(videos=videos, search=search))
+    service.engine = SimpleNamespace(
+        library=SimpleNamespace(videos=videos, video_chunk_scores=search)
+    )
     service._get_video_router = lambda: SimpleNamespace(search=router_search)
     return service, router_calls
 
@@ -1097,9 +1095,9 @@ def test_hybrid_router_scores_every_scoped_video_with_its_chunks(monkeypatch):
     monkeypatch.delenv(local_api.VIDEO_ROUTER_SCORE_ENV, raising=False)
     search_calls = []
 
-    def search(query, *, k, language, video_ids):
-        search_calls.append({"k": k, "language": language, "video_ids": video_ids})
-        return [{"video_id": "c", "score": 0.95}, {"video_id": "a", "score": 0.80}]
+    def search(query, *, language, video_ids):
+        search_calls.append({"language": language, "video_ids": video_ids})
+        return {"c": [0.95], "a": [0.80]}
 
     service, router_calls = _hybrid_service(search)
     routed = service.route_videos("q", top_k=1, language="en", video_ids=["a", "c"])
@@ -1107,7 +1105,52 @@ def test_hybrid_router_scores_every_scoped_video_with_its_chunks(monkeypatch):
     assert routed["video_ids"] == ["c"]
     # The profile router ranks every scoped video so low-ranked ones can rise.
     assert router_calls == [{"top_k": 2, "video_ids": ["a", "c"], "rank_by_relevance": True}]
-    assert search_calls == [{"k": 5, "language": "en", "video_ids": ["a", "c"]}]
+    assert search_calls == [{"language": "en", "video_ids": ["a", "c"]}]
+
+
+def test_blend_keeps_profile_scores_when_chunk_scores_are_empty():
+    from multilingual.video_routing import blend_chunk_scores
+
+    profiled = {
+        "video_ids": ["a", "b"],
+        "results": [
+            {"video_id": "a", "dense_score": 0.88, "lexical_score": 0.0},
+            {"video_id": "b", "dense_score": 0.78, "lexical_score": 0.3},
+        ],
+        "used_fallback": False,
+    }
+    # Halving dense scores while keeping lexical ones would rank b (0.465) above a (0.440).
+    routed = blend_chunk_scores(profiled, {}, top_k=2)
+    assert routed["video_ids"] == ["a", "b"]
+    assert [row["score"] for row in routed["results"]] == pytest.approx([0.88, 0.855])
+    assert routed["chunk_scores_available"] is False
+
+
+def test_blend_keeps_profile_score_for_a_video_without_chunk_score():
+    from multilingual.video_routing import blend_chunk_scores
+
+    profiled = {
+        "video_ids": ["a", "b"],
+        "results": [
+            {"video_id": "a", "dense_score": 0.86, "lexical_score": None},
+            {"video_id": "b", "dense_score": 0.84, "lexical_score": None},
+        ],
+        "used_fallback": False,
+    }
+    routed = blend_chunk_scores(profiled, {"b": 0.80}, top_k=2)
+    rows = {row["video_id"]: row for row in routed["results"]}
+    assert rows["a"]["dense_score"] == pytest.approx(0.86)
+    assert rows["a"]["chunk_score"] is None
+    assert rows["b"]["dense_score"] == pytest.approx(0.82)
+    assert routed["video_ids"] == ["a", "b"]
+
+
+def test_hybrid_router_keeps_profile_order_when_the_index_is_empty(monkeypatch):
+    monkeypatch.delenv(local_api.VIDEO_ROUTER_SCORE_ENV, raising=False)
+    service, _ = _hybrid_service(lambda query, **kwargs: {})
+    routed = service.route_videos("q", top_k=3, language="en")
+    assert routed["video_ids"] == ["a", "b", "c"]
+    assert [row["dense_score"] for row in routed["results"]] == pytest.approx([0.84, 0.83, 0.80])
 
 
 def test_hybrid_router_keeps_profile_scores_when_chunk_search_fails(monkeypatch):
@@ -1137,6 +1180,6 @@ def test_profile_router_score_skips_chunk_search(monkeypatch):
 
 def test_unknown_video_router_score_is_rejected(monkeypatch):
     monkeypatch.setenv(local_api.VIDEO_ROUTER_SCORE_ENV, "chunks")
-    service, _ = _hybrid_service(lambda *args, **kwargs: [])
+    service, _ = _hybrid_service(lambda *args, **kwargs: {})
     with pytest.raises(ValueError, match="video router score"):
         service.route_videos("q", top_k=2)

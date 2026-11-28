@@ -9,7 +9,9 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from multilingual.video_library import VideoLibrary
-from multilingual.video_routing import MultiVectorVideoRouter
+from multilingual.video_routing import MultiVectorVideoRouter, route_with_chunk_scores
+
+ROUTER_SCORES = ("hybrid", "profile")
 
 
 def _library_video(record: Mapping[str, Any]) -> dict:
@@ -77,7 +79,12 @@ class MultiVectorRouterAdapter:
         include_channel_ablation: bool = True,
         include_chunk_retrieval: bool = True,
         chunk_top_k: int = 5,
+        router_score: str = "hybrid",
     ):
+        if router_score not in ROUTER_SCORES:
+            raise ValueError(f"Unknown video router score: {router_score!r}")
+        self.router_score = router_score
+        self.include_chunk_retrieval = include_chunk_retrieval
         self.videos = build_library_videos(video_records)
         self._temp_dir = None
         if artifact_dir is None:
@@ -92,7 +99,8 @@ class MultiVectorRouterAdapter:
         self.router.build(self.videos, persist=False)
         self.chunk_top_k = max(1, int(chunk_top_k))
         self.library = None
-        if include_chunk_retrieval:
+        # Hybrid routing scores videos by their chunks, so it needs the index too.
+        if include_chunk_retrieval or router_score == "hybrid":
             self.library = VideoLibrary(
                 data_dir=str(Path(artifact_dir) / "chunk_library"),
                 processor=processor,
@@ -113,19 +121,27 @@ class MultiVectorRouterAdapter:
             )
             self.without_channel_router.build(ablated_videos, persist=False)
 
+    def _select(self, router, query: str, *, top_k: int, language) -> dict:
+        """Select videos the way Ask does for the configured router score."""
+        if self.router_score == "hybrid":
+            return route_with_chunk_scores(
+                router, self.library, query, top_k=top_k, language=language
+            )
+        return router.search(query, top_k=top_k, language=language)
+
     def route(self, request: Mapping[str, Any]) -> dict:
         """Return evaluator-compatible rankings without reading gold labels."""
         started_at = time.perf_counter()
         query = str(request.get("query") or "")
         language = str(request.get("language") or "").strip() or None
         top_k = max(1, int(request.get("top_k") or 5))
-        result = self.router.search(query, top_k=top_k, language=language)
+        result = self._select(self.router, query, top_k=top_k, language=language)
         response = {
             "ranked_video_ids": list(result.get("video_ids") or []),
             "fallback_used": bool(result.get("used_fallback")),
             "latency_ms": (time.perf_counter() - started_at) * 1000.0,
         }
-        if self.library is not None and response["ranked_video_ids"]:
+        if self.include_chunk_retrieval and response["ranked_video_ids"]:
             chunk_rows = self.library.search(
                 query,
                 k=self.chunk_top_k,
@@ -140,10 +156,8 @@ class MultiVectorRouterAdapter:
                 for row in chunk_rows
             ]
         if self.without_channel_router is not None:
-            ablated = self.without_channel_router.search(
-                query,
-                top_k=top_k,
-                language=language,
+            ablated = self._select(
+                self.without_channel_router, query, top_k=top_k, language=language
             )
             response["ablation"] = {
                 "without_channel": {

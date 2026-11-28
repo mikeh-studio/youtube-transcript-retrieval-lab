@@ -40,14 +40,17 @@ def video_relevance(dense_score: Optional[float], lexical_score: Optional[float]
     return (dense_score or 0.0) + 0.25 * (lexical_score or 0.0)
 
 
-def chunk_route_scores(chunk_hits) -> dict:
-    """Score each video by its best transcript chunks: 0.7 x best + 0.3 x second."""
-    per_video = defaultdict(list)
-    for hit in chunk_hits:
-        per_video[hit["video_id"]].append(float(hit["score"]))
+def chunk_route_scores(best_by_video) -> dict:
+    """Score each video by its best transcript chunks: 0.7 x best + 0.3 x second.
+
+    ``best_by_video`` maps a video id to its chunk similarities, highest first,
+    as returned by ``VideoLibrary.video_chunk_scores``.
+    """
     scores = {}
-    for video_id, values in per_video.items():
-        values.sort(reverse=True)
+    for video_id, values in best_by_video.items():
+        values = sorted((float(value) for value in values), reverse=True)
+        if not values:
+            continue
         scores[video_id] = values[0] if len(values) == 1 else 0.7 * values[0] + 0.3 * values[1]
     return scores
 
@@ -57,9 +60,10 @@ def blend_chunk_scores(routed: dict, chunk_scores: dict, *, top_k: int) -> dict:
 
     Profiles summarize a long transcript in a few sampled sections, so a topic
     covered in one passage can be missed. Each video's dense score becomes the
-    mean of its profile score and its chunk score. ``routed`` must list every
-    candidate video, ranked by relevance, so videos the profile ranked low can
-    still rise on their chunks.
+    mean of its profile score and its chunk score. A video with no chunk score
+    keeps its profile score, so missing chunk evidence never halves it.
+    ``routed`` must list every candidate video, ranked by relevance, so videos
+    the profile ranked low can still rise on their chunks.
     """
     rows = []
     for row in routed.get("results") or []:
@@ -69,7 +73,8 @@ def blend_chunk_scores(routed: dict, chunk_scores: dict, *, top_k: int) -> dict:
         blended = dict(row)
         blended["profile_dense_score"] = profile_dense
         blended["chunk_score"] = chunk_score
-        blended["dense_score"] = ((profile_dense or 0.0) + (chunk_score or 0.0)) / 2
+        if chunk_score is not None:
+            blended["dense_score"] = ((profile_dense or 0.0) + chunk_score) / 2
         blended["score"] = video_relevance(blended["dense_score"], row.get("lexical_score"))
         rows.append(blended)
     rows.sort(key=lambda row: (-row["score"], row["video_id"]))
@@ -83,6 +88,44 @@ def blend_chunk_scores(routed: dict, chunk_scores: dict, *, top_k: int) -> dict:
         "fusion": "profile_chunk_relevance",
         "chunk_scores_available": bool(chunk_scores),
     }
+
+
+def route_with_chunk_scores(router, library, query, *, top_k, language=None, video_ids=None) -> dict:
+    """Hybrid routing: rank every scoped video by profile and chunk evidence.
+
+    Shared by Ask and the routing evaluator so both select videos the same
+    way. If chunk scoring raises, the profile ranking is returned unchanged.
+    """
+    top_k = int(top_k)
+    scoped = [
+        video_id
+        for video_id in (library.videos if video_ids is None else video_ids)
+        if video_id in library.videos
+    ]
+    profiled = router.search(
+        query,
+        top_k=max(top_k, len(scoped)),
+        language=language,
+        video_ids=video_ids,
+        rank_by_relevance=True,
+    )
+    shortlist = {
+        **profiled,
+        "results": (profiled.get("results") or [])[:top_k],
+        "video_ids": (profiled.get("video_ids") or [])[:top_k],
+    }
+    if profiled.get("used_fallback") or not scoped:
+        return shortlist
+    try:
+        best = library.video_chunk_scores(
+            query,
+            language=language,
+            video_ids=None if video_ids is None else scoped,
+        )
+    except Exception as exc:
+        # Profile scores alone still give a usable shortlist.
+        return {**shortlist, "chunk_scores_available": False, "chunk_score_error": str(exc)}
+    return blend_chunk_scores(profiled, chunk_route_scores(best), top_k=top_k)
 
 
 def _chmod_private(path: str) -> None:

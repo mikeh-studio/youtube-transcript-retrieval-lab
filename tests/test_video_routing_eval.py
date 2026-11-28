@@ -364,3 +364,94 @@ def test_production_router_adapter_runs_label_blind_channel_ablation(tmp_path):
     )
     assert 0.0 <= report["metrics"]["video_recall@3"] <= 1.0
     assert report["metrics"]["final_chunk_recall@5"] is not None
+
+
+def _chunk_library(tmp_path):
+    from multilingual.video_library import VideoLibrary
+
+    library = VideoLibrary(data_dir=str(tmp_path / "lib"), processor=_HashProcessor())
+    texts = {
+        "a": ["solar panel install", "battery storage cost", "grid tie inverter"],
+        "b": ["sourdough starter", "solar oven bread"],
+        "c": [],
+        "d": ["panel discussion on solar policy"],
+    }
+    library.videos = {
+        video_id: {
+            "title": video_id,
+            "language": "en",
+            "source": {},
+            "chunks": [
+                {"raw_text": text, "embed_text": text, "start": float(i), "end": float(i + 1)}
+                for i, text in enumerate(chunk_texts)
+            ],
+        }
+        for video_id, chunk_texts in texts.items()
+    }
+    library._rebuild_index()
+    return library
+
+
+def test_video_chunk_scores_match_the_best_search_hits(tmp_path):
+    library = _chunk_library(tmp_path)
+    for video_ids in (None, ["a", "b"], ["d", "c"]):
+        hits = library.search(
+            "solar panel cost", k=library.index.ntotal, language="en", video_ids=video_ids
+        )
+        expected = {}
+        for hit in hits:
+            values = expected.setdefault(hit["video_id"], [])
+            if len(values) < 2:
+                values.append(hit["score"])
+        best = library.video_chunk_scores("solar panel cost", language="en", video_ids=video_ids)
+        assert best.keys() == expected.keys()
+        for video_id, values in expected.items():
+            assert best[video_id] == pytest.approx(values)
+    # A video without chunks has no entry, and an empty index gives no scores.
+    assert "c" not in library.video_chunk_scores("solar", language="en")
+    library.index = None
+    assert library.video_chunk_scores("solar", language="en") == {}
+
+
+def test_adapter_selects_videos_with_the_shared_hybrid_router(tmp_path, monkeypatch):
+    from evals.video_routing import adapters
+
+    dataset = load_dataset(FIXTURE_PATH)
+    calls = []
+    real = adapters.route_with_chunk_scores
+
+    def recording(router, library, query, **kwargs):
+        calls.append((router, library))
+        return real(router, library, query, **kwargs)
+
+    monkeypatch.setattr(adapters, "route_with_chunk_scores", recording)
+    adapter = MultiVectorRouterAdapter(
+        dataset["videos"], _HashProcessor(), artifact_dir=tmp_path,
+        include_chunk_retrieval=False,
+    )
+    request = {"query": dataset["queries"][0]["query"], "top_k": 3}
+    response = adapter.route(request)
+
+    # Both the main router and the channel ablation go through the hybrid path.
+    assert calls == [
+        (adapter.router, adapter.library),
+        (adapter.without_channel_router, adapter.library),
+    ]
+    expected = real(adapter.router, adapter.library, request["query"], top_k=3)
+    assert response["ranked_video_ids"] == expected["video_ids"]
+    assert "ranked_chunks" not in response
+
+
+def test_adapter_profile_mode_uses_the_profile_router(tmp_path):
+    dataset = load_dataset(FIXTURE_PATH)
+    adapter = MultiVectorRouterAdapter(
+        dataset["videos"], _HashProcessor(), artifact_dir=tmp_path,
+        include_chunk_retrieval=False, include_channel_ablation=False,
+        router_score="profile",
+    )
+    query = dataset["queries"][0]["query"]
+    response = adapter.route({"query": query, "top_k": 3})
+    assert adapter.library is None
+    assert response["ranked_video_ids"] == adapter.router.search(query, top_k=3)["video_ids"]
+    with pytest.raises(ValueError, match="router score"):
+        MultiVectorRouterAdapter(dataset["videos"], _HashProcessor(), router_score="chunks")
