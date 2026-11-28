@@ -100,7 +100,6 @@ repository.
 | --- | --- |
 | Retrieval ranking | On 42 English and Japanese question forms, nDCG@10 is 0.626 for dense and 0.590 for hybrid search. Translating cross-language questions adds +0.33 for BM25. Labels are model-judged. [Development study](docs/evaluation-development-study.md) |
 | Episode key areas | On 8 long-form episodes with owner-reviewed gold: faithfulness 0.986, weighted key-point recall 0.966, section boundary F1@30s 0.553. The owner agreed with 19 of 20 audited judge decisions. |
-| Cross-source Ask | On 12 questions spanning 2–3 videos, answer source coverage rose from 0.417 to 0.71, mostly from answering covered parts instead of declining. |
 | Answer quality | Scoring method added; judged scores wait for the owner audit. |
 
 [Results, regression floors and methods](docs/evaluation.md). Run the offline
