@@ -101,6 +101,11 @@ margin, or to `0` to route exactly `video_top_k` sources.
 When the routed videos span several languages, chunks from each language search
 are merged by rank, alternating between languages. Set
 `YT_RAG_MULTILINGUAL_CHUNK_MERGE=dense` to merge by dense similarity instead.
+At the `k` cut, a tie goes to the chunk from a language whose evidence passed
+the sufficiency check. Routing stops at a scope only if that evidence survives
+the merge; otherwise it widens as for insufficient evidence.
+`video_routing.stages[].sufficient_before_merge` records the check before the
+merge.
 Stored relevance feedback still adjusts each chunk's score. If a language search
 has no dense scores (lexical mode, or a hybrid search that fell back to lexical)
 or was reranked by the cross-encoder, the dense merge falls back to rank. `retrieval_details.video_routing.fusion` and

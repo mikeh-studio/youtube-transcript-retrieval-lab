@@ -1183,3 +1183,57 @@ def test_unknown_video_router_score_is_rejected(monkeypatch):
     service, _ = _hybrid_service(lambda *args, **kwargs: {})
     with pytest.raises(ValueError, match="video router score"):
         service.route_videos("q", top_k=2)
+
+
+def _tie_retrieve(dense):
+    def retrieve(query, **kwargs):
+        language = kwargs["language"]
+        rows = [
+            {"video_id": kwargs["video_ids"][0], "chunk_index": 0, "text": query,
+             "language": language, "dense_score": dense[language]}
+        ]
+        details = {"status": "ok", "duration_ms": 1.0, "stages": {}}
+        return {"results": rows, "details": details, "retrieval_mode": "hybrid"}
+
+    return retrieve
+
+
+def _japanese_only_evidence(**kwargs):
+    passed = any(row["language"] == "ja" for row in kwargs["rows"])
+    return {"sufficient": passed, "reason_code": "fixture"}
+
+
+def test_rank_merge_tie_keeps_the_chunk_that_passed_the_evidence_check(monkeypatch):
+    """At k=1 both top chunks tie under rank fusion; the passing one must survive."""
+    service = _multilingual_service()
+    monkeypatch.delenv(local_api.MULTILINGUAL_CHUNK_MERGE_ENV, raising=False)
+    monkeypatch.setattr(local_api, "assess_grounded_answer_evidence", _japanese_only_evidence)
+    service.retrieve = _tie_retrieve({"en": 0.86, "ja": 0.80})
+
+    result = service.retrieve_video_first("starter timing", k=1, video_top_k=2, agentic=False)
+
+    rows = result["retrieval"]["results"]
+    assert [(row["video_id"], row["chunk_index"]) for row in rows] == [("ja_video", 0)]
+    stage = result["retrieval"]["details"]["video_routing"]["stages"][0]
+    assert stage["scope"] == "routed_top_k"
+    assert stage["sufficient"] is True
+    assert stage["sufficient_before_merge"] is True
+
+
+def test_merge_that_drops_the_passing_chunk_is_not_sufficient(monkeypatch):
+    """Score merge keeps the stronger English chunk, so routing must not stop there."""
+    service = _multilingual_service()
+    # A source outside the routed pair, so a wider scope exists to fall back to.
+    service.engine.library.videos["other_video"] = {"language": "en"}
+    monkeypatch.setenv(local_api.MULTILINGUAL_CHUNK_MERGE_ENV, "dense")
+    monkeypatch.setattr(local_api, "assess_grounded_answer_evidence", _japanese_only_evidence)
+    service.retrieve = _tie_retrieve({"en": 0.86, "ja": 0.80})
+
+    result = service.retrieve_video_first("starter timing", k=1, video_top_k=2, agentic=False)
+
+    stages = result["retrieval"]["details"]["video_routing"]["stages"]
+    assert stages[0]["scope"] == "routed_top_k"
+    assert stages[0]["sufficient_before_merge"] is True
+    assert stages[0]["sufficient"] is False
+    # Insufficient routed evidence moves on to the whole library instead of stopping.
+    assert stages[-1]["scope"] == "global_fallback"

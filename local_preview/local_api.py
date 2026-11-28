@@ -3456,10 +3456,17 @@ class LocalRAGService:
         if chunk_merge not in MULTILINGUAL_CHUNK_MERGES:
             raise ValueError(f"Unknown multilingual chunk merge: {chunk_merge!r}")
 
-        def merge_retrievals(retrievals):
+        def merge_retrievals(retrievals, preferred=None):
+            """Merge language searches; ``preferred`` flags scopes whose evidence passed.
+
+            At the k cut, ties go to chunks from a preferred scope, so rank fusion
+            cannot keep an unrelated chunk over the one that passed the check.
+            """
             if len(retrievals) == 1:
                 return retrievals[0]
+            preferred = list(preferred or [False] * len(retrievals))
             merged: Dict[str, dict] = {}
+            from_preferred = set()
             # Dense scores only compare languages when every search produced them;
             # lexical mode, or a hybrid search that fell back to lexical, ranks by rank.
             # A cross-encoder order is not reflected in dense scores, so a reranked
@@ -3482,12 +3489,14 @@ class LocalRAGService:
                 )
             ):
                 effective_merge = "rrf"
-            for scoped_retrieval in retrievals:
+            for scoped_retrieval, scope_preferred in zip(retrievals, preferred):
                 for rank, row in enumerate(
                     scoped_retrieval.get("results") or [],
                     start=1,
                 ):
                     key = self._chunk_identity(row)
+                    if scope_preferred:
+                        from_preferred.add(key)
                     entry = merged.setdefault(key, dict(row))
                     if effective_merge == "dense":
                         # Cosine similarity is comparable across language searches;
@@ -3507,6 +3516,7 @@ class LocalRAGService:
                 merged.values(),
                 key=lambda row: (
                     -float(row.get("multilingual_score", 0.0)),
+                    self._chunk_identity(row) not in from_preferred,
                     self._chunk_identity(row),
                 ),
             )[:k]
@@ -3612,6 +3622,7 @@ class LocalRAGService:
             agentic_outcomes = []
             deterministic_assessments = []
             language_stages = []
+            scope_checks = []
             for (
                 retrieval_language,
                 scoped_query,
@@ -3631,6 +3642,16 @@ class LocalRAGService:
                     scoped_retrieval = outcome["retrieval"]
                     agentic_outcomes.append(outcome)
                     scoped_sufficient = bool(outcome.get("sufficient"))
+
+                    def reassess(rows, scoped_query=scoped_query, retrieval=scoped_retrieval):
+                        # Same check retrieve_agentic applies to its own rows.
+                        return assess_grounded_answer_evidence(
+                            question=scoped_query,
+                            rows=rows,
+                            retrieval_mode=retrieval.get("retrieval_mode", retrieval_mode),
+                            tokenize_fn=self._tokenize_for_lexical,
+                            answer_language=self._infer_query_language(scoped_query),
+                        )
                 else:
                     scoped_retrieval = self.retrieve(
                         scoped_query,
@@ -3654,6 +3675,23 @@ class LocalRAGService:
                     )
                     deterministic_assessments.append(assessment)
                     scoped_sufficient = bool(assessment.get("sufficient"))
+
+                    def reassess(
+                        rows,
+                        scoped_query=scoped_query,
+                        query_language=query_language,
+                        retrieval=scoped_retrieval,
+                    ):
+                        return assess_grounded_answer_evidence(
+                            question=scoped_query,
+                            rows=rows,
+                            retrieval_mode=retrieval.get("retrieval_mode", retrieval_mode),
+                            tokenize_fn=self._tokenize_for_lexical,
+                            answer_language=expansion["query_language"],
+                            query_language=query_language,
+                        )
+
+                scope_checks.append((scoped_sufficient, reassess))
                 scoped_retrieval["_query_language"] = retrieval_language
                 retrievals.append(scoped_retrieval)
                 language_stages.append(
@@ -3671,12 +3709,32 @@ class LocalRAGService:
                     }
                 )
 
-            retrieval = merge_retrievals(retrievals)
+            retrieval = merge_retrievals(
+                retrievals, preferred=[passed for passed, _ in scope_checks]
+            )
             retrieval.pop("_query_language", None)
-            if agentic:
+            sufficient_before_merge = any(passed for passed, _ in scope_checks)
+            sufficient = sufficient_before_merge
+            if len(retrievals) > 1 and sufficient:
+                # The merge keeps only k chunks; stop only if the evidence that
+                # passed survived it.
+                kept = {
+                    self._chunk_identity(row) for row in retrieval.get("results") or []
+                }
                 sufficient = any(
-                    bool(outcome.get("sufficient")) for outcome in agentic_outcomes
+                    passed
+                    and bool(
+                        check(
+                            [
+                                row
+                                for row in scoped.get("results") or []
+                                if self._chunk_identity(row) in kept
+                            ]
+                        ).get("sufficient")
+                    )
+                    for (passed, check), scoped in zip(scope_checks, retrievals)
                 )
+            if agentic:
                 if len(agentic_outcomes) == 1:
                     final_outcome = agentic_outcomes[0]
                 else:
@@ -3749,17 +3807,13 @@ class LocalRAGService:
                         "sufficient": sufficient,
                         "language_outcomes": agentic_outcomes,
                     }
-            else:
-                sufficient = any(
-                    bool(assessment.get("sufficient"))
-                    for assessment in deterministic_assessments
-                )
             routing_stages.append(
                 {
                     "scope": scope_label,
                     "video_ids": list(scope_ids) if scope_ids is not None else None,
                     "result_count": len(retrieval.get("results") or []),
                     "sufficient": sufficient,
+                    "sufficient_before_merge": sufficient_before_merge,
                     "language_stages": language_stages,
                 }
             )
