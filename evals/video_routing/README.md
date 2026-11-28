@@ -68,7 +68,11 @@ report = run_adapter(dataset, adapter)
 
 Only the label-free `videos` collection is passed to the production adapter.
 The adapter selects videos with the same hybrid profile-and-chunk scoring as
-Ask; pass `router_score="profile"` to measure the profile-only router. It also
+Ask and the same final ranking step (`route_query_variants`); pass
+`router_score="profile"` to measure the profile-only router. It routes the
+untranslated query only, as Ask does for a one-language library. On a
+library with several languages Ask also searches a translated query, which
+the offline evaluator does not reproduce. It also
 builds a channel-name-ablated router for the comparison metrics, scored the
 same way.
 

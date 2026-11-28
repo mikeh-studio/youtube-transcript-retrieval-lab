@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from multilingual.video_library import VideoLibrary
+from local_preview.query_variant_routing import route_query_variants
 from multilingual.video_routing import MultiVectorVideoRouter, route_with_chunk_scores
 
 ROUTER_SCORES = ("hybrid", "profile")
@@ -122,12 +123,37 @@ class MultiVectorRouterAdapter:
             self.without_channel_router.build(ablated_videos, persist=False)
 
     def _select(self, router, query: str, *, top_k: int, language) -> dict:
-        """Select videos the way Ask does for the configured router score."""
-        if self.router_score == "hybrid":
-            return route_with_chunk_scores(
-                router, self.library, query, top_k=top_k, language=language
+        """Select videos the way Ask does for the configured router score.
+
+        Ask reranks the router's shortlist in ``route_query_variants``, so the
+        evaluator runs that step too, with the single untranslated query Ask
+        uses when the library has one language.
+        """
+
+        def route_videos(query, *, top_k, language, video_ids, rank_by_relevance):
+            if self.router_score == "hybrid":
+                return route_with_chunk_scores(
+                    router, self.library, query,
+                    top_k=top_k, language=language, video_ids=video_ids,
+                )
+            return router.search(
+                query, top_k=top_k, language=language,
+                video_ids=video_ids, rank_by_relevance=rank_by_relevance,
             )
-        return router.search(query, top_k=top_k, language=language)
+
+        expansion = {
+            "query_language": language,
+            "variants": [
+                {
+                    "query": query,
+                    "language": language,
+                    "query_language": language,
+                    "kind": "original",
+                    "video_ids": list(self.videos),
+                }
+            ],
+        }
+        return route_query_variants(expansion, top_k=top_k, route_videos=route_videos)
 
     def route(self, request: Mapping[str, Any]) -> dict:
         """Return evaluator-compatible rankings without reading gold labels."""

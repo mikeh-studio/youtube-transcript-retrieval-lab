@@ -437,9 +437,64 @@ def test_adapter_selects_videos_with_the_shared_hybrid_router(tmp_path, monkeypa
         (adapter.router, adapter.library),
         (adapter.without_channel_router, adapter.library),
     ]
-    expected = real(adapter.router, adapter.library, request["query"], top_k=3)
-    assert response["ranked_video_ids"] == expected["video_ids"]
+    assert len(response["ranked_video_ids"]) == 3
     assert "ranked_chunks" not in response
+
+
+def _local_api():
+    """Import the app module without starting its global service or loading models."""
+    import importlib
+    import os
+    import sys
+
+    local_preview_dir = str(ROOT_DIR / "local_preview")
+    if local_preview_dir not in sys.path:
+        sys.path.insert(0, local_preview_dir)
+    os.environ["YT_RAG_SKIP_GLOBAL_SERVICE"] = "1"
+    return importlib.import_module("local_api")
+
+
+def _ask_service(router, library):
+    from types import SimpleNamespace
+
+    local_api = _local_api()
+
+    service = local_api.LocalRAGService.__new__(local_api.LocalRAGService)
+    service.engine = SimpleNamespace(library=library)
+    service._get_video_router = lambda: router
+    return service
+
+
+@pytest.mark.parametrize("router_score", ["hybrid", "profile"])
+def test_adapter_ranking_matches_the_ask_shortlist(tmp_path, monkeypatch, router_score):
+    local_api = _local_api()
+    monkeypatch.setenv(local_api.VIDEO_ROUTER_SCORE_ENV, router_score)
+    dataset = load_dataset(FIXTURE_PATH)
+    adapter = MultiVectorRouterAdapter(
+        dataset["videos"], _HashProcessor(), artifact_dir=tmp_path,
+        include_chunk_retrieval=False, router_score=router_score,
+    )
+    library = adapter.library
+    if library is None:
+        from multilingual.video_library import VideoLibrary
+
+        library = VideoLibrary(data_dir=str(tmp_path / "ask"), processor=_HashProcessor())
+        library.videos = adapter.videos
+    ask = _ask_service(adapter.router, library)
+    ablated_ask = _ask_service(adapter.without_channel_router, library)
+    case_ids = []
+    for case in dataset["queries"]:
+        expansion = ask._expand_query_for_video_languages(
+            case["query"], provider="none", model=None, language=case["language"]
+        )
+        assert len(expansion["variants"]) == 1
+        response = adapter.route({"query": case["query"], "language": case["language"], "top_k": 5})
+        assert response["ranked_video_ids"] == ask._route_query_variants(expansion, top_k=5)["video_ids"]
+        assert response["ablation"]["without_channel"]["ranked_video_ids"] == (
+            ablated_ask._route_query_variants(expansion, top_k=5)["video_ids"]
+        )
+        case_ids.append(case["id"])
+    assert "channel_brine" in case_ids
 
 
 def test_adapter_profile_mode_uses_the_profile_router(tmp_path):
@@ -452,6 +507,6 @@ def test_adapter_profile_mode_uses_the_profile_router(tmp_path):
     query = dataset["queries"][0]["query"]
     response = adapter.route({"query": query, "top_k": 3})
     assert adapter.library is None
-    assert response["ranked_video_ids"] == adapter.router.search(query, top_k=3)["video_ids"]
+    assert len(response["ranked_video_ids"]) == 3
     with pytest.raises(ValueError, match="router score"):
         MultiVectorRouterAdapter(dataset["videos"], _HashProcessor(), router_score="chunks")
