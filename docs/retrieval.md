@@ -94,12 +94,11 @@ fewer than three videos is scored against every candidate instead. Set
 baselines, or to `none` to merge raw relevance scores.
 
 When the routed videos span several languages, chunks from each language search
-are merged by dense similarity, so a weak language search does not take an
-equal share of the evidence. Stored relevance feedback still adjusts each
-chunk's score. If a language search has no dense scores (lexical mode, or a
-hybrid search that fell back to lexical) or was reranked by the cross-encoder,
-chunks are merged by rank. Set `YT_RAG_MULTILINGUAL_CHUNK_MERGE=rrf` to always
-merge by rank. `retrieval_details.video_routing.fusion` and
+are merged by rank, alternating between languages. Set
+`YT_RAG_MULTILINGUAL_CHUNK_MERGE=dense` to merge by dense similarity instead.
+Stored relevance feedback still adjusts each chunk's score. If a language search
+has no dense scores (lexical mode, or a hybrid search that fell back to lexical)
+or was reranked by the cross-encoder, the dense merge falls back to rank. `retrieval_details.video_routing.fusion` and
 `multilingual_retrieval.fusion` report which methods ran.
 
 ```json

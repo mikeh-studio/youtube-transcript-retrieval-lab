@@ -931,11 +931,11 @@ def test_multilingual_merge_preserves_stage_diagnostics(
     [
         ("rrf", ["ja_video:0", "en_video:0", "ja_video:1", "en_video:1"]),
         ("dense", ["en_video:0", "en_video:1", "ja_video:0", "ja_video:1"]),
-        ("", ["en_video:0", "en_video:1", "ja_video:0", "ja_video:1"]),
+        ("", ["ja_video:0", "en_video:0", "ja_video:1", "en_video:1"]),
     ],
 )
 def test_multilingual_chunk_merge_modes(monkeypatch, merge, expected):
-    """Rank-only fusion interleaves languages; dense merge, the default, follows similarity."""
+    """Rank merge, the default, interleaves languages; dense merge follows similarity."""
     service = _multilingual_service()
     monkeypatch.setenv(local_api.MULTILINGUAL_CHUNK_MERGE_ENV, merge)
     monkeypatch.setattr(
@@ -958,11 +958,11 @@ def test_multilingual_chunk_merge_modes(monkeypatch, merge, expected):
     result = service.retrieve_video_first("starter timing", k=4, video_top_k=2, agentic=False)
     rows = result["retrieval"]["results"]
     order = [f"{row['video_id']}:{row['chunk_index']}" for row in rows]
-    if merge == "rrf":
-        assert sorted(order) == sorted(expected)
-    else:
+    if merge == "dense":
         assert order == expected
-    assert result["retrieval"]["details"]["multilingual_retrieval"]["fusion"] == (merge or "dense")
+    else:
+        assert sorted(order) == sorted(expected)
+    assert result["retrieval"]["details"]["multilingual_retrieval"]["fusion"] == (merge or "rrf")
 
 
 def test_unknown_multilingual_chunk_merge_is_rejected(monkeypatch):
@@ -975,7 +975,7 @@ def test_unknown_multilingual_chunk_merge_is_rejected(monkeypatch):
 def test_dense_chunk_merge_falls_back_to_rank_without_dense_scores(monkeypatch):
     """Lexical-only searches carry no dense score, so each language's top hit survives."""
     service = _multilingual_service()
-    monkeypatch.delenv(local_api.MULTILINGUAL_CHUNK_MERGE_ENV, raising=False)
+    monkeypatch.setenv(local_api.MULTILINGUAL_CHUNK_MERGE_ENV, "dense")
     monkeypatch.setattr(
         local_api, "assess_grounded_answer_evidence",
         lambda **kwargs: {"sufficient": bool(kwargs["rows"]), "reason_code": "fixture"},
@@ -1003,7 +1003,7 @@ def test_dense_chunk_merge_falls_back_to_rank_without_dense_scores(monkeypatch):
 
 def test_dense_chunk_merge_respects_feedback_and_reranking(monkeypatch):
     service = _multilingual_service()
-    monkeypatch.delenv(local_api.MULTILINGUAL_CHUNK_MERGE_ENV, raising=False)
+    monkeypatch.setenv(local_api.MULTILINGUAL_CHUNK_MERGE_ENV, "dense")
     monkeypatch.setattr(
         local_api, "assess_grounded_answer_evidence",
         lambda **kwargs: {"sufficient": bool(kwargs["rows"]), "reason_code": "fixture"},

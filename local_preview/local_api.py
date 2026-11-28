@@ -181,9 +181,9 @@ AGENTIC_RETRIEVAL_ENV = "YT_RAG_AGENTIC_RETRIEVAL"
 # alone; "dense" ranks every chunk by its cosine similarity to its own query.
 MULTILINGUAL_CHUNK_MERGE_ENV = "YT_RAG_MULTILINGUAL_CHUNK_MERGE"
 MULTILINGUAL_CHUNK_MERGES = ("rrf", "dense")
-# Rank-only merging alternates languages however weak a match is, so chunks
-# from several language searches are merged by dense score unless set to "rrf".
-DEFAULT_MULTILINGUAL_CHUNK_MERGE = "dense"
+# Dense scores from different language searches are not on one scale, so chunks
+# from several language searches are merged by rank unless set to "dense".
+DEFAULT_MULTILINGUAL_CHUNK_MERGE = "rrf"
 HYBRID_OPTIMIZED_WEIGHTS = {
     "dense": 0.475,
     "lexical": 0.475,
