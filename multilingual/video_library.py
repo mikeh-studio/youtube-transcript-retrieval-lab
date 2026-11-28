@@ -257,10 +257,14 @@ class VideoLibrary:
 
         if prepare_record is not None:
             prepare_record(record)
+        is_new_source = video_id not in self.videos
         self.videos[video_id] = record
 
-        # Rebuild the unified index
-        self._rebuild_index()
+        # Embed only the new source when possible; replacements rebuild.
+        if is_new_source:
+            self._append_or_rebuild_index(video_id)
+        else:
+            self._rebuild_index()
 
         print(f"Added video: {title} ({video_id}) [{language}] - {len(chunks)} chunks")
         return video_id
@@ -343,7 +347,10 @@ class VideoLibrary:
             "chunking": self.current_chunking_metadata(),
         }
         try:
-            self._rebuild_index()
+            if previous is None:
+                self._append_or_rebuild_index(source_id)
+            else:
+                self._rebuild_index()
             if persist:
                 self.save()
         except Exception:
@@ -666,6 +673,67 @@ class VideoLibrary:
                 }
             )
         return result
+
+    def _can_append_index(self, video_id):
+        """Return True when appending ``video_id`` equals a full rebuild.
+
+        The incremental path is only safe when the live index was built in
+        the active embedding space, the source is the last one in insertion
+        order (so its vectors belong at the end), and the index and
+        ``chunk_map`` exactly cover every other source in order.
+        """
+        if self.index is None or self._preserve_saved_index:
+            return False
+        if not isinstance(self.index, faiss.IndexFlatIP):
+            return False
+        current = self.processor.embedding_metadata()
+        saved = self.index_embedding_metadata
+        if not isinstance(saved, dict) or any(
+            saved.get(key) != current.get(key)
+            for key in ("backend", "model", "dim", "revision")
+        ):
+            return False
+        if int(self.index.d) != int(current.get("dim") or 0):
+            return False
+        if not self.videos or next(reversed(self.videos)) != video_id:
+            return False
+        expected = [
+            (vid, chunk_idx)
+            for vid, data in self.videos.items()
+            if vid != video_id
+            for chunk_idx in range(len(data["chunks"]))
+        ]
+        return (
+            int(self.index.ntotal) == len(expected)
+            and list(self.chunk_map) == expected
+        )
+
+    def _append_or_rebuild_index(self, video_id):
+        """Embed only ``video_id``'s chunks and append them to the index.
+
+        Falls back to a full rebuild whenever appending would not produce
+        the same vectors and ``chunk_map`` as ``_rebuild_index``. The live
+        index object is never mutated: callers that roll back by restoring
+        the previous ``(index, chunk_map)`` keep working.
+        """
+        if not self._can_append_index(video_id):
+            self._rebuild_index()
+            return
+        chunks = self.videos[video_id]["chunks"]
+        if not chunks:
+            return
+        print(f"Generating embeddings for {len(chunks)} new chunks...")
+        embeddings = self.processor.generate_embeddings(chunks)
+        if embeddings.ndim != 2 or int(embeddings.shape[1]) != int(self.index.d):
+            self._rebuild_index()
+            return
+        index = faiss.clone_index(self.index)
+        index.add(embeddings)
+        self.index = index
+        self.chunk_map = list(self.chunk_map) + [
+            (video_id, chunk_idx) for chunk_idx in range(len(chunks))
+        ]
+        print(f"FAISS index appended to {index.ntotal} vectors")
 
     def _rebuild_index(self):
         """Rebuild the unified FAISS index from all video chunks."""

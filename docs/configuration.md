@@ -43,6 +43,19 @@ paths are not saved as model identities. Changing the revision rebuilds the
 index from stored chunks; expect local embedding work on startup. OCR indexes
 must also be rebuilt when their embedding space changes.
 
+Adding a source embeds only that source's chunks and appends them to the
+index. Replacing, rechunking or deleting a source still rebuilds the whole
+index. To re-embed every chunk in one pass, for example after a batch ingest or
+a change to passage formatting, stop the app and run:
+
+```bash
+python pipelines/reembed_library.py --dry-run
+python pipelines/reembed_library.py
+```
+
+The command refuses to run on the hashing fallback unless you pass
+`--allow-hash`, so a missing model never overwrites a model-built index.
+
 ### Offline mode
 
 ```bash
