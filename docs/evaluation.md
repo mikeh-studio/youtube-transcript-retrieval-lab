@@ -10,7 +10,7 @@ on local transcripts that stay out of the repository.
 | --- | --- | --- | --- |
 | Retrieval ranking | 42 English and Japanese question forms over 7 recordings; model-judged labels | nDCG@10: dense 0.626, hybrid 0.590. Translating cross-language questions adds +0.33 for BM25. | [Development study](evaluation-development-study.md) |
 | Episode key areas | 8 long-form episodes; 63 owner-reviewed key points and section boundaries | Faithfulness 0.986, weighted key-point recall 0.966, boundary F1@30s 0.553. The owner agreed with 19 of 20 audited judge decisions. | [Floors](#key-areas-ask-and-collection-floors) |
-| Cross-source Ask | 12 questions spanning 2–3 videos | With the current routing defaults: answer source coverage 0.71, answer span recall 0.53, no answerable question declined (one run). Approved baseline 0.417 / 0.333. | [Floors](#key-areas-ask-and-collection-floors) |
+| Cross-source Ask | 12 questions spanning 2–3 videos | Answer source coverage 0.71 (baseline 0.417), answer span recall 0.53 (baseline 0.333) | [Floors](#key-areas-ask-and-collection-floors) |
 | Collection summaries | 3 sets with 12 gold themes each | 3 of 3 complete; judged scores await an audit | [Floors](#key-areas-ask-and-collection-floors) |
 | Answer quality | — | Method added; scores await an owner audit | [Answer quality](#answer-quality) |
 
@@ -484,14 +484,11 @@ default of ten chunks. One question moves a rate by about 0.08.
 | `answer_source_coverage` | 0.417 | 0.30 |
 | `answer_span_recall` | 0.333 | 0.20 |
 
-On 2026-11-28, with the routing defaults described in
-[retrieval](retrieval.md) (hybrid profile and chunk scores, a 25th-percentile
-pool baseline, five routed sources plus near ties), one run of the same 12
-questions gave `answer_source_coverage` 0.71 and `answer_span_recall` 0.53, with
-no answerable question declined. In an offline replay every question routed all
-of its gold sources. Two runs of the same settings differ by about 0.04 in
-coverage. The baseline and floors above stay as approved until the owner
-re-baselines them.
+On 2026-11-28, with the current answer prompt and [routing](retrieval.md)
+defaults, the same 12 questions gave `answer_source_coverage` 0.71 and
+`answer_span_recall` 0.53 (one run; runs differ by about 0.04). Most of the gain
+comes from answering the covered parts of a question instead of declining it.
+The baseline and floors above stay as approved until the owner re-baselines them.
 
 Collections use three owner-labeled sets (one Japanese, two English) with 12 gold
 themes each. They run at a cosine threshold of 0.85, without a focus. The
