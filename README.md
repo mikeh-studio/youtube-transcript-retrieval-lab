@@ -44,7 +44,7 @@ features. Node.js is only needed to rebuild the frontend, not to run the app.
 | **Library → Search** | Index transcripts and search selected videos or your whole library. |
 | **Inspect evidence** | Read passages and context, follow timestamps, and select sources for an optional answer. |
 | **Search → Evaluation** | Label results in Compare; open **+ Query sets** in Evaluation for datasets; import saved reports for review. |
-| **Answer** | Review selected sources and the token budget, then generate an optional cited answer. |
+| **Answer** | Review selected sources and the token budget, then generate an optional cited answer. It answers the parts the evidence covers, says which parts it doesn't, and cites every factual sentence. |
 | **Key areas** | Split an episode into the show's own sections, each with key points that cite transcript lines and link to the moment. |
 | **Collection summaries** | Compare 2–12 videos by theme, with each source's stance cited to its own passages. |
 
@@ -65,6 +65,10 @@ flowchart TD
     P --> E[Passages and original video moments]
     E --> H[Inspect, label and compare results]
 ```
+
+For a question across the whole library, Ask first shortlists the videos most
+likely to hold the answer, scoring each by its profile and its best-matching
+passages, then searches passages inside that shortlist.
 
 Original transcripts remain the source of truth. Derived chunks, indexes and
 video-routing profiles can be rebuilt. Semantic, lexical and hybrid search are
@@ -96,7 +100,8 @@ repository.
 | --- | --- |
 | Retrieval ranking | On 42 English and Japanese question forms, nDCG@10 is 0.626 for dense and 0.590 for hybrid search. Translating cross-language questions adds +0.33 for BM25. Labels are model-judged. [Development study](docs/evaluation-development-study.md) |
 | Episode key areas | On 8 long-form episodes with owner-reviewed gold: faithfulness 0.986, weighted key-point recall 0.966, section boundary F1@30s 0.553. The owner agreed with 19 of 20 audited judge decisions. |
-| Answer quality | Not yet scored. |
+| Cross-source Ask | On 12 questions spanning 2–3 videos, answers cite 0.71 of the gold sources and match 0.53 of the gold timestamp spans, with no answerable question declined (one run). |
+| Answer quality | Scoring method added; judged scores wait for the owner audit. |
 
 [Results, regression floors and methods](docs/evaluation.md). Run the offline
 fixture without network access, model downloads or provider keys:
