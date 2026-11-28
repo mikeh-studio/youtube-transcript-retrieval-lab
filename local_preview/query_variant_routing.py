@@ -1,7 +1,7 @@
 """Compare video candidates from the language variants of one query."""
 
 import os
-from statistics import mean, median, pstdev
+from statistics import mean, median, pstdev, quantiles
 from time import perf_counter
 from typing import Callable, Optional
 
@@ -14,15 +14,23 @@ def _env_float(name: str) -> Optional[float]:
 
 
 # Routing gates. The penalty and gap are experimental and off unless set; pool
-# normalization defaults to the median and is turned off with "none".
+# normalization defaults to the pool's 25th percentile and is turned off with "none".
 TRANSLATED_PENALTY_ENV = "YT_RAG_ROUTING_TRANSLATED_PENALTY"
 MAX_SCORE_GAP_ENV = "YT_RAG_ROUTING_MAX_SCORE_GAP"
 POOL_NORMALIZATION_ENV = "YT_RAG_ROUTING_POOL_NORMALIZATION"
 PENALTY_SPARES_BEST_ENV = "YT_RAG_ROUTING_PENALTY_SPARES_BEST"
-POOL_NORMALIZATIONS = ("zscore", "median")
-DEFAULT_POOL_NORMALIZATION = "median"
+POOL_NORMALIZATIONS = ("percentile", "zscore", "median")
+DEFAULT_POOL_NORMALIZATION = "percentile"
+# A pool's median rises when many of its sources share a topic, which hides a real
+# match in a crowded pool. A low percentile follows the pool's unrelated sources.
+POOL_BASELINE_PERCENTILE = 25
 POOL_NORMALIZATION_OFF = ("none", "off")
 MIN_POOL_STDEV = 0.005
+# Sources scoring within this margin of the last routed one are routed too, up to
+# a few extra: in a crowded topic the true source often sits just below the cut.
+SCORE_MARGIN_ENV = "YT_RAG_ROUTING_SCORE_MARGIN"
+DEFAULT_SCORE_MARGIN = 0.005
+SCORE_MARGIN_MAX_EXTRA = 3
 # A pool smaller than this has no useful baseline of its own (a lone video always
 # sits at its own median), so it is scored against every candidate instead.
 MIN_POOL_SIZE = 3
@@ -36,6 +44,13 @@ def normalize_pool(scores: dict, method: str, reference: Optional[list] = None) 
     if not scores:
         return {}
     values = list(reference) if reference else list(scores.values())
+    if method == "percentile":
+        center = (
+            quantiles(values, n=100)[POOL_BASELINE_PERCENTILE - 1]
+            if len(values) > 1
+            else values[0]
+        )
+        return {key: value - center for key, value in scores.items()}
     if method == "median":
         center = median(values)
         return {key: value - center for key, value in scores.items()}
@@ -53,17 +68,22 @@ def route_query_variants(
     max_score_gap: Optional[float] = None,
     pool_normalization: Optional[str] = None,
     penalty_spares_best: Optional[bool] = None,
+    score_margin: Optional[float] = None,
+    max_results: Optional[int] = None,
 ) -> dict:
     """Route each language scope and combine candidates by comparable evidence.
 
     When several language variants compete, ``translated_penalty`` lowers the
     relevance of hits found only through a translated query, and ``max_score_gap``
     drops candidates scoring more than that below the best one.
-    ``pool_normalization`` (``median`` by default, ``zscore``, or ``none``) scores every candidate
-    against the other sources in its own language pool before merging, so the
+    ``pool_normalization`` (``percentile`` by default, ``median``, ``zscore``, or ``none``)
+    scores every candidate against the other sources in its own language pool before merging, so the
     best match from an unrelated pool no longer looks as strong as a real match.
     With ``penalty_spares_best``, the single best candidate before the penalty
     keeps its unpenalized score, so a clear cross-language match is never dropped.
+    ``score_margin`` also routes up to three more candidates scoring within that
+    margin of the last one (0.005 by default; 0 turns it off). ``max_results``
+    caps the shortlist.
     """
     started_at = clock()
     if translated_penalty is None:
@@ -79,11 +99,19 @@ def route_query_variants(
         pool_normalization = None
     if pool_normalization not in (None, *POOL_NORMALIZATIONS):
         raise ValueError(f"Unknown routing pool normalization: {pool_normalization!r}")
+    if score_margin is None:
+        score_margin = _env_float(SCORE_MARGIN_ENV)
+        if score_margin is None:
+            score_margin = DEFAULT_SCORE_MARGIN
+    if score_margin < 0:
+        raise ValueError(f"Routing score margin must not be negative: {score_margin!r}")
     if penalty_spares_best is None:
         penalty_spares_best = os.environ.get(PENALTY_SPARES_BEST_ENV, "").strip().lower() in (
             "1", "true", "yes", "on")
     compare_variants = len(expansion["variants"]) > 1
     normalize = compare_variants and pool_normalization is not None
+    # Near-tie candidates must come back from the router to be considered.
+    route_top_k = top_k + SCORE_MARGIN_MAX_EXTRA if compare_variants and score_margin else top_k
     fused = {}
     route_attempts = []
     routed_variants = []
@@ -91,7 +119,7 @@ def route_query_variants(
         routed = route_videos(
             variant["query"],
             # A pool's distribution needs every source in it, not only its top hits.
-            top_k=max(top_k, len(variant["video_ids"])) if normalize else top_k,
+            top_k=max(route_top_k, len(variant["video_ids"])) if normalize else route_top_k,
             language=variant["language"],
             video_ids=variant["video_ids"],
             rank_by_relevance=compare_variants,
@@ -174,10 +202,21 @@ def route_query_variants(
         best["score"] = best["unpenalized_score"]
     # Pool scores tie when sources sit at their pool's median, so raw relevance
     # breaks ties before the video id does.
-    ordered = sorted(
+    ranked = sorted(
         fused.values(),
         key=lambda row: (-row["score"], -row["raw_relevance"], row["video_id"]),
-    )[:top_k]
+    )
+    ordered = ranked[:top_k]
+    # Margins only mean something on comparable relevance scores, not on RRF.
+    if compare_variants and score_margin and top_k > 0 and len(ranked) > top_k:
+        floor = ranked[top_k - 1]["score"] - score_margin
+        ordered += [
+            row
+            for row in ranked[top_k:top_k + SCORE_MARGIN_MAX_EXTRA]
+            if row["score"] >= floor
+        ]
+    if max_results is not None:
+        ordered = ordered[: max(0, int(max_results))]
     for row in ordered:
         row.pop("unpenalized_score", None)
         row.pop("raw_relevance", None)

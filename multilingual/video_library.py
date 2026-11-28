@@ -834,6 +834,55 @@ class VideoLibrary:
 
         return results
 
+    def video_chunk_scores(self, query, *, language=None, video_ids=None, per_video=2):
+        """Return each video's best chunk similarities, highest first.
+
+        Scores come straight from the index and chunk map, so no per-chunk
+        result rows are built. Scoping and query language follow ``search``.
+        Videos without chunks are absent, and a missing index gives ``{}``.
+        """
+        if self.index is None or self.index.ntotal == 0:
+            return {}
+        scoped_video_ids = None
+        if video_ids is not None:
+            if isinstance(video_ids, (str, bytes)):
+                raise TypeError("video_ids must be an iterable of video IDs.")
+            scoped_video_ids = {
+                str(value or "").strip() for value in video_ids if str(value or "").strip()
+            }
+            if not scoped_video_ids:
+                return {}
+            missing = sorted(scoped_video_ids - set(self.videos))
+            if missing:
+                raise KeyError(f"Video(s) not found in library: {', '.join(missing)}")
+            if not any(self.videos[value].get("chunks") for value in scoped_video_ids):
+                return {}
+        if language is None:
+            if scoped_video_ids:
+                scoped_languages = [
+                    self.videos[value].get("language", "ja") for value in scoped_video_ids
+                ]
+                language = max(set(scoped_languages), key=scoped_languages.count)
+            else:
+                language = self._dominant_language()
+        query_emb = self.processor.encode_query(query, language=language)
+        if scoped_video_ids:
+            scores, indices = self._search_scoped_index(query_emb, scoped_video_ids)
+        else:
+            scores, indices = self.index.search(query_emb, int(self.index.ntotal))
+        limit = max(1, int(per_video))
+        best = {}
+        for score, idx in zip(scores[0], indices[0]):
+            if idx < 0:
+                continue
+            video_id = self.chunk_map[idx][0]
+            if scoped_video_ids and video_id not in scoped_video_ids:
+                continue
+            values = best.setdefault(video_id, [])
+            if len(values) < limit:
+                values.append(float(score))
+        return best
+
     def save(self):
         """Save library to disk."""
         os.makedirs(self.data_dir, exist_ok=True)

@@ -121,7 +121,7 @@ YouTube audio is never downloaded.
 {
   "question": "How does fermentation timing affect the starter?",
   "video_routing": "multi_vector",
-  "video_top_k": 3,
+  "video_top_k": 5,
   "agentic": true
 }
 ```

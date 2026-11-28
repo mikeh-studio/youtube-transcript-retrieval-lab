@@ -64,12 +64,18 @@ insufficient-evidence answer behavior still applies.
 ## Video-first routing
 
 A library-wide `/v1/ask` request with `video_routing: "multi_vector"` first
-shortlists relevant videos, then retrieves chunks from them. The router builds identity
-(title and channel), overview, and timestamped section vectors for each video and
-ranks videos by dense aggregation plus lexical RRF. Router artifacts are stored
+shortlists relevant videos (five unless `video_top_k` is set, plus near ties), then retrieves
+chunks from them. The router builds identity (title and channel), overview, and
+timestamped section vectors for each video. Router artifacts are stored
 separately from the chunk index and rebuilt when video inputs change.
 With `video_routing: "multi_vector"` and no `video_id`, Ask defaults to ten
 chunks unless `k` or `top_k` is supplied.
+
+A profile samples only a few sections of a long transcript, so a topic covered
+in one passage can be missed. Each video's dense score is therefore the mean of
+its profile score and its chunk score: 0.7 times its best chunk's cosine plus
+0.3 times its second best. Each routing result reports `profile_dense_score` and
+`chunk_score`. Set `YT_RAG_VIDEO_ROUTER_SCORE=profile` to rank by profiles alone.
 
 For a multilingual query expansion, each language variant uses the same
 relevance formula before shortlisting and during fusion. The score is the
@@ -79,25 +85,37 @@ variants use the same weights as the original. Each candidate's
 
 Embedding scores are compressed, so the best match in an unrelated language pool
 can score almost as high as a real match. Before merging, each video is scored
-by how far its relevance sits above the median of its own language pool
-(`pool_score`), with raw relevance breaking ties. A pool of fewer than three
-videos is scored against the median of every candidate instead. Set
-`YT_RAG_ROUTING_POOL_NORMALIZATION=none` to merge raw relevance scores instead.
+by how far its relevance sits above the 25th percentile of its own language pool
+(`pool_score`), with raw relevance breaking ties. The median is a poor baseline
+when many sources in one pool share a topic: it rises with them and hides a real
+match, while a low percentile follows the pool's unrelated sources. A pool of
+fewer than three videos is scored against every candidate instead. Set
+`YT_RAG_ROUTING_POOL_NORMALIZATION` to `median` or `zscore` for the older
+baselines, or to `none` to merge raw relevance scores.
+
+In a crowded topic the right source often scores just below the cut, so up to
+three more sources are routed when their score is within 0.005 of the last
+routed one, to at most ten. Set `YT_RAG_ROUTING_SCORE_MARGIN` to change the
+margin, or to `0` to route exactly `video_top_k` sources.
 
 When the routed videos span several languages, chunks from each language search
-are merged by dense similarity, so a weak language search does not take an
-equal share of the evidence. Stored relevance feedback still adjusts each
-chunk's score. If a language search has no dense scores (lexical mode, or a
-hybrid search that fell back to lexical) or was reranked by the cross-encoder,
-chunks are merged by rank. Set `YT_RAG_MULTILINGUAL_CHUNK_MERGE=rrf` to always
-merge by rank. `retrieval_details.video_routing.fusion` and
+are merged by rank, alternating between languages. Set
+`YT_RAG_MULTILINGUAL_CHUNK_MERGE=dense` to merge by dense similarity instead.
+At the `k` cut, a tie goes to the chunk from a language whose evidence passed
+the sufficiency check. Routing stops at a scope only if that evidence survives
+the merge; otherwise it widens as for insufficient evidence.
+`video_routing.stages[].sufficient_before_merge` records the check before the
+merge.
+Stored relevance feedback still adjusts each chunk's score. If a language search
+has no dense scores (lexical mode, or a hybrid search that fell back to lexical)
+or was reranked by the cross-encoder, the dense merge falls back to rank. `retrieval_details.video_routing.fusion` and
 `multilingual_retrieval.fusion` report which methods ran.
 
 ```json
 {
   "question": "How does fermentation timing affect the starter?",
   "video_routing": "multi_vector",
-  "video_top_k": 3,
+  "video_top_k": 5,
   "agentic": true
 }
 ```

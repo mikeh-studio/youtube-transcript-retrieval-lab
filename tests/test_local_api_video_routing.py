@@ -20,6 +20,7 @@ if str(LOCAL_PREVIEW_DIR) not in sys.path:
 
 os.environ["YT_RAG_SKIP_GLOBAL_SERVICE"] = "1"
 local_api = importlib.import_module("local_api")
+query_variant_routing = importlib.import_module("query_variant_routing")
 grounded_answer = importlib.import_module("grounded_answer")
 
 
@@ -422,6 +423,10 @@ def test_video_first_uses_global_retrieval_when_router_is_unavailable():
 def test_mixed_library_routes_to_relevant_videos(
     monkeypatch, question_language, relevant_language
 ):
+    # This fixture checks the profile router's scores; chunk evidence is tested apart.
+    monkeypatch.setenv(local_api.VIDEO_ROUTER_SCORE_ENV, "profile")
+    # Two sources per language with tied scores; no near-tie sources are wanted.
+    monkeypatch.setenv(query_variant_routing.SCORE_MARGIN_ENV, "0")
     questions = {"en": "How do kites float?", "ja": "凧はなぜ浮きますか"}
     relevant_texts = {
         "en": ["Fabric wings catch a breeze.", "Tension keeps the sail stable."],
@@ -495,14 +500,19 @@ def test_mixed_library_routes_to_relevant_videos(
     selected = [f"{relevant_language}-0", f"{relevant_language}-1"]
 
     assert details["selected_video_ids"] == selected
-    assert details["fusion"] == "language_pool_median"
+    assert details["fusion"] == "language_pool_percentile"
     assert retrieval_calls == [(questions[relevant_language], relevant_language, selected)]
+    pool_scores = []
     for candidate in details["candidates"]:
         (hit,) = candidate["variant_hits"]
         assert hit["relevance_score"] == pytest.approx(0.83)
-        # Both relevant sources sit at their pool's median; raw relevance breaks the tie.
-        assert candidate["score"] == hit["pool_score"] == pytest.approx(0.0)
+        assert candidate["score"] == hit["pool_score"]
         assert hit["lexical_score"] is None
+        pool_scores.append(hit["pool_score"])
+    # Both relevant sources stand equally far above their pool's low percentile,
+    # so raw relevance breaks the tie.
+    assert pool_scores[0] == pytest.approx(pool_scores[1])
+    assert pool_scores[0] > 0
     # The lexical decoy would make the per-language RRF shortlist.
     assert all(
         attempt["video_ids"] == [f"{attempt['language']}-0", f"{attempt['language']}-1"]
@@ -924,11 +934,11 @@ def test_multilingual_merge_preserves_stage_diagnostics(
     [
         ("rrf", ["ja_video:0", "en_video:0", "ja_video:1", "en_video:1"]),
         ("dense", ["en_video:0", "en_video:1", "ja_video:0", "ja_video:1"]),
-        ("", ["en_video:0", "en_video:1", "ja_video:0", "ja_video:1"]),
+        ("", ["ja_video:0", "en_video:0", "ja_video:1", "en_video:1"]),
     ],
 )
 def test_multilingual_chunk_merge_modes(monkeypatch, merge, expected):
-    """Rank-only fusion interleaves languages; dense merge, the default, follows similarity."""
+    """Rank merge, the default, interleaves languages; dense merge follows similarity."""
     service = _multilingual_service()
     monkeypatch.setenv(local_api.MULTILINGUAL_CHUNK_MERGE_ENV, merge)
     monkeypatch.setattr(
@@ -951,11 +961,11 @@ def test_multilingual_chunk_merge_modes(monkeypatch, merge, expected):
     result = service.retrieve_video_first("starter timing", k=4, video_top_k=2, agentic=False)
     rows = result["retrieval"]["results"]
     order = [f"{row['video_id']}:{row['chunk_index']}" for row in rows]
-    if merge == "rrf":
-        assert sorted(order) == sorted(expected)
-    else:
+    if merge == "dense":
         assert order == expected
-    assert result["retrieval"]["details"]["multilingual_retrieval"]["fusion"] == (merge or "dense")
+    else:
+        assert sorted(order) == sorted(expected)
+    assert result["retrieval"]["details"]["multilingual_retrieval"]["fusion"] == (merge or "rrf")
 
 
 def test_unknown_multilingual_chunk_merge_is_rejected(monkeypatch):
@@ -968,7 +978,7 @@ def test_unknown_multilingual_chunk_merge_is_rejected(monkeypatch):
 def test_dense_chunk_merge_falls_back_to_rank_without_dense_scores(monkeypatch):
     """Lexical-only searches carry no dense score, so each language's top hit survives."""
     service = _multilingual_service()
-    monkeypatch.delenv(local_api.MULTILINGUAL_CHUNK_MERGE_ENV, raising=False)
+    monkeypatch.setenv(local_api.MULTILINGUAL_CHUNK_MERGE_ENV, "dense")
     monkeypatch.setattr(
         local_api, "assess_grounded_answer_evidence",
         lambda **kwargs: {"sufficient": bool(kwargs["rows"]), "reason_code": "fixture"},
@@ -996,7 +1006,7 @@ def test_dense_chunk_merge_falls_back_to_rank_without_dense_scores(monkeypatch):
 
 def test_dense_chunk_merge_respects_feedback_and_reranking(monkeypatch):
     service = _multilingual_service()
-    monkeypatch.delenv(local_api.MULTILINGUAL_CHUNK_MERGE_ENV, raising=False)
+    monkeypatch.setenv(local_api.MULTILINGUAL_CHUNK_MERGE_ENV, "dense")
     monkeypatch.setattr(
         local_api, "assess_grounded_answer_evidence",
         lambda **kwargs: {"sufficient": bool(kwargs["rows"]), "reason_code": "fixture"},
@@ -1022,3 +1032,208 @@ def test_dense_chunk_merge_respects_feedback_and_reranking(monkeypatch):
     reranked["value"] = True
     result = service.retrieve_video_first("starter timing", k=2, video_top_k=2, agentic=False)
     assert result["retrieval"]["details"]["multilingual_retrieval"]["fusion"] == "rrf"
+
+
+def test_blend_chunk_scores_lifts_a_video_covered_in_one_passage():
+    from multilingual.video_routing import blend_chunk_scores, chunk_route_scores
+
+    profiled = {
+        "video_ids": ["a", "b", "c"],
+        "results": [
+            {"video_id": "a", "dense_score": 0.84, "lexical_score": None},
+            {"video_id": "b", "dense_score": 0.83, "lexical_score": None},
+            {"video_id": "c", "dense_score": 0.80, "lexical_score": 0.2},
+        ],
+        "used_fallback": False,
+    }
+    best = {"c": [0.90, 0.86], "a": [0.82, 0.78], "b": [0.81]}
+    scores = chunk_route_scores(best)
+    assert scores["c"] == pytest.approx(0.7 * 0.90 + 0.3 * 0.86)
+    assert scores["b"] == pytest.approx(0.81)
+
+    routed = blend_chunk_scores(profiled, scores, top_k=2)
+    # The profile ranked "c" last; its strong passages move it to the top.
+    assert routed["video_ids"] == ["c", "a"]
+    top = routed["results"][0]
+    assert top["rank"] == 1
+    assert top["profile_dense_score"] == pytest.approx(0.80)
+    assert top["chunk_score"] == pytest.approx(scores["c"])
+    assert top["dense_score"] == pytest.approx((0.80 + scores["c"]) / 2)
+    assert top["score"] == pytest.approx(top["dense_score"] + 0.25 * 0.2)
+    assert routed["fusion"] == "profile_chunk_relevance"
+
+
+def _hybrid_service(search):
+    videos = {
+        "a": {"chunks": [{}, {}]},
+        "b": {"chunks": [{}]},
+        "c": {"chunks": [{}, {}, {}]},
+    }
+    profile_results = [
+        {"video_id": "a", "dense_score": 0.84, "lexical_score": None},
+        {"video_id": "b", "dense_score": 0.83, "lexical_score": None},
+        {"video_id": "c", "dense_score": 0.80, "lexical_score": None},
+    ]
+    router_calls = []
+
+    def router_search(query, *, top_k, language, video_ids, rank_by_relevance):
+        router_calls.append({"top_k": top_k, "video_ids": video_ids,
+                             "rank_by_relevance": rank_by_relevance})
+        rows = [row for row in profile_results if video_ids is None or row["video_id"] in video_ids]
+        return {"video_ids": [row["video_id"] for row in rows][:top_k],
+                "results": rows[:top_k], "used_fallback": False}
+
+    service = local_api.LocalRAGService.__new__(local_api.LocalRAGService)
+    service.engine = SimpleNamespace(
+        library=SimpleNamespace(videos=videos, video_chunk_scores=search)
+    )
+    service._get_video_router = lambda: SimpleNamespace(search=router_search)
+    return service, router_calls
+
+
+def test_hybrid_router_scores_every_scoped_video_with_its_chunks(monkeypatch):
+    monkeypatch.delenv(local_api.VIDEO_ROUTER_SCORE_ENV, raising=False)
+    search_calls = []
+
+    def search(query, *, language, video_ids):
+        search_calls.append({"language": language, "video_ids": video_ids})
+        return {"c": [0.95], "a": [0.80]}
+
+    service, router_calls = _hybrid_service(search)
+    routed = service.route_videos("q", top_k=1, language="en", video_ids=["a", "c"])
+
+    assert routed["video_ids"] == ["c"]
+    # The profile router ranks every scoped video so low-ranked ones can rise.
+    assert router_calls == [{"top_k": 2, "video_ids": ["a", "c"], "rank_by_relevance": True}]
+    assert search_calls == [{"language": "en", "video_ids": ["a", "c"]}]
+
+
+def test_blend_keeps_profile_scores_when_chunk_scores_are_empty():
+    from multilingual.video_routing import blend_chunk_scores
+
+    profiled = {
+        "video_ids": ["a", "b"],
+        "results": [
+            {"video_id": "a", "dense_score": 0.88, "lexical_score": 0.0},
+            {"video_id": "b", "dense_score": 0.78, "lexical_score": 0.3},
+        ],
+        "used_fallback": False,
+    }
+    # Halving dense scores while keeping lexical ones would rank b (0.465) above a (0.440).
+    routed = blend_chunk_scores(profiled, {}, top_k=2)
+    assert routed["video_ids"] == ["a", "b"]
+    assert [row["score"] for row in routed["results"]] == pytest.approx([0.88, 0.855])
+    assert routed["chunk_scores_available"] is False
+
+
+def test_blend_keeps_profile_score_for_a_video_without_chunk_score():
+    from multilingual.video_routing import blend_chunk_scores
+
+    profiled = {
+        "video_ids": ["a", "b"],
+        "results": [
+            {"video_id": "a", "dense_score": 0.86, "lexical_score": None},
+            {"video_id": "b", "dense_score": 0.84, "lexical_score": None},
+        ],
+        "used_fallback": False,
+    }
+    routed = blend_chunk_scores(profiled, {"b": 0.80}, top_k=2)
+    rows = {row["video_id"]: row for row in routed["results"]}
+    assert rows["a"]["dense_score"] == pytest.approx(0.86)
+    assert rows["a"]["chunk_score"] is None
+    assert rows["b"]["dense_score"] == pytest.approx(0.82)
+    assert routed["video_ids"] == ["a", "b"]
+
+
+def test_hybrid_router_keeps_profile_order_when_the_index_is_empty(monkeypatch):
+    monkeypatch.delenv(local_api.VIDEO_ROUTER_SCORE_ENV, raising=False)
+    service, _ = _hybrid_service(lambda query, **kwargs: {})
+    routed = service.route_videos("q", top_k=3, language="en")
+    assert routed["video_ids"] == ["a", "b", "c"]
+    assert [row["dense_score"] for row in routed["results"]] == pytest.approx([0.84, 0.83, 0.80])
+
+
+def test_hybrid_router_keeps_profile_scores_when_chunk_search_fails(monkeypatch):
+    monkeypatch.delenv(local_api.VIDEO_ROUTER_SCORE_ENV, raising=False)
+
+    def search(query, **kwargs):
+        raise RuntimeError("index missing")
+
+    service, _ = _hybrid_service(search)
+    routed = service.route_videos("q", top_k=2, language="en")
+    assert routed["video_ids"] == ["a", "b"]
+    assert routed["used_fallback"] is False
+    assert routed["chunk_scores_available"] is False
+
+
+def test_profile_router_score_skips_chunk_search(monkeypatch):
+    monkeypatch.setenv(local_api.VIDEO_ROUTER_SCORE_ENV, "profile")
+
+    def search(query, **kwargs):
+        raise AssertionError("chunk search should not run")
+
+    service, router_calls = _hybrid_service(search)
+    routed = service.route_videos("q", top_k=2, language="en")
+    assert routed["video_ids"] == ["a", "b"]
+    assert router_calls[0]["top_k"] == 2
+
+
+def test_unknown_video_router_score_is_rejected(monkeypatch):
+    monkeypatch.setenv(local_api.VIDEO_ROUTER_SCORE_ENV, "chunks")
+    service, _ = _hybrid_service(lambda *args, **kwargs: {})
+    with pytest.raises(ValueError, match="video router score"):
+        service.route_videos("q", top_k=2)
+
+
+def _tie_retrieve(dense):
+    def retrieve(query, **kwargs):
+        language = kwargs["language"]
+        rows = [
+            {"video_id": kwargs["video_ids"][0], "chunk_index": 0, "text": query,
+             "language": language, "dense_score": dense[language]}
+        ]
+        details = {"status": "ok", "duration_ms": 1.0, "stages": {}}
+        return {"results": rows, "details": details, "retrieval_mode": "hybrid"}
+
+    return retrieve
+
+
+def _japanese_only_evidence(**kwargs):
+    passed = any(row["language"] == "ja" for row in kwargs["rows"])
+    return {"sufficient": passed, "reason_code": "fixture"}
+
+
+def test_rank_merge_tie_keeps_the_chunk_that_passed_the_evidence_check(monkeypatch):
+    """At k=1 both top chunks tie under rank fusion; the passing one must survive."""
+    service = _multilingual_service()
+    monkeypatch.delenv(local_api.MULTILINGUAL_CHUNK_MERGE_ENV, raising=False)
+    monkeypatch.setattr(local_api, "assess_grounded_answer_evidence", _japanese_only_evidence)
+    service.retrieve = _tie_retrieve({"en": 0.86, "ja": 0.80})
+
+    result = service.retrieve_video_first("starter timing", k=1, video_top_k=2, agentic=False)
+
+    rows = result["retrieval"]["results"]
+    assert [(row["video_id"], row["chunk_index"]) for row in rows] == [("ja_video", 0)]
+    stage = result["retrieval"]["details"]["video_routing"]["stages"][0]
+    assert stage["scope"] == "routed_top_k"
+    assert stage["sufficient"] is True
+    assert stage["sufficient_before_merge"] is True
+
+
+def test_merge_that_drops_the_passing_chunk_is_not_sufficient(monkeypatch):
+    """Score merge keeps the stronger English chunk, so routing must not stop there."""
+    service = _multilingual_service()
+    # A source outside the routed pair, so a wider scope exists to fall back to.
+    service.engine.library.videos["other_video"] = {"language": "en"}
+    monkeypatch.setenv(local_api.MULTILINGUAL_CHUNK_MERGE_ENV, "dense")
+    monkeypatch.setattr(local_api, "assess_grounded_answer_evidence", _japanese_only_evidence)
+    service.retrieve = _tie_retrieve({"en": 0.86, "ja": 0.80})
+
+    result = service.retrieve_video_first("starter timing", k=1, video_top_k=2, agentic=False)
+
+    stages = result["retrieval"]["details"]["video_routing"]["stages"]
+    assert stages[0]["scope"] == "routed_top_k"
+    assert stages[0]["sufficient_before_merge"] is True
+    assert stages[0]["sufficient"] is False
+    # Insufficient routed evidence moves on to the whole library instead of stopping.
+    assert stages[-1]["scope"] == "global_fallback"
