@@ -100,7 +100,11 @@ from multilingual.source_model import (  # noqa: E402
     timestamp_url,
 )
 from multilingual.text_processing import LANGUAGE_CONFIG  # noqa: E402
-from multilingual.video_routing import MultiVectorVideoRouter  # noqa: E402
+from multilingual.video_routing import (  # noqa: E402
+    MultiVectorVideoRouter,
+    blend_chunk_scores,
+    chunk_route_scores,
+)
 from multilingual.video_library import TranscriptRequestPaused  # noqa: E402
 from multilingual.youtube_metadata import (  # noqa: E402
     YOUTUBE_INGEST_PAUSE_SECONDS,
@@ -157,7 +161,12 @@ LEXICAL_TOKENIZER_BIGRAM_VERSION = "ja_bigram_v0"
 RETRIEVAL_MODES = {"hybrid", "dense", "lexical"}
 VIDEO_ROUTING_MODES = {"none", "multi_vector"}
 DEFAULT_MULTI_VECTOR_ASK_K = 10
-DEFAULT_VIDEO_ROUTING_TOP_K = 3
+DEFAULT_VIDEO_ROUTING_TOP_K = 5
+# How the router scores videos: "hybrid" averages each video's profile score with
+# the score of its best transcript chunks; "profile" uses the profile alone.
+VIDEO_ROUTER_SCORE_ENV = "YT_RAG_VIDEO_ROUTER_SCORE"
+VIDEO_ROUTER_SCORES = ("hybrid", "profile")
+DEFAULT_VIDEO_ROUTER_SCORE = "hybrid"
 MAX_VIDEO_ROUTING_TOP_K = 10
 MAX_SEARCH_VIDEO_SCOPE = 500
 HYBRID_BASELINE_PROFILE = "baseline_rrf"
@@ -997,15 +1006,26 @@ class LocalRAGService:
     ) -> dict:
         """Return a best-effort video shortlist without blocking Ask fallback."""
         started_at = time.perf_counter()
+        router_score = (
+            os.environ.get(VIDEO_ROUTER_SCORE_ENV, "").strip().lower()
+            or DEFAULT_VIDEO_ROUTER_SCORE
+        )
+        if router_score not in VIDEO_ROUTER_SCORES:
+            raise ValueError(f"Unknown video router score: {router_score!r}")
         try:
             router = self._get_video_router()
-            routed = router.search(
-                query,
-                top_k=top_k,
-                language=language,
-                video_ids=video_ids,
-                rank_by_relevance=rank_by_relevance,
-            )
+            if router_score == "hybrid":
+                routed = self._route_videos_hybrid(
+                    router, query, top_k=top_k, language=language, video_ids=video_ids
+                )
+            else:
+                routed = router.search(
+                    query,
+                    top_k=top_k,
+                    language=language,
+                    video_ids=video_ids,
+                    rank_by_relevance=rank_by_relevance,
+                )
         except Exception as exc:
             routed = {
                 "video_ids": [],
@@ -1019,6 +1039,51 @@ class LocalRAGService:
             }
         routed["latency_ms"] = round((time.perf_counter() - started_at) * 1000, 3)
         return routed
+
+    def _route_videos_hybrid(
+        self,
+        router: MultiVectorVideoRouter,
+        query: str,
+        *,
+        top_k: int,
+        language: Optional[str],
+        video_ids: Optional[List[str]],
+    ) -> dict:
+        """Rank every scoped video by profile and chunk evidence, then shortlist."""
+        library = self.engine.library
+        scoped = [
+            video_id
+            for video_id in (library.videos if video_ids is None else video_ids)
+            if video_id in library.videos
+        ]
+        profiled = router.search(
+            query,
+            top_k=max(int(top_k), len(scoped)),
+            language=language,
+            video_ids=video_ids,
+            rank_by_relevance=True,
+        )
+        if profiled.get("used_fallback") or not scoped:
+            return {**profiled, "results": profiled.get("results", [])[:top_k],
+                    "video_ids": profiled.get("video_ids", [])[:top_k]}
+        chunk_count = sum(len(library.videos[video_id].get("chunks") or []) for video_id in scoped)
+        try:
+            chunk_hits = library.search(
+                query,
+                k=chunk_count,
+                language=language,
+                video_ids=None if video_ids is None else scoped,
+            )
+        except Exception as exc:
+            # Profile scores alone still give a usable shortlist.
+            return {
+                **profiled,
+                "results": profiled.get("results", [])[:top_k],
+                "video_ids": profiled.get("video_ids", [])[:top_k],
+                "chunk_scores_available": False,
+                "chunk_score_error": str(exc),
+            }
+        return blend_chunk_scores(profiled, chunk_route_scores(chunk_hits), top_k=top_k)
 
     @staticmethod
     def _canonical_video_language(value: Optional[str], fallback: str = "en") -> str:

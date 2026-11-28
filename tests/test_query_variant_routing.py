@@ -29,10 +29,10 @@ def test_raw_merge_lets_translated_hit_displace_original(monkeypatch):
     assert _ids() == ["a", "b", "j"]
 
 
-def test_pool_median_is_the_default_and_can_be_turned_off(monkeypatch):
+def test_pool_percentile_is_the_default_and_can_be_turned_off(monkeypatch):
     monkeypatch.delenv(query_variant_routing.POOL_NORMALIZATION_ENV, raising=False)
     routed = route_query_variants(EXPANSION, top_k=3, route_videos=_route)
-    assert routed["fusion"] == "language_pool_median"
+    assert routed["fusion"] == "language_pool_percentile"
     monkeypatch.setenv(query_variant_routing.POOL_NORMALIZATION_ENV, "none")
     routed = route_query_variants(EXPANSION, top_k=3, route_videos=_route)
     assert routed["fusion"] == "language_scoped_relevance"
@@ -135,4 +135,42 @@ def test_single_video_pool_is_scored_against_all_candidates(monkeypatch):
     routed = route_query_variants(expansion, top_k=3, route_videos=route)
     # A lone video sits at its own median; against every candidate it stands out.
     assert routed["video_ids"][0] == "j"
-    assert routed["fusion"] == "language_pool_median"
+    assert routed["fusion"] == "language_pool_percentile"
+
+
+def test_percentile_baseline_finds_a_match_in_a_crowded_pool(monkeypatch):
+    for name in (query_variant_routing.TRANSLATED_PENALTY_ENV,
+                 query_variant_routing.MAX_SCORE_GAP_ENV):
+        monkeypatch.delenv(name, raising=False)
+    # Japanese has many sources on the same topic, so its median sits high and the
+    # two real matches clear it only narrowly. English is mostly unrelated, so a
+    # weaker English match stands far above its own median.
+    scores = {
+        "ja": [("g1", 0.872), ("g2", 0.871), ("j3", 0.86), ("j4", 0.858), ("j5", 0.857),
+               ("j6", 0.856), ("j7", 0.80), ("j8", 0.79), ("j9", 0.78)],
+        "en": [("r1", 0.853), ("r2", 0.85), ("e3", 0.82), ("e4", 0.816), ("e5", 0.81),
+               ("e6", 0.80), ("e7", 0.79)],
+    }
+    expansion = {"variants": [
+        {"query": "q", "language": "ja", "kind": "original",
+         "video_ids": [v for v, _ in scores["ja"]]},
+        {"query": "q", "language": "en", "kind": "translated",
+         "video_ids": [v for v, _ in scores["en"]]},
+    ]}
+
+    def route(query, *, top_k, language, video_ids, rank_by_relevance):
+        rows = scores[language][:top_k]
+        return {"video_ids": [v for v, _ in rows], "results": [
+            {"video_id": v, "dense_score": s, "lexical_score": 0.0} for v, s in rows]}
+
+    def ids(method):
+        return route_query_variants(expansion, top_k=2, route_videos=route,
+                                    pool_normalization=method)["video_ids"]
+
+    assert ids("median") == ["r1", "r2"]
+    assert ids("percentile") == ["g1", "g2"]
+    assert ids("none") == ["g1", "g2"]
+
+
+def test_percentile_of_a_one_value_reference_is_that_value():
+    assert query_variant_routing.normalize_pool({"a": 0.5}, "percentile") == {"a": 0.0}

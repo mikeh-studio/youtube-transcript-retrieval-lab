@@ -1,7 +1,7 @@
 """Compare video candidates from the language variants of one query."""
 
 import os
-from statistics import mean, median, pstdev
+from statistics import mean, median, pstdev, quantiles
 from time import perf_counter
 from typing import Callable, Optional
 
@@ -14,13 +14,16 @@ def _env_float(name: str) -> Optional[float]:
 
 
 # Routing gates. The penalty and gap are experimental and off unless set; pool
-# normalization defaults to the median and is turned off with "none".
+# normalization defaults to the pool's 25th percentile and is turned off with "none".
 TRANSLATED_PENALTY_ENV = "YT_RAG_ROUTING_TRANSLATED_PENALTY"
 MAX_SCORE_GAP_ENV = "YT_RAG_ROUTING_MAX_SCORE_GAP"
 POOL_NORMALIZATION_ENV = "YT_RAG_ROUTING_POOL_NORMALIZATION"
 PENALTY_SPARES_BEST_ENV = "YT_RAG_ROUTING_PENALTY_SPARES_BEST"
-POOL_NORMALIZATIONS = ("zscore", "median")
-DEFAULT_POOL_NORMALIZATION = "median"
+POOL_NORMALIZATIONS = ("percentile", "zscore", "median")
+DEFAULT_POOL_NORMALIZATION = "percentile"
+# A pool's median rises when many of its sources share a topic, which hides a real
+# match in a crowded pool. A low percentile follows the pool's unrelated sources.
+POOL_BASELINE_PERCENTILE = 25
 POOL_NORMALIZATION_OFF = ("none", "off")
 MIN_POOL_STDEV = 0.005
 # A pool smaller than this has no useful baseline of its own (a lone video always
@@ -36,6 +39,13 @@ def normalize_pool(scores: dict, method: str, reference: Optional[list] = None) 
     if not scores:
         return {}
     values = list(reference) if reference else list(scores.values())
+    if method == "percentile":
+        center = (
+            quantiles(values, n=100)[POOL_BASELINE_PERCENTILE - 1]
+            if len(values) > 1
+            else values[0]
+        )
+        return {key: value - center for key, value in scores.items()}
     if method == "median":
         center = median(values)
         return {key: value - center for key, value in scores.items()}
@@ -59,8 +69,8 @@ def route_query_variants(
     When several language variants compete, ``translated_penalty`` lowers the
     relevance of hits found only through a translated query, and ``max_score_gap``
     drops candidates scoring more than that below the best one.
-    ``pool_normalization`` (``median`` by default, ``zscore``, or ``none``) scores every candidate
-    against the other sources in its own language pool before merging, so the
+    ``pool_normalization`` (``percentile`` by default, ``median``, ``zscore``, or ``none``)
+    scores every candidate against the other sources in its own language pool before merging, so the
     best match from an unrelated pool no longer looks as strong as a real match.
     With ``penalty_spares_best``, the single best candidate before the penalty
     keeps its unpenalized score, so a clear cross-language match is never dropped.

@@ -40,6 +40,51 @@ def video_relevance(dense_score: Optional[float], lexical_score: Optional[float]
     return (dense_score or 0.0) + 0.25 * (lexical_score or 0.0)
 
 
+def chunk_route_scores(chunk_hits) -> dict:
+    """Score each video by its best transcript chunks: 0.7 x best + 0.3 x second."""
+    per_video = defaultdict(list)
+    for hit in chunk_hits:
+        per_video[hit["video_id"]].append(float(hit["score"]))
+    scores = {}
+    for video_id, values in per_video.items():
+        values.sort(reverse=True)
+        scores[video_id] = values[0] if len(values) == 1 else 0.7 * values[0] + 0.3 * values[1]
+    return scores
+
+
+def blend_chunk_scores(routed: dict, chunk_scores: dict, *, top_k: int) -> dict:
+    """Rerank a profile routing result with chunk-level evidence.
+
+    Profiles summarize a long transcript in a few sampled sections, so a topic
+    covered in one passage can be missed. Each video's dense score becomes the
+    mean of its profile score and its chunk score. ``routed`` must list every
+    candidate video, ranked by relevance, so videos the profile ranked low can
+    still rise on their chunks.
+    """
+    rows = []
+    for row in routed.get("results") or []:
+        video_id = row["video_id"]
+        profile_dense = row.get("dense_score")
+        chunk_score = chunk_scores.get(video_id)
+        blended = dict(row)
+        blended["profile_dense_score"] = profile_dense
+        blended["chunk_score"] = chunk_score
+        blended["dense_score"] = ((profile_dense or 0.0) + (chunk_score or 0.0)) / 2
+        blended["score"] = video_relevance(blended["dense_score"], row.get("lexical_score"))
+        rows.append(blended)
+    rows.sort(key=lambda row: (-row["score"], row["video_id"]))
+    rows = rows[: max(0, int(top_k))]
+    for rank, row in enumerate(rows, start=1):
+        row["rank"] = rank
+    return {
+        **routed,
+        "video_ids": [row["video_id"] for row in rows],
+        "results": rows,
+        "fusion": "profile_chunk_relevance",
+        "chunk_scores_available": bool(chunk_scores),
+    }
+
+
 def _chmod_private(path: str) -> None:
     try:
         os.chmod(path, 0o600)
